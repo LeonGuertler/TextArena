@@ -1,10 +1,7 @@
 from textarena.core import ActionWrapper, Env
-from typing import Any, Dict, Optional, Tuple, Union
 
-__all__ = [
-    "ClipWordsActionWrapper",
-    "ClipCharactersActionWrapper"
-]
+__all__ = ["ClipWordsActionWrapper", "ClipCharactersActionWrapper"]
+
 
 class ClipWordsActionWrapper(ActionWrapper):
     """
@@ -12,7 +9,8 @@ class ClipWordsActionWrapper(ActionWrapper):
 
     This wrapper truncates the player's action if it exceeds the specified maximum number of words.
     """
-    def __init__(self, env:Env, max_num_words:int):
+
+    def __init__(self, env: Env, max_num_words: int):
         """
         Initialize the ClipWordsActionWrapper.
 
@@ -23,7 +21,7 @@ class ClipWordsActionWrapper(ActionWrapper):
         super().__init__(env)
         self.max_num_words = max_num_words
 
-    def action(self, action:str) -> str:
+    def action(self, action: str) -> str:
         """
         Truncates the action to the maximum number of words.
 
@@ -35,10 +33,10 @@ class ClipWordsActionWrapper(ActionWrapper):
         """
         word_list = action.split()
         if len(word_list) <= self.max_num_words:
-            return action 
+            return action
         else:
             # Truncate and return
-            return " ".join(word_list[:self.max_num_words])
+            return " ".join(word_list[: self.max_num_words])
 
 
 class ClipCharactersActionWrapper(ActionWrapper):
@@ -70,7 +68,7 @@ class ClipCharactersActionWrapper(ActionWrapper):
             str: The truncated action.
         """
         if len(action) <= self.max_num_characters:
-            return action 
+            return action
         else:
             # Truncate and return
-            return action[:self.max_num_characters]
+            return action[: self.max_num_characters]

@@ -30,14 +30,18 @@ In this game, two players engage in a debate on a given topic. Each player is as
 - **Tie**: If both sides gain an equal number of votes, the game is a tie.
 """
 
-from typing import Any, Dict, Optional, Tuple
-import os
 import json
+import os
 import random
-import openai
+from typing import Any, Dict, Optional, Tuple
+import textarena.utils as gen_utils
+
 import textarena as ta
 
+
 class DebateEnv(ta.Env):
+    """Environment for the Debate game."""
+
     def __init__(
         self,
         max_turns: Optional[int] = 4,
@@ -52,8 +56,7 @@ class DebateEnv(ta.Env):
             num_judges (int): Number of judges evaluating the debate.
             topics_path (str): Path to the JSON file containing debate topics.
         """
-        self.ENVIRONMENT_NAME = "Debate"
-
+        self.environment_name = "Debate"
 
         # Load debate topics
         self._load_topics(topics_path)
@@ -65,23 +68,20 @@ class DebateEnv(ta.Env):
             "gpt-3.5-turbo",
         ]
         # Initialize game state
-        self.game_state = {
-            "turn": 0,
-            "max_turns": max_turns,
-            "num_judges": num_judges,
-            "topic": None,
-            "sides": {},
-            "arguments": {0: [], 1: []},
-            "pre_votes": {"Affirmative": 0, "Negative": 0},
-            "post_votes": {"Affirmative": 0, "Negative": 0},
-            "logs": [],
-            "render": ["turn", "max_turns", "topic", "sides"],
-        }
-
-        # check if openai Key available
-        assert os.getenv("OPENAI_API_KEY") is not None, \
-            "OpenAI API key not found. Please set the OPENAI_API_KEY environment variable or provide it as a parameter."
-
+        self.game_state = ta.State(
+            {
+                "turn": 0,
+                "max_turns": max_turns,
+                "num_judges": num_judges,
+                "topic": None,
+                "sides": {},
+                "arguments": {0: [], 1: []},
+                "pre_votes": {"Affirmative": 0, "Negative": 0},
+                "post_votes": {"Affirmative": 0, "Negative": 0},
+                "logs": [],
+                "render": ["turn", "max_turns", "topic", "sides"],
+            }
+        )
 
     def _load_topics(self, topics_path: Optional[str]):
         """
@@ -92,27 +92,26 @@ class DebateEnv(ta.Env):
         """
         if topics_path is None:
             topics_path = os.path.join(
-                "textarena", "envs",
-                "two_player", "data",
-                "debate_topics.json"
+                "textarena", "envs", "two_player", "data", "debate_topics.json"
             )
 
         if not os.path.exists(topics_path):
             raise FileNotFoundError(f"Debate topics file not found at {topics_path}")
 
-        with open(topics_path, 'r') as f:
+        with open(topics_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         if "topics" not in data or not isinstance(data["topics"], list):
-            raise ValueError("Invalid format for debate topics JSON. Expected a key 'topics' with a list of topics.")
+            raise ValueError(
+                "Invalid format for debate topics JSON. Expected a key 'topics' with a list of topics."
+            )
 
         self.topics = data["topics"]
         if not self.topics:
             raise ValueError("Debate topics list is empty.")
 
     def reset(
-        self,
-        seed: Optional[int] = None
+        self, seed: Optional[int] = None
     ) -> Tuple[Optional[Dict[int, str]], Dict[int, Any]]:
         """
         Reset the game to its initial state.
@@ -143,13 +142,12 @@ class DebateEnv(ta.Env):
 
         # Conduct pre-debate voting
         self.game_state["pre_votes"] = self._evaluate_debate(debate_transcript=None)
-        self.game_state["logs"].append(f"[GAME] Pre-Debate Votes: {self.game_state['pre_votes']}")
+        self.game_state["logs"].append(
+            (-1, f"Pre-Debate Votes: {self.game_state['pre_votes']}")
+        )
 
         # Generate initial prompts for both players
-        observations = {
-            0: self._generate_player_prompt(player_id=0),
-            1: self._generate_player_prompt(player_id=1),
-        }
+        observations = self._generate_initial_observation([0, 1])
 
         info = {
             "topic": self.game_state["topic"],
@@ -161,7 +159,7 @@ class DebateEnv(ta.Env):
 
         return observations, info
 
-    def _generate_player_prompt(self, player_id: int) -> str:
+    def _generate_initial_observation(self, ids: list[int]) -> ta.Observation:
         """
         Generate the initial prompt for a player based on their side.
 
@@ -171,14 +169,17 @@ class DebateEnv(ta.Env):
         Returns:
             str: The initial prompt for the player.
         """
-        prompt = (
-            f"You are Player {player_id} in the Debate game.\n"
-            f"Topic: {self.game_state['topic']}\n"
-            f"Your position: {self.game_state['sides'][player_id]}\n"
-            f"You will have {self.game_state['max_turns']} turns to present your arguments.\n"
-            "On your turn, simply type your argument."
-        )
-        return prompt
+        observations = {}
+        for player_id in ids:
+            prompt = (
+                f"You are Player {player_id} in the Debate game.\n"
+                f"Topic: {self.game_state['topic']}\n"
+                f"Your position: {self.game_state['sides'][player_id]}\n"
+                f"You will have {self.game_state['max_turns']} turns to present your arguments.\n"
+                "On your turn, simply type your argument."
+            )
+            observations[player_id] = [(ta.GAME_ID, prompt)]
+        return observations
 
     def _evaluate_debate(self, debate_transcript: Optional[str]) -> Dict[str, int]:
         """
@@ -201,33 +202,26 @@ class DebateEnv(ta.Env):
             else:
                 prompt += "No debate has occurred yet. Please vote for either 'Affirmative' or 'Negative' based solely on the topic. Provide only the side you vote for."
 
-            # Simulate judge decision (placeholder for actual API call)
-            # Replace the following line with actual logic or API call to get the judge's vote
-            judge_decision = random.choice(["Affirmative", "Negative"])
-
-            try:
-                response = openai.ChatCompletion.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=10,
-                    temperature=0.7,
-                    n=1,
-                    stop=None
+                judge_decision = (
+                    gen_utils.batch_open_router_generate(
+                        texts=[prompt],
+                        model_string=f"openai/{model}",
+                        message_history=None,
+                    )
+                    .lower()
+                    .strip()
                 )
-                judge_decision = response.choices[0].message['content'].strip().lower()
                 if "affirmative" in judge_decision:
                     votes["Affirmative"] += 1
                 elif "negative" in judge_decision:
                     votes["Negative"] += 1
                 else:
                     self.game_state["logs"].append(
-                        f"[ERROR] Judge returned illegal evaluation: {judge_decision}"
+                        (
+                            -1,
+                            f"[ERROR] Judge returned illegal evaluation: {judge_decision}",
+                        )
                     )
-            except Exception as e:
-                self.game_state["logs"].append(
-                    f"[ERROR] Judge API call failed: {e}"
-                )
-
         return votes
 
     def step(
@@ -235,11 +229,11 @@ class DebateEnv(ta.Env):
         player_id: int,
         action: str,
     ) -> Tuple[
-        Optional[Dict[int, str]],  # observations
-        Optional[Dict[int, int]],  # reward
+        Optional[ta.Observation],  # observations
+        Optional[ta.Reward],  # reward
         bool,  # truncated
         bool,  # terminated
-        Dict[str, Any],  # info
+        ta.Info,  # info
     ]:
         """
         Process the player's action.
@@ -256,15 +250,16 @@ class DebateEnv(ta.Env):
         truncated = False
         reward = None
         info = {}
+        message = (player_id, action)
 
         self.game_state["turn"] += 1
 
         # Store the argument
         self.game_state["arguments"][player_id].append(action)
-        self.game_state["logs"].append(f"[Player {player_id} ({self.game_state['sides'][player_id]})] {action}")
+        self.game_state["logs"].append([message])
 
         # Observations for both players
-        observations = {player_id: action, other_player_id: action}
+        observations = {player_id: [message], other_player_id: [message]}
 
         # Check if debate is over
         if self.game_state["turn"] >= self.game_state["max_turns"]:
@@ -277,12 +272,22 @@ class DebateEnv(ta.Env):
                     debate_transcript += f"Player 1 ({self.game_state['sides'][1]}): {self.game_state['arguments'][1][i]}\n"
 
             # Conduct post-debate voting
-            self.game_state["post_votes"] = self._evaluate_debate(debate_transcript=debate_transcript)
-            self.game_state["logs"].append(f"[GAME] Post-Debate Votes: {self.game_state['post_votes']}")
+            self.game_state["post_votes"] = self._evaluate_debate(
+                debate_transcript=debate_transcript
+            )
+            self.game_state["logs"].append(
+                (-1, f"[GAME] Post-Debate Votes: {self.game_state['post_votes']}")
+            )
 
             # Calculate gains
-            gain_affirmative = self.game_state["post_votes"]["Affirmative"] - self.game_state["pre_votes"]["Affirmative"]
-            gain_negative = self.game_state["post_votes"]["Negative"] - self.game_state["pre_votes"]["Negative"]
+            gain_affirmative = (
+                self.game_state["post_votes"]["Affirmative"]
+                - self.game_state["pre_votes"]["Affirmative"]
+            )
+            gain_negative = (
+                self.game_state["post_votes"]["Negative"]
+                - self.game_state["pre_votes"]["Negative"]
+            )
 
             # Determine the winner
             if gain_affirmative > gain_negative:
@@ -293,15 +298,19 @@ class DebateEnv(ta.Env):
                 winner_side = None  # It's a tie
 
             if winner_side:
-                winner_id = [pid for pid, side in self.game_state["sides"].items() if side == winner_side][0]
+                winner_id = [
+                    pid
+                    for pid, side in self.game_state["sides"].items()
+                    if side == winner_side
+                ][0]
                 reward = {winner_id: 1, 1 - winner_id: -1}
                 info["reason"] = f"Player {winner_id} ({winner_side}) wins the debate."
-                self.game_state["logs"].append(f"[GAME] {info['reason']}")
+                self.game_state["logs"].append((-1, f"[GAME] {info['reason']}"))
             else:
                 # It's a tie
                 reward = {0: 0, 1: 0}
                 info["reason"] = "The debate is a tie."
-                self.game_state["logs"].append(f"[GAME] {info['reason']}")
+                self.game_state["logs"].append((-1, f"[GAME] {info['reason']}"))
 
             terminated = True
 
@@ -315,6 +324,9 @@ class DebateEnv(ta.Env):
         print(f"Topic: {self.game_state['topic']}")
         print(f"Player Sides: {self.game_state['sides']}")
         print("Game Logs:")
-        for log in self.game_state["logs"]:
-            print(log)
+        for player_id, log in self.game_state["logs"]:
+            if player_id == ta.GAME_ID:
+                print(f"GAME: {log}")
+            else:
+                print(f"Player {player_id}: {log}")
         print("\n")

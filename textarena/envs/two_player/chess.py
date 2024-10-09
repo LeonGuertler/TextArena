@@ -1,11 +1,15 @@
-from typing import Any, Dict, Optional, Tuple
 import random
 import re
-import textarena as ta
+from typing import Any, Dict, Optional, Tuple
+
 import chess
+
+import textarena as ta
 
 
 class ChessEnv(ta.Env):
+    """Environment for playing the game of Chess."""
+
     def __init__(
         self,
         is_open: bool = True,
@@ -20,24 +24,21 @@ class ChessEnv(ta.Env):
             max_turns (int): Maximum number of turns before the game ends.
             show_valid (bool): If True, players can see a list of valid moves.
         """
-        self.ENVIRONMENT_NAME = "Chess"
+        self.environment_name = "Chess"
 
         # Initialize game state variables
         self.game_state = {
-            "turn": 0, 
+            "turn": 0,
             "is_open": is_open,
             "show_valid": show_valid,
             "max_turns": max_turns,
             "current_board": None,
             "logs": [],
-            "render": [
-                "turn", "max_turns", "current_board"
-            ],
+            "render": ["turn", "max_turns", "current_board"],
         }
 
     def reset(
-        self,
-        seed: Optional[int] = None
+        self, seed: Optional[int] = None
     ) -> Tuple[Dict[int, str], Dict[int, Any]]:
         """
         Reset the game to its initial state.
@@ -60,15 +61,12 @@ class ChessEnv(ta.Env):
         # Log the reset action
         self.game_state["logs"].append("[GAME] Game has been reset.")
 
-        self.player_color = {
-            0: "White",
-            1: "Black"
-        }
+        self.player_color = {0: "White", 1: "Black"}
 
         # Generate initial prompts for both players
         observations = {
             0: self._generate_player_prompt(0),
-            1: self._generate_player_prompt(1)
+            1: self._generate_player_prompt(1),
         }
 
         info = {}
@@ -100,11 +98,11 @@ class ChessEnv(ta.Env):
         player_id: int,
         action: str,
     ) -> Tuple[
-        Dict[int, str],  # observations
-        Dict[int, int],  # reward
+        ta.Observation,  # observations
+        ta.Reward,  # reward
         bool,  # truncated
         bool,  # terminated
-        Dict[str, Any],  # info
+        ta.Info,  # info
     ]:
         """
         Process the player's move.
@@ -120,22 +118,28 @@ class ChessEnv(ta.Env):
         info = {}
 
         # Log the player's action
-        self.game_state["logs"].append(f"Player {player_id}: {action}")
-
+        self.game_state["logs"].append((-1, f"Player {player_id}: {action}"))
 
         # Validate the move format using regex
         # Move must be enclosed in square brackets: [e2e4]
-        move_pattern = re.compile(r'\[[a-h][1-8][a-h][1-8][qrbn]?\]', re.IGNORECASE)
+        move_pattern = re.compile(r"\[[a-h][1-8][a-h][1-8][qrbn]?\]", re.IGNORECASE)
         match = move_pattern.search(action.strip())
         if not match:
-            info = {"reason": "Invalid move format. Moves must be enclosed in square brackets (e.g., [e2e4])."}
+            info = {
+                "reason": "Invalid move format. Moves must be enclosed in square brackets (e.g., [e2e4])."
+            }
             reward[player_id] = -1  # Penalize for invalid format
             terminated = True
-            self.game_state["logs"].append(f"[GAME] Player {player_id} provided an invalid move format. Game over.")
+            self.game_state["logs"].append(
+                (
+                    -1,
+                    f"[GAME] Player {player_id} provided an invalid move format. Game over.",
+                )
+            )
             return None, reward, truncated, terminated, info
 
         # Extract the move from within the brackets
-        move_uci = match.group(0).lower().replace("[","").replace("]","")
+        move_uci = match.group(0).lower().replace("[", "").replace("]", "")
 
         # Attempt to make the move
         try:
@@ -147,52 +151,69 @@ class ChessEnv(ta.Env):
                 if self.board.is_game_over():
                     result = self.board.result()
                     input(result)
-                    if result == '1-0':
+                    if result == "1-0":
                         reward = {0: 1, 1: -1}
                         info = {"result": "White wins by checkmate."}
-                        self.game_state["logs"].append("[GAME] White wins by checkmate.")
-                    elif result == '0-1':
+                        self.game_state["logs"].append(
+                            (-1, "[GAME] White wins by checkmate.")
+                        )
+                    elif result == "0-1":
                         reward = {0: -1, 1: 1}
                         info = {"result": "Black wins by checkmate."}
-                        self.game_state["logs"].append("[GAME] Black wins by checkmate.")
+                        self.game_state["logs"].append(
+                            (-1, "[GAME] Black wins by checkmate.")
+                        )
                     else:
                         # Handle draws
                         reward = {0: 0, 1: 0}
                         info = {"result": "The game is a draw."}
-                        self.game_state["logs"].append("[GAME] The game ended in a draw.")
+                        self.game_state["logs"].append(
+                            (-1, "[GAME] The game ended in a draw.")
+                        )
                     terminated = True
 
                 elif self.board.fullmove_number > self.game_state["max_turns"]:
                     # Draw by turn limit
                     reward = {0: 0, 1: 0}
                     info = {"reason": "Turn limit reached. The game is a draw."}
-                    self.game_state["logs"].append("[GAME] Turn limit reached. The game is a draw.")
+                    self.game_state["logs"].append(
+                        (-1, "[GAME] Turn limit reached. The game is a draw.")
+                    )
                     truncated = True
                 else:
                     # Game continues
                     self.game_state["turn"] += 1
                     info = {"info": "Move accepted."}
-                    self.game_state["logs"].append(f"[GAME] Player {player_id} made a move: [{move_uci}].")
+                    self.game_state["logs"].append(
+                        (-1, f"[GAME] Player {player_id} made a move: [{move_uci}].")
+                    )
 
             else:
                 # Move is illegal
                 info = {"reason": "Illegal move."}
                 reward[player_id] = -1  # Penalize for illegal move
                 terminated = True
-                self.game_state["logs"].append(f"[GAME] Player {player_id} attempted an illegal move: [{move_uci}]. Game over.")
+                self.game_state["logs"].append(
+                    (
+                        -1,
+                        f"[GAME] Player {player_id} attempted an illegal move: [{move_uci}]. Game over.",
+                    )
+                )
 
         except ValueError:
             # Move parsing failed
             info = {"reason": "Invalid move format."}
             reward[player_id] = -1  # Penalize for invalid format
             terminated = True
-            self.game_state["logs"].append(f"[GAME] Player {player_id} provided an invalid move format. Game over.")
+            self.game_state["logs"].append(
+                (
+                    -1,
+                    f"[GAME] Player {player_id} provided an invalid move format. Game over.",
+                )
+            )
 
         # Prepare observations
-        observations = self._get_observations(
-            player_id=player_id,
-            action=action
-        )
+        observations = self._get_observations(player_id=player_id, action=action)
 
         self.game_state["current_board"] = str(self.board)
 
@@ -201,7 +222,7 @@ class ChessEnv(ta.Env):
 
         return observations, reward, truncated, terminated, info
 
-    def _get_observations(self, player_id: int, action: str) -> Dict[int, str]:
+    def _get_observations(self, player_id: int, action: str) -> ta.Observation:
         """
         Generate observations for both players based on the game state.
         Args:
@@ -212,7 +233,7 @@ class ChessEnv(ta.Env):
         """
         observations = {}
 
-        for player_id_local in [0, 1]: # only do detail for oponent.
+        for player_id_local in [0, 1]:  # only do detail for oponent.
             player_observation = f"[{self.player_color[player_id]}] {action}\n"
             if self.game_state["is_open"]:
                 # Provide the full board state
@@ -223,7 +244,7 @@ class ChessEnv(ta.Env):
                 valid_moves = [f"[{move.uci()}]" for move in self.board.legal_moves]
                 player_observation += f"Valid moves: {', '.join(valid_moves)}.\n"
 
-            observations[player_id_local] = player_observation
+            observations[player_id_local] = [(-1, player_observation)]
         return observations
 
     def render(self):
@@ -235,6 +256,9 @@ class ChessEnv(ta.Env):
         print("Current Board State:")
         print(self.board)
         print("\nAction Logs:")
-        for log in self.game_state["logs"]:
-            print(f"  - {log}")
+        for player_id, log in self.game_state["logs"]:
+            if player_id == -1:
+                print(f"[GAME] {log}")
+            else:
+                print(f"Player {player_id}: {log}")
         print("\n")

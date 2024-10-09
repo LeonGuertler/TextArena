@@ -36,7 +36,10 @@ from typing import Any, Dict, Optional, Tuple
 import random, re
 import textarena as ta
 
+
 class ConnectFourEnv(ta.Env):
+    """"""
+
     def __init__(
         self,
         is_open: Optional[bool] = True,
@@ -51,7 +54,7 @@ class ConnectFourEnv(ta.Env):
             num_rows (int): Number of rows in the game board.
             num_cols (int): Number of columns in the game board.
         """
-        self.ENVIRONMENT_NAME = "Connect Four"
+        self.environment_name = "Connect Four"
         self.is_open = is_open
         self.num_rows = num_rows
         self.num_cols = num_cols
@@ -62,15 +65,12 @@ class ConnectFourEnv(ta.Env):
             "board": [],
             "rendered_board": None,
             "logs": [],
-            "render": [
-                "turn", "rendered_board"
-            ],
+            "render": ["turn", "rendered_board"],
         }
 
     def reset(
-        self,
-        seed: Optional[int] = None
-    ) -> Tuple[Optional[Dict[int, str]], Dict[int, Any]]:
+        self, seed: Optional[int] = None
+    ) -> Tuple[Optional[ta.Observation], ta.Reward]:
         """
         Reset the game to its initial state.
 
@@ -86,7 +86,9 @@ class ConnectFourEnv(ta.Env):
             random.seed()
 
         self.game_state["turn"] = 0
-        self.game_state["board"] = [['.' for _ in range(self.num_cols)] for _ in range(self.num_rows)]
+        self.game_state["board"] = [
+            ["." for _ in range(self.num_cols)] for _ in range(self.num_rows)
+        ]
         self.game_state["rendered_board"] = self._render_board()
         self.game_state["logs"] = []
 
@@ -132,18 +134,18 @@ class ConnectFourEnv(ta.Env):
             )
         else:
             prompt += "The game board is not visible to players.\n"
-        return prompt
+        return (-1, prompt)
 
     def step(
         self,
         player_id: int,
         action: str,
     ) -> Tuple[
-        Optional[Dict[int, str]],  # observations
-        Optional[Dict[int, int]],  # reward
+        Optional[ta.Observation],  # observations
+        Optional[ta.Reward],  # reward
         bool,  # truncated
         bool,  # terminated
-        Dict[str, Any],  # info
+        ta.Info,  # info
     ]:
         """
         Process the player's action.
@@ -167,37 +169,41 @@ class ConnectFourEnv(ta.Env):
         self.game_state["logs"].append(f"[Player {player_id}] {action}")
 
         # Validate the action
-        action_search_pattern = re.compile(r'\[col [0-9]*\]', re.IGNORECASE)
+        action_search_pattern = re.compile(r"\[col [0-9]*\]", re.IGNORECASE)
         match = action_search_pattern.search(action)
 
         if not match:
             terminated = True
-            info["reason"] = f"Invalid input. Player {player_id} did not provide a column number."
+            info["reason"] = (
+                f"Invalid input. Player {player_id} did not provide a column number."
+            )
             reward = {player_id: -1, other_player_id: 0}
-            self.game_state["logs"].append(f"[GAME] {info['reason']}")
+            self.game_state["logs"].append((-1, f"[GAME] {info['reason']}"))
             return None, reward, truncated, terminated, info
 
         # extract the number
-        col = int(match.group(0).lower().replace("[col ","").replace("]",""))
+        col = int(match.group(0).lower().replace("[col ", "").replace("]", ""))
 
         # check if valid number
-        if not (0 <= col < self.num_cols) or self.game_state["board"][0][col] != '.':
+        if not (0 <= col < self.num_cols) or self.game_state["board"][0][col] != ".":
             terminated = True
             reward = {player_id: -1, other_player_id: 0}
-            info["reason"] = f"Invalid move. Player {player_id} tried to play in column {col}."
-            self.game_state["logs"].append(f"[GAME] {info['reason']}")
+            info["reason"] = (
+                f"Invalid move. Player {player_id} tried to play in column {col}."
+            )
+            self.game_state["logs"].append((-1, f"[GAME] {info['reason']}"))
             return None, reward, truncated, terminated, info
 
         # Place the disc
         row = self._get_available_row(col)
-        self.game_state["board"][row][col] = 'X' if player_id == 0 else 'O'
+        self.game_state["board"][row][col] = "X" if player_id == 0 else "O"
 
         # Check for win
         if self._check_win(row, col):
             terminated = True
             reward = {player_id: 1, other_player_id: -1}
             info["reason"] = f"Player {player_id} wins!"
-            self.game_state["logs"].append(f"[GAME] {info['reason']}")
+            self.game_state["logs"].append((-1, f"[GAME] {info['reason']}"))
             return None, reward, truncated, terminated, info
 
         # Check for draw
@@ -205,18 +211,16 @@ class ConnectFourEnv(ta.Env):
             terminated = True
             reward = {0: 0, 1: 0}
             info["reason"] = "The game is a draw."
-            self.game_state["logs"].append(f"[GAME] {info['reason']}")
+            self.game_state["logs"].append((-1, f"[GAME] {info['reason']}"))
             return None, reward, truncated, terminated, info
 
         # Prepare observations
-        observation_str = f"[Player {player_id}] {action}"
+        observation_str = action
         board_str = self._render_board()
         if self.is_open:
             observation_str += f"\nBoard state: {board_str}"
-        observations = {
-            0: observation_str,
-            1: observation_str
-        }
+        message = (player_id, observation_str)
+        observations = {0: message, 1: message}
         # update the rendered board
         self.game_state["rendered_board"] = board_str
 
@@ -233,7 +237,7 @@ class ConnectFourEnv(ta.Env):
             int: The row index.
         """
         for r in range(self.num_rows - 1, -1, -1):
-            if self.game_state["board"][r][col] == '.':
+            if self.game_state["board"][r][col] == ".":
                 return r
         return -1  # Should not happen if move is valid
 
@@ -251,10 +255,10 @@ class ConnectFourEnv(ta.Env):
         board = self.game_state["board"]
         disc = board[row][col]
         directions = [
-            [(0, 1), (0, -1)],    # Horizontal
-            [(1, 0), (-1, 0)],    # Vertical
-            [(-1, -1), (1, 1)],   # Diagonal /
-            [(-1, 1), (1, -1)]    # Diagonal \
+            [(0, 1), (0, -1)],  # Horizontal
+            [(1, 0), (-1, 0)],  # Vertical
+            [(-1, -1), (1, 1)],  # Diagonal /
+            [(-1, 1), (1, -1)],  # Diagonal \
         ]
         for direction in directions:
             count = 1
@@ -263,7 +267,11 @@ class ConnectFourEnv(ta.Env):
                 while True:
                     r += dr
                     c += dc
-                    if 0 <= r < self.num_rows and 0 <= c < self.num_cols and board[r][c] == disc:
+                    if (
+                        0 <= r < self.num_rows
+                        and 0 <= c < self.num_cols
+                        and board[r][c] == disc
+                    ):
                         count += 1
                     else:
                         break
@@ -278,8 +286,8 @@ class ConnectFourEnv(ta.Env):
         Returns:
             str: The board as a string.
         """
-        column_numbers = ' '.join([str(c) for c in range(self.num_cols)])
-        board_rows = '\n'.join([' '.join(row) for row in self.game_state["board"]])
+        column_numbers = " ".join([str(c) for c in range(self.num_cols)])
+        board_rows = "\n".join([" ".join(row) for row in self.game_state["board"]])
         board_str = f"{column_numbers}\n{board_rows}"
         return board_str
 
@@ -291,6 +299,9 @@ class ConnectFourEnv(ta.Env):
         print("Game Board:")
         print(self._render_board())
         print("\nGame Logs:")
-        for log in self.game_state["logs"]:
-            print(log)
+        for i, log in self.game_state["logs"]:
+            if i == -1:
+                print(f"[GAME] {log}")
+            else:
+                print(f"[Player {i}] {log}")
         print("\n")
