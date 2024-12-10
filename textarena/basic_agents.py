@@ -135,7 +135,8 @@ class HFLocalAgent(Agent):
     def __init__(
         self, 
         model_name: str, 
-        quantize: bool = False
+        quantize: bool = False,
+        hf_kwargs: dict = None,
     ):
         """
         Initialize the Hugging Face local agent.
@@ -163,12 +164,14 @@ class HFLocalAgent(Agent):
                 load_in_8bit=True,
                 token=access_token,
                 device_map='auto',
+                **hf_kwargs,
                 )
         else:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 token=access_token,
-                device_map='auto'
+                device_map='auto',
+                **hf_kwargs,
                 )
 
         ## Initialize the Hugging Face pipeline
