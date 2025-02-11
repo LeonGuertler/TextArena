@@ -78,11 +78,11 @@ class OpenRouterAgent(Agent):
         self.kwargs = kwargs
 
         # Set the open router api key from an environment variable
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError("OpenRouter API key not found. Please set the OPENROUTER_API_KEY environment variable.")
+            raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
         
-        self.client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+        self.client = OpenAI(api_key=api_key)
         
 
     def _make_request(self, observation: str) -> str:
