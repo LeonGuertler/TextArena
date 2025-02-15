@@ -37,7 +37,8 @@ setup(
         "uvicorn",
         "anthropic",
         "boto3",
-        "urllib3<2.0.0"
+        "urllib3<2.0.0",
+        "mss"
 
     ],
     python_requires='>=3.9',
