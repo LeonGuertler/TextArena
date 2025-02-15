@@ -418,3 +418,30 @@ register(
         "tv",
     ],
 )
+
+register(
+    id="Snake-v0",
+    entry_point="textarena.envs.two_player.Snake.env:TwoPlayerSnakeEnv",
+    width=5,
+    height=5,
+    num_apples=2,
+    max_turns=40
+)
+
+register(
+    id="Snake-v0-standard",
+    entry_point="textarena.envs.two_player.Snake.env:TwoPlayerSnakeEnv",
+    width=10,
+    height=10,
+    num_apples=3,
+    max_turns=100
+)
+
+register(
+    id="Snake-v0-large",
+    entry_point="textarena.envs.two_player.Snake.env:TwoPlayerSnakeEnv",
+    width=15,
+    height=15,
+    num_apples=5,
+    max_turns=200
+)

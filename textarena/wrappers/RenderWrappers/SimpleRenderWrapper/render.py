@@ -499,3 +499,5 @@ class SimpleRenderWrapper(RenderWrapper):
                 self._save_video()
             except Exception as e:
                 print(f"Error during cleanup: {e}")
+
+        return self.env.close()

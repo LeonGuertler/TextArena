@@ -6,21 +6,15 @@ import textarena as ta
 
 
 class LiarsDiceEnv(ta.Env):
-    """
-    Environment for the Liar's Dice Game.
-    """
+    """ Environment for the Liar's Dice Game. """
 
-    def __init__(
-        self,
-        num_dice: Optional[int] = 5,
-    ):
+    def __init__(self, num_dice: Optional[int] = 5):
         """
         Initialize the Liar's Dice game environment.
 
         Args:
             num_dice (int): Number of dice each player rolls.
         """
-        self.environment_name = "Liar's Dice"
         self.num_dice = num_dice
 
         # Initialize game state variables
@@ -73,11 +67,7 @@ class LiarsDiceEnv(ta.Env):
                 1: [random.randint(1, 6) for _ in range(self.num_dice)],
             },
         }
-
-        return self.state.reset(
-            game_state=game_state,
-            player_prompt_function=self._generate_player_prompt
-        )
+        self.state.reset(game_state=game_state, player_prompt_function=self._generate_player_prompt)
 
     def _generate_player_prompt(self, player_id: int, game_state: Dict[int, Any]) -> str:
         """

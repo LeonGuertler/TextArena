@@ -1,1 +1,2 @@
 from textarena.wrappers.ActionWrappers.clip_action_wrapper import ClipCharactersActionWrapper, ClipWordsActionWrapper
+from textarena.wrappers.ActionWrappers.action_formatting_wrapper import ActionFormattingWrapper
