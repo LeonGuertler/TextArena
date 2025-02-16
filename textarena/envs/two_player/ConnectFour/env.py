@@ -3,6 +3,8 @@ from typing import Any, Dict, Optional, Tuple, List, Callable
 
 import textarena as ta 
 
+
+
 class ConnectFourEnv(ta.Env):
     """ Environment for Connect Four Game. """
     def __init__(self, is_open, num_rows, num_cols):
@@ -19,10 +21,7 @@ class ConnectFourEnv(ta.Env):
         self.num_cols = num_cols 
 
         # Initialize game state variables
-        self.state = ta.State(
-            num_players=2,
-            max_turns=None,
-        )
+        self.state = ta.State(num_players=2, max_turns=None)
 
     @property 
     def offline_renderer(self):
@@ -172,7 +171,6 @@ class ConnectFourEnv(ta.Env):
         return self.state.step()
 
 
-
     def _validate_action(self, action: str) -> Tuple[bool, Optional[int], Optional[str]]:
         """
         Validate the player's action.
@@ -181,12 +179,12 @@ class ConnectFourEnv(ta.Env):
             action (str): The action string provided by the player.
 
         Returns:
-            Tuple[bool, Any]: (is_valid, column number or reason for invalidity)
+            Tuple[bool, Optional[int], Optional[str]]: (is_valid, column number or reason for invalidity)
         """
-        action_pattern = re.compile(r'.*\[col\s*(\d+)\].*', re.IGNORECASE)
+        action_pattern = re.compile(r'\[ *(?:col)? *(\d+) *\]', re.IGNORECASE)
         match = action_pattern.search(action)
         if not match:
-            return False, None, f"Player {self.state.current_player_id}, Invalid action format. Expected format: '[col x]'."
+            return False, None, f"Player {self.state.current_player_id}, Invalid action format. Expected format: '[col x]' or '[x]'."
 
         col = int(match.group(1))
         if not (0 <= col < self.num_cols):
@@ -195,7 +193,7 @@ class ConnectFourEnv(ta.Env):
         if self.state.game_state["board"][0][col] != ".":
             return False, None, f"Player {self.state.current_player_id}, Invalid action. Column {col} is full."
 
-        return True, col, None 
+        return True, col, None
 
 
     def _get_available_row(self, col: int) -> int:
