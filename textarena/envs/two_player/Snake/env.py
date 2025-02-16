@@ -67,34 +67,6 @@ class TwoPlayerSnakeEnv(ta.Env):
         """Which keys to show in a terminal rendering if used outside."""
         return ["board_state", "scores"]
 
-    # def _random_free_cell(
-    #     self,
-    #     current_snakes: Dict[int, Snake] = None,
-    #     current_apples: List[Tuple[int, int]] = None
-    # ) -> Tuple[int, int]:
-    #     """
-    #     Return a random (x, y) that is not occupied by a snake body
-    #     or an existing apple.
-    #     """
-    #     while True:
-    #         x = random.randint(0, self.width - 1)
-    #         y = random.randint(0, self.height - 1)
-
-    #         # Check if occupied by a snake
-    #         occupied_by_snake = False
-    #         if current_snakes:
-    #             for s in current_snakes.values():
-    #                 if s.alive and (x, y) in s.positions:
-    #                     occupied_by_snake = True
-    #                     break
-
-    #         # Check if occupied by an apple
-    #         occupied_by_apple = False
-    #         if current_apples and (x, y) in current_apples:
-    #             occupied_by_apple = True
-
-    #         if not occupied_by_snake and not occupied_by_apple:
-    #             return (x, y)
     def _random_free_cell(
         self,
         current_snakes: Dict[int, Snake] = None,
