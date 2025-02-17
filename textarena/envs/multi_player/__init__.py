@@ -1,15 +1,9 @@
-# TODO
+""" Register multi-player environments """
+
+from textarena.envs.registration import register
 
 
-
-## Required Skills:
-- Theory of Mind (0.4)
-- Persuasion (0.35)
-- Adaptability (0.25)
-
-
-
-### Register Individual Games
+# Register Individual Games
 register(
     id="CharacterConclave-multiplayer-v0",
     entry_point="textarena.envs.multi_player.CharacterConclave.env:CharacterConclaveEnv",
