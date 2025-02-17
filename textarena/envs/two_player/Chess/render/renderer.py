@@ -17,8 +17,14 @@ class ChessRenderer(BaseRenderer):
         # Copy piece images from assets
         assets_dir = Path(__file__).parent / "assets" / "pieces"
         if assets_dir.exists():
-            for piece in ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k']:
-                src = assets_dir / f"{piece}.png"
+            piece_mapping = {
+                'P': 'pawn.png', 'N': 'knight.png', 'B': 'bishop.png',
+                'R': 'rook.png', 'Q': 'queen.png', 'K': 'king.png',
+                'p': 'pawn.png', 'n': 'knight.png', 'b': 'bishop.png',
+                'r': 'rook.png', 'q': 'queen.png', 'k': 'king.png'
+            }
+            for piece, filename in piece_mapping.items():
+                src = assets_dir / filename
                 if src.exists():
                     shutil.copy(src, pieces_dir / f"{piece}.png")
 
