@@ -51,7 +51,8 @@ class AnswerTokenAgentWrapper(ta.AgentWrapper):
         if self.debugging:
             print(f"Model raw output: {raw_answer}")
         if self.answer_token in raw_answer:
-            print(f"Model filtered output: {raw_answer.split(self.answer_token)[-1]}")
+            if self.debugging:
+                print(f"Model filtered output: {raw_answer.split(self.answer_token)[-1]}")
             return raw_answer.split(self.answer_token)[-1]
 
         else:

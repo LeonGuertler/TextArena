@@ -1,0 +1,1 @@
+from textarena.envs.multi_player.LiarsDice.env import LiarsDiceEnv
