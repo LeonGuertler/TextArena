@@ -19,8 +19,6 @@ class SpellingBeeEnv(ta.Env):
         Args:
             num_letters (int): Number of unique allowed letters.
         """
-        self.environment_name = "Spelling Bee Game"
-
         self.num_letters = num_letters
 
         # Initialize game state variables
@@ -39,8 +37,6 @@ class SpellingBeeEnv(ta.Env):
     @property
     def offline_renderer(self):
         raise NotImplementedError
-        # from textarena.envs.two_player.SpellingBee.render.renderer import SpellingBeeRenderer
-        # return SpellingBeeRenderer        
 
     @property
     def terminal_render_keys(self):
