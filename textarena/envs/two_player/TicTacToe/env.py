@@ -50,15 +50,20 @@ class TicTacToeEnv(ta.Env):
     def _render_board(self):
         """
         Return the current state of the Tic Tac Toe board as a string.
+        Renders with grid lines for better visibility.
         """
         board_str = []
-        for row in self.board:
-            board_str.append("|".join(row))
-        return "\n".join(board_str)
+        for i, row in enumerate(self.board):
+            # Replace empty strings with spaces and pad each cell
+            formatted_row = [' ' if cell == '' else cell for cell in row]
+            board_str.append(' {} | {} | {} '.format(*formatted_row))
+            if i < 2:  # Add horizontal line after first two rows
+                board_str.append('---+---+---')
+        return '\n'.join(board_str)
 
        
 
-    def _generate_player_prompt(slef,player_id:int,game_state:Dict[str,Any])-> str:
+    def _generate_player_prompt(self,player_id:int,game_state:Dict[str,Any])-> str:
         """
         Generate the prompt for the current player.
         """
