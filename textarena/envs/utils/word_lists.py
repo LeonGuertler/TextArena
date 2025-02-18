@@ -2,6 +2,12 @@ import importlib.resources
 import re
 from collections import defaultdict
 
+# Load NLTK word list
+import nltk
+from nltk.corpus import words
+
+nltk.download("words")
+
 
 def _parse_affix_rules(file_content: list[str]):
     # Regular expression pattern to match the affix rules
@@ -47,20 +53,36 @@ def _split(line: str) -> tuple[str, str]:
     """Split a line from a .dic file into a word and its flags."""
     if "/" in line:
         return tuple(line.split("/"))
-    return line, ""
+    return line.strip(), ""
 
 
 class EnglishDictionary:
     """Dictionary Utils for English words."""
 
-    def __init__(self, keep_proper_nouns=False, include_nltk=False):
+    def __init__(
+        self, keep_proper_nouns=False, include_nltk=True, keep_non_alpha=False
+    ):
+        """Initialize the dictionary."""
         self.include_nltk = include_nltk
+        self.keep_non_alpha = keep_non_alpha
         self.keep_proper_nouns = keep_proper_nouns
         self.uk_words = self._load_dic("en_GB.dic", "en.aff")
         # self.uk_words = self.expand(self.uk_words, self.uk_affs)
         self.us_words = self._load_dic("en_US.dic", "en.aff")
         # self.us_words = self.expand(self.us_words, self.us_affs)
-        self.nltk_words = self._load_nltk() if include_nltk else set()
+        self.nltk_words = self._load_nltk(basic=False) if include_nltk else set()
+        self.nltk_basic_words = self._load_nltk(basic=True) if include_nltk else set()
+
+    def _filter(
+        self,
+        words: set[str],
+    ) -> set[str]:
+        filtered = set()
+        for word in words:
+            if word[0].isalpha() or self.keep_non_alpha:
+                if word[0].islower() or self.keep_proper_nouns:
+                    filtered.add(word)
+        return filtered
 
     def _load_dic(
         self,
@@ -82,11 +104,7 @@ class EnglishDictionary:
             acc_lines = f.readlines()
         prefixes, suffixes = _parse_affix_rules(acc_lines)
         entries = set(_split(line) for line in lines)
-        filtered = set(
-            entry
-            for entry in entries
-            if entry[0].isalpha() and (entry[0].islower() or self.keep_proper_nouns)
-        )  # remove non-alphabetic words and words with capital letters (nouns)
+        filtered = self._filter(entries)
         all_words = set()
         # first we add the base words
         for word, flag in filtered:
@@ -164,15 +182,12 @@ class EnglishDictionary:
                         else:
                             new_word = word + rule["affix"]
                             all_words.add(new_word)
+        all_words = self._filter(all_words)
         return all_words
 
-    def _load_nltk(self) -> set[str]:
-        # Load NLTK word list
-        import nltk
-        from nltk.corpus import words
-
-        nltk.download("words")
-        return set(words.words("en"))
+    def _load_nltk(self, basic: bool) -> set[str]:
+        nltk_words = set(words.words("en-basic") if basic else words.words("en"))
+        return self._filter(nltk_words)
 
     def is_english_word(self, word: str) -> bool:
         """Check if a word is in the UK and/or US and/or NLTK English dictionary."""
@@ -181,9 +196,8 @@ class EnglishDictionary:
 
     def get_all_words(self) -> set[str]:
         """Get all words in the dictionary as a set"""
-        return self.uk_words.union(self.us_words).union(self.nltk_words)
+        return self.uk_words | self.us_words | self.nltk_words
 
-
-if __name__ == "__main__":
-    dict = EnglishDictionary(include_nltk=True)
-    print(len(dict.uk_words))
+    def get_basic_words(self) -> set[str]:
+        """Get all words in the basic NLTK dictionary as a set"""
+        return self.nltk_basic_words
