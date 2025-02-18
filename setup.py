@@ -18,7 +18,7 @@ setup(
             "*.json"
         ],  # Explicitly include JSON files in this directory
         "textarena": ["envs/**/*.json"],  # Recursive include from textarena root
-        "textarena.envs.two_player.Debate": ["topics.json"],
+        "textarena.data": ["*.dic", "*.aff"],
     },
     install_requires=[
         "requests",
