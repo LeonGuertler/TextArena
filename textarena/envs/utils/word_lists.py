@@ -1,3 +1,5 @@
+"""Utils for Word Lists, common to language games."""
+
 import importlib.resources
 import re
 from collections import defaultdict
