@@ -59,9 +59,11 @@ class EnglishDictionary:
     def __init__(self, keep_proper_nouns=False, include_nltk=False):
         self.include_nltk = include_nltk
         self.keep_proper_nouns = keep_proper_nouns
+        print("Loading English Dictionary...")
         self.uk_words = self._load_dic("en_GB.dic", "en.aff")
         # self.uk_words = self.expand(self.uk_words, self.uk_affs)
         self.us_words = self._load_dic("en_US.dic", "en.aff")
+        print("Loaded English Dictionary. Loading NLTK")
         # self.us_words = self.expand(self.us_words, self.us_affs)
         self.nltk_words = self._load_nltk() if include_nltk else set()
 
@@ -185,7 +187,7 @@ class EnglishDictionary:
 
 
 if __name__ == "__main__":
-    dict = EnglishDictionary()
+    dict = EnglishDictionary(include_nltk=True)
     print(len(dict.uk_words))
     print(dict.is_english_word("hello"))
     print(dict.is_english_word("world"))
