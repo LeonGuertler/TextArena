@@ -138,7 +138,9 @@ class WordLadderEnv(ta.Env):
         word_graphs = {}
 
         for length in range(min_length, max_length + 1):
-            filtered_words = [w.lower() for w in self.word_list if len(w) == length]
+            filtered_words = [
+                w.lower() for w in self.dictionary.get_all_words() if len(w) == length
+            ]
 
             # Create a graph for this word length
             G = nx.Graph()
@@ -310,7 +312,7 @@ class WordLadderEnv(ta.Env):
                     player_id=player_id,
                     reason=f"Invalid move format. Player {player_id} did not respond with a word of the correct length.",
                 )
-            elif next_word not in self.universal_word_list:
+            elif not self.dictionary.is_english_word(next_word):
                 ## check if the word is in the word list
                 self.state.set_invalid_move(
                     player_id=player_id,
