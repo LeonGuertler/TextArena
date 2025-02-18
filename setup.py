@@ -17,8 +17,11 @@ setup(
         "textarena.envs.two_player.Debate": [
             "*.json"
         ],  # Explicitly include JSON files in this directory
-        "textarena": ["envs/**/*.json"],  # Recursive include from textarena root
-        "textarena.data": ["*.dic", "*.aff"],
+        "textarena": [
+            "envs/**/*.json",
+            "data/*.dic",
+            "data/*.aff",
+        ],  # Recursive include from textarena root
     },
     install_requires=[
         "requests",
