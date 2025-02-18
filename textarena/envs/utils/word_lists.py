@@ -77,10 +77,10 @@ class EnglishDictionary:
 
     def _filter(
         self,
-        words: set[str],
+        word_set: set[str],
     ) -> set[str]:
         filtered = set()
-        for word in words:
+        for word in word_set:
             if word[0].isalpha() or self.keep_non_alpha:
                 if word[0].islower() or self.keep_proper_nouns:
                     filtered.add(word)
