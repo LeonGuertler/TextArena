@@ -1,10 +1,13 @@
-from typing import Any, Dict, Tuple, Optional
+"""Word Ladder environment."""
+
 import random
-import textarena as ta
 import re
+from typing import Any, Dict, Optional, Tuple
+
 import networkx as nx
+
+import textarena as ta
 from textarena.envs.utils.word_lists import EnglishDictionary
-import tqdm
 
 
 class WordLadderEnv(ta.Env):
@@ -48,6 +51,10 @@ class WordLadderEnv(ta.Env):
             self.min_distance = 13
             self.max_distance = 15
         self.current_word = ...  # needs to be initialized in reset
+        self.start_word = ...  # needs to be initialized in reset
+        self.target_word = ...  # needs to be initialized in reset
+        self.history = ...  # needs to be initialized in reset
+        self.word_graph = ...  # needs to be initialized in reset
 
     @property
     def offline_renderer(self):
