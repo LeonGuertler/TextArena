@@ -4,6 +4,7 @@ import textarena as ta
 import re
 import networkx as nx
 from textarena.envs.utils.word_lists import EnglishDictionary
+import tqdm
 
 
 class WordLadderEnv(ta.Env):
@@ -46,6 +47,7 @@ class WordLadderEnv(ta.Env):
         elif self.difficulty == "hard":
             self.min_distance = 13
             self.max_distance = 15
+        self.current_word = ...  # needs to be initialized in reset
 
     @property
     def offline_renderer(self):
@@ -137,18 +139,25 @@ class WordLadderEnv(ta.Env):
         word_graphs = {}
 
         for length in range(min_length, max_length + 1):
-            filtered_words = [
-                w.lower() for w in self.dictionary.get_all_words() if len(w) == length
+            filtered_words = [  # should maybe upgrade to get_all_words...
+                w.lower() for w in self.dictionary.get_basic_words() if len(w) == length
             ]
 
             # Create a graph for this word length
             G = nx.Graph()
             G.add_nodes_from(filtered_words)
+            # Add edges for words differing by one letter using a more efficient approach
+            buckets = {}
+            for word in filtered_words:
+                for i in range(len(word)):
+                    bucket = word[:i] + "_" + word[i + 1 :]
+                    if bucket not in buckets:
+                        buckets[bucket] = []
+                    buckets[bucket].append(word)
 
-            # Add edges for words differing by one letter
-            for i, word1 in enumerate(filtered_words):
-                for word2 in filtered_words[i + 1 :]:
-                    if self.one_letter_difference(word1, word2):
+            for bucket, words in buckets.items():
+                for i, word1 in enumerate(words):
+                    for word2 in words[i + 1 :]:
                         G.add_edge(word1, word2)
 
             # Store the graph
@@ -164,76 +173,60 @@ class WordLadderEnv(ta.Env):
             return False
         return sum(a != b for a, b in zip(word1, word2)) == 1
 
-    # def _generate_word_graph(self, word_len: int) -> Any:
-    #     """
-    #     Builds a graph where each word is a node and two words are connected
-    #     if they differ by exactly one letter.
-
-    #     Args:
-    #         word_len: The length of the words to use.
-
-    #     Returns:
-    #         Any: A networkx graph representing the word ladder.
-
-    #     """
-    #     print("Generating word graph...")
-    #     graph = nx.Graph()
-    #     self.k_len_words = [word for word in self.word_list if len(word) == word_len and len(word) <=10]
-    #     graph.add_nodes_from(self.k_len_words)
-    #     for i, word in enumerate(self.k_len_words):
-    #         for other_word in self.k_len_words[i + 1 :]:
-    #             if sum(a != b for a, b in zip(word, other_word)) == 1: ## check if the words differ by exactly one letter
-    #                 graph.add_edge(word, other_word)
-    #     # remove any isolated nodes
-    #     graph.remove_nodes_from(list(nx.isolates(graph)))
-    #     print("Word graph generated.")
-
-    #     return graph
-
-    # def _generate_words(self) -> Tuple[str, str]:
-    #     """
-    #     Generate the start and target words for the game.
-
-    #     Returns:
-    #         Tuple[str, str]: The start and target words.
-
-    #     """
-    #     start_word, target_word = random.sample(self.k_len_words, 2)
-
-    #     while not self._validate_solution_existence(self.word_graph, start_word, target_word):
-    #         start_word = random.choice(self.k_len_words).lower()
-    #         target_word = random.choice(self.k_len_words).lower()
-    #         while target_word == start_word:
-    #             target_word = random.choice(self.k_len_words).lower()
-
-    #     return start_word, target_word
-
-    def words_with_at_least_n_difference(self, graphs, min, max):
+    def words_with_at_least_n_difference(
+        self, graphs, min_steps, max_steps, max_pairs=100000
+    ):
         """
-        Finds all word pairs with at least 'n' letter differences within the graphs.
+        Finds word pairs with path lengths between min_steps and max_steps within the graphs,
+        using a more efficient sampling approach.
 
         Args:
             graphs (dict): A dictionary of graphs created by `create_word_graphs`.
-            n (int): Minimum number of letter differences required.
+            min_steps (int): Minimum number of steps required.
+            max_steps (int): Maximum number of steps allowed.
+            max_pairs (int): Maximum number of pairs to return.
 
         Returns:
-            list: A list of tuples (word1, word2, path) where path length is at least 'n'.
+            list: A list of tuples (word1, word2, path) with path lengths between min_steps and max_steps.
         """
         word_pairs = []
 
+        # For each graph (representing words of a specific length)
         for length, G in graphs.items():
-            for word1 in G.nodes:
-                for word2 in G.nodes:
-                    if word1 < word2:  # Avoid duplicate pairs
-                        try:
-                            path = nx.shortest_path(G, source=word1, target=word2)
-                            steps = (
-                                len(path) - 1
-                            )  # Path length is number of transformations
-                            if steps >= min and steps <= max:
-                                word_pairs.append((word1, word2, path))
-                        except nx.NetworkXNoPath:
-                            continue  # Ignore words with no connection
+            # If graph is too small, skip it
+            if G.number_of_nodes() < 2:
+                continue
+
+            # Sample starting words rather than examining all pairs
+            sample_size = min(100, G.number_of_nodes())
+            start_words = random.sample(list(G.nodes()), sample_size)
+
+            for start_word in start_words:
+                # Use single-source shortest paths from each start word
+                lengths = nx.single_source_shortest_path_length(G, start_word)
+
+                # Filter words by path length
+                candidates = [
+                    (word, length)
+                    for word, length in lengths.items()
+                    if min_steps <= length <= max_steps and word != start_word
+                ]
+
+                # Randomly sample from candidates if there are many
+                if candidates:
+                    sample_count = min(10, len(candidates))
+                    sampled_candidates = random.sample(candidates, sample_count)
+
+                    for target_word, _ in sampled_candidates:
+                        # Only compute the actual path for the selected candidates
+                        path = nx.shortest_path(
+                            G, source=start_word, target=target_word
+                        )
+                        word_pairs.append((start_word, target_word, path))
+
+                        # Early exit if we've found enough pairs
+                        if len(word_pairs) >= max_pairs:
+                            return word_pairs
 
         return word_pairs
 
