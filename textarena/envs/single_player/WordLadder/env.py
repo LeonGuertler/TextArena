@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple, Optional, Union
+from typing import Any, Dict, Tuple, Optional
 import copy
 import random
 import textarena as ta

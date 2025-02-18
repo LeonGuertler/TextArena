@@ -16,10 +16,6 @@ Install TextArena directly from PyPI:
 pip install textarena
 ```
 
-Install enchant on ubuntu:
-```bash
-apt install enchant2
-```
 
 ### Play Offline
 Run the following command to set your OpenRouter API key:
