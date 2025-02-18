@@ -2,9 +2,6 @@ import importlib.resources
 import re
 from collections import defaultdict
 
-import nltk
-from nltk.corpus import words
-
 
 def _parse_affix_rules(file_content: list[str]):
     # Regular expression pattern to match the affix rules
@@ -173,6 +170,10 @@ class EnglishDictionary:
 
     def _load_nltk(self) -> set[str]:
         # Load NLTK word list
+        print("Loading NLTK words...")
+        import nltk
+        from nltk.corpus import words
+
         nltk.download("words")
         return set(words.words("en"))
 
