@@ -34,9 +34,7 @@ class WordLadderEnv(ta.Env):
         )
 
         ## load the word list (to be sampled from)
-        print("Creating dictionary...")
         self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
-        print("Dictionary created.")
 
         ## Set the difficulty parameters
         if self.difficulty == "easy":
