@@ -17,10 +17,17 @@ class ChessRenderer(BaseRenderer):
         # Copy piece images from assets
         assets_dir = Path(__file__).parent / "assets" / "pieces"
         if assets_dir.exists():
-            for piece in ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k']:
-                src = assets_dir / f"{piece}.png"
-                if src.exists():
-                    shutil.copy(src, pieces_dir / f"{piece}.png")
+                piece_map = {
+                    'P': 'wP', 'N': 'wN', 'B': 'wB', 'R': 'wR', 'Q': 'wQ', 'K': 'wK',  # White pieces
+                    'p': 'bp', 'n': 'bn', 'b': 'bb', 'r': 'br', 'q': 'bq', 'k': 'bk'   # Black pieces
+                }
+                
+                for piece, filename in piece_map.items():
+                    src = assets_dir / f"{filename}.png"
+                    if src.exists():
+                        dest = pieces_dir / f"{filename}.png"
+                        shutil.copy(src, dest)
+
 
     def get_state(self) -> dict:
         """Get chess-specific state"""
@@ -88,9 +95,14 @@ class ChessRenderer(BaseRenderer):
                 const char = row[i];
                 if (isNaN(char)) {
                     if (currentFile === file) {
+                        const pieceMap = {
+                            'P': 'wP', 'N': 'wN', 'B': 'wB', 'R': 'wR', 'Q': 'wQ', 'K': 'wK',
+                            'p': 'bp', 'n': 'bn', 'b': 'bb', 'r': 'br', 'q': 'bq', 'k': 'bk'
+                        };
+                        const filename = `${pieceMap[char]}.png`;
                         return (
                             <img 
-                                src={`/static/pieces/${char}.png`}
+                                src={`/static/pieces/${filename}`}
                                 alt={char}
                                 className="piece-img"
                             />
