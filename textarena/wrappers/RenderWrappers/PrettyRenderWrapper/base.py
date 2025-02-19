@@ -284,9 +284,20 @@ class BaseRenderer(ABC):
         module_path, _ = entry_point.split(":") 
         module_path = "/".join(module_path.split(".")[:-1])
         readme_path = Path(module_path) / "README.md"
+        
+        # Initialize content as None
+        content = None
+        
         if readme_path.exists():
-            with open(readme_path, "r") as f:
-                content = f.read()
+            try:
+                with open(readme_path, "r") as f:
+                    content = f.read()
+            except Exception as e:
+                print(f"Error reading README: {e}")
+                return "No gameplay instructions available."
+
+        if not content:
+            return "No gameplay instructions available."
 
         ## extract the instructions from the readme file
         pattern = r'## Gameplay\n(.*?)(?=\n##|\Z)'
