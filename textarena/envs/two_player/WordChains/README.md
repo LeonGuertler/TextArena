@@ -71,19 +71,13 @@ Player 1: [event]
 | **Draw**         |  `0`              |  `0`                |
 | **Invalid Move** | `-1`              |  `0`                |
 
-## Parameters
-
-- `max_turns` (`int`):
-    - **Description:** Specifies the maximum number of turns allowed before the game ends automatically.
-    - **Impact:** Limits the duration of the game, preventing infinite loops.
 
 
 ## Variants
 
-| Env-id                   | max_turns  |
-|--------------------------|:----------:|
-| `WordChains-v0`          | `100`      |
-| `WordChains-v0-infinite` | `None`     |
+| Env-id                   |
+|--------------------------|
+| `WordChains-v0`          |
 
 
 
