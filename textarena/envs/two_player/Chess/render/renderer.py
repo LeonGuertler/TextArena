@@ -107,7 +107,7 @@ class ChessRenderer(BaseRenderer):
                         return (
                             <img 
                                 src={`/static/pieces/${filename}`}
-                                alt={char}
+                                alt={pieceMap[char].replace('_', ' ')}
                                 className="piece-img"
                             />
                         );
