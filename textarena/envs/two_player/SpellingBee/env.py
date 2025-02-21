@@ -19,8 +19,6 @@ class SpellingBeeEnv(ta.Env):
         Args:
             num_letters (int): Number of unique allowed letters.
         """
-        self.environment_name = "Spelling Bee Game"
-
         self.num_letters = num_letters
 
         # Initialize game state variables
