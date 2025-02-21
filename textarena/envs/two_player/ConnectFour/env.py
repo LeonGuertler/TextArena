@@ -69,7 +69,7 @@ class ConnectFourEnv(ta.Env):
             f"Your disc symbol: {'X' if player_id == 0 else 'O'}.\n"
             f"The game board has {self.num_rows} rows and {self.num_cols} columns.\n"
             f"Players take turns dropping their disc into one of the columns (0 to {self.num_cols - 1}).\n"
-            "First to connect four discs vertically, horizontally, or diagonally wins.\n"
+            "The first to connect (their own) four discs vertically, horizontally, or diagonally wins.\n"
             "On your turn, enter the column number in squared brackets to make your move.\n"
             "For example: '[col 4]' or '[col 1]'.\n"
         )
