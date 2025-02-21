@@ -76,6 +76,341 @@ class NegotiationEnv(ta.Env):
             prompt += "The game has no turn limit.\n"
         return prompt
 
+    def _initialize_game_data(self):
+        """Initialize the data structure for game statistics tracking."""
+
+        player_names = getattr(self, 'player_names', {0: "Player 0", 1: "Player 1"})
+
+        self.game_data = {
+            "turns_data": [],
+            "game_metadata": {
+                "total_trades": 0,
+                "total_successful_trades": 0,
+                "total_attempted_trades": 0,
+                "total_value_traded": 0,
+                "total_economic_surplus": 0,
+                "pareto_improvements": 0,
+                "zero_sum_trades": 0,
+                "value_destroying_trades": 0,
+                "price_equilibrium": {},
+                "delta_value_player_0": 0,
+                "delta_value_player_1": 0,
+                "player_names": player_names
+            }
+        }
+
+    def _is_favorable_trade(self, trade_data: Dict) -> Dict:
+        """
+        Determine if a trade is favorable based on multiple economic metrics.
+
+        Args:
+            trade_data (Dict): Data about the trade
+
+        Returns:
+            Dict: Dictionary containing various economic trade metrics
+        """
+        initiator_id = trade_data["from_player"]
+        recipient_id = trade_data["to_player"]
+
+        # Calculate value from initiator's perspective
+        offered_value_init = self._calculate_trade_value(trade_data["offered_resources"], initiator_id)
+        requested_value_init = self._calculate_trade_value(trade_data["requested_resources"], initiator_id)
+
+        # Calculate value from recipient's perspective
+        offered_value_recip = self._calculate_trade_value(trade_data["offered_resources"], recipient_id)
+        requested_value_recip = self._calculate_trade_value(trade_data["requested_resources"], recipient_id)
+
+        # Calculate net gains for each party
+        initiator_gain = requested_value_init - offered_value_init
+        recipient_gain = offered_value_recip - requested_value_recip
+
+        # Calculate total economic surplus
+        economic_surplus = initiator_gain + recipient_gain
+
+        # Calculate comparative advantage ratios for resources involved
+        comparative_advantages = {}
+        for resource in set(
+                list(trade_data["offered_resources"].keys()) + list(trade_data["requested_resources"].keys())):
+            init_value = self.state.game_state["player_values"][initiator_id].get(resource, 0)
+            recip_value = self.state.game_state["player_values"][recipient_id].get(resource, 0)
+            if init_value > 0 and recip_value > 0:  # Avoid division by zero
+                comparative_advantages[resource] = init_value / recip_value
+
+        # Determine trade efficiency (% of theoretical maximum gains achieved)
+        # Theoretical maximum occurs when all resources go to the player who values them most
+        theoretical_max = 0
+        for resource, qty in trade_data["offered_resources"].items():
+            theoretical_max += qty * max(
+                self.state.game_state["player_values"][initiator_id][resource],
+                self.state.game_state["player_values"][recipient_id][resource]
+            )
+        for resource, qty in trade_data["requested_resources"].items():
+            theoretical_max += qty * max(
+                self.state.game_state["player_values"][initiator_id][resource],
+                self.state.game_state["player_values"][recipient_id][resource]
+            )
+
+        # Actual value after trade
+        actual_after_trade = offered_value_recip + requested_value_init
+
+        # Value before trade
+        value_before_trade = offered_value_init + requested_value_recip
+
+        # Calculate efficiency percentage
+        if theoretical_max > value_before_trade:
+            # Only if trade could theoretically increase total value
+            trade_efficiency = (actual_after_trade - value_before_trade) / (theoretical_max - value_before_trade) * 100
+        else:
+            trade_efficiency = 0
+
+        # Calculate opportunity costs (simplified version based on highest value alternatives)
+        opportunity_costs = {}
+        for resource, qty in trade_data["offered_resources"].items():
+            # Opportunity cost is what else this resource could have been traded for
+            max_alternative_value = 0
+            for other_resource in self.resource_names:
+                if other_resource != resource:
+                    # How much of other_resource could be obtained for same value
+                    alt_qty = (qty * self.state.game_state["player_values"][initiator_id][resource]) / \
+                              max(1, self.state.game_state["player_values"][recipient_id][other_resource])
+                    alt_value = alt_qty * self.state.game_state["player_values"][initiator_id][other_resource]
+                    max_alternative_value = max(max_alternative_value, alt_value)
+            opportunity_costs[f"{resource}_offered"] = max_alternative_value
+
+        for resource, qty in trade_data["requested_resources"].items():
+            max_alternative_value = 0
+            for other_resource in self.resource_names:
+                if other_resource != resource:
+                    alt_qty = (qty * self.state.game_state["player_values"][recipient_id][resource]) / \
+                              max(1, self.state.game_state["player_values"][initiator_id][other_resource])
+                    alt_value = alt_qty * self.state.game_state["player_values"][recipient_id][other_resource]
+                    max_alternative_value = max(max_alternative_value, alt_value)
+            opportunity_costs[f"{resource}_requested"] = max_alternative_value
+
+        return {
+            "favorable_to_initiator": initiator_gain > 0,
+            "favorable_to_recipient": recipient_gain > 0,
+            "mutually_favorable": initiator_gain > 0 and recipient_gain > 0,
+            "zero_sum": abs(economic_surplus) < 0.001,  # Near zero with small float tolerance
+            "value_destroying": economic_surplus < 0,
+            "initiator_gain": initiator_gain,
+            "recipient_gain": recipient_gain,
+            "economic_surplus": economic_surplus,
+            "comparative_advantages": comparative_advantages,
+            "trade_efficiency": trade_efficiency,
+            "opportunity_costs": opportunity_costs
+        }
+
+    def _update_turn_data(self, turn_number: int, trade_data: Optional[Dict] = None):
+        """
+        Update the data for the current turn, handling multiple offers per turn.
+
+        Args:
+            turn_number (int): Current turn number
+            trade_data (Optional[Dict]): Data about trades made in this turn
+        """
+        # Get or create turn data for current turn
+        if len(self.game_data["turns_data"]) <= turn_number:
+            turn_data = {
+                "turn_number": turn_number,
+                "trades_data": {
+                    "number_of_offers": 0,
+                    "successful_trades": 0,
+                    "rejected_trades": 0,
+                    "trades": []
+                }
+            }
+            self.game_data["turns_data"].append(turn_data)
+        else:
+            turn_data = self.game_data["turns_data"][turn_number]
+
+        if trade_data:
+            # Get the outcome, defaulting to None for new offers
+            outcome = trade_data.get("outcome")
+            from_player = trade_data["from_player"]
+            to_player = trade_data["to_player"]
+
+            # Get economic metrics for this trade
+            economic_metrics = self._is_favorable_trade(trade_data)
+
+            # Calculate values from both perspectives
+            value_offer_init = self._calculate_trade_value(
+                trade_data["offered_resources"],
+                from_player
+            )
+            value_ask_init = self._calculate_trade_value(
+                trade_data["requested_resources"],
+                from_player
+            )
+
+            value_offer_recip = self._calculate_trade_value(
+                trade_data["offered_resources"],
+                to_player
+            )
+            value_ask_recip = self._calculate_trade_value(
+                trade_data["requested_resources"],
+                to_player
+            )
+
+            # Calculate exchange ratios for price equilibrium tracking
+            exchange_ratios = {}
+            for res_offered, qty_offered in trade_data["offered_resources"].items():
+                for res_requested, qty_requested in trade_data["requested_resources"].items():
+                    ratio_key = f"{res_offered}_per_{res_requested}"
+                    ratio_value = qty_offered / max(qty_requested, 1)  # Avoid division by zero
+                    exchange_ratios[ratio_key] = ratio_value
+
+                    # Update game-level price equilibrium tracking
+                    if ratio_key not in self.game_data["game_metadata"]["price_equilibrium"]:
+                        self.game_data["game_metadata"]["price_equilibrium"][ratio_key] = []
+
+                    if outcome == "Accepted":  # Only track successful trades for equilibrium
+                        self.game_data["game_metadata"]["price_equilibrium"][ratio_key].append(ratio_value)
+
+            trade_info = {
+                "trade_initiated_by": from_player,
+                "value_offer_initiator": value_offer_init,
+                "value_ask_initiator": value_ask_init,
+                "value_offer_recipient": value_offer_recip,
+                "value_ask_recipient": value_ask_recip,
+                "resources_offered": trade_data["offered_resources"],
+                "resources_asked": trade_data["requested_resources"],
+                "exchange_ratios": exchange_ratios,
+                "economic_metrics": economic_metrics,
+                "trade_successful": outcome == "Accepted",
+                "text_metadata": {
+                    "text_length": len(str(trade_data))
+                }
+            }
+
+            turn_data["trades_data"]["trades"].append(trade_info)
+            turn_data["trades_data"]["number_of_offers"] += 1
+
+            if outcome == "Accepted":
+                turn_data["trades_data"]["successful_trades"] += 1
+                self.game_data["game_metadata"]["total_successful_trades"] += 1
+                self.game_data["game_metadata"]["total_value_traded"] += (
+                        value_offer_init + value_ask_init
+                )
+
+                # Update economic surplus tracking
+                self.game_data["game_metadata"]["total_economic_surplus"] += economic_metrics["economic_surplus"]
+
+                # Update trade type counters
+                if economic_metrics["mutually_favorable"]:
+                    self.game_data["game_metadata"]["pareto_improvements"] += 1
+                elif economic_metrics["zero_sum"]:
+                    self.game_data["game_metadata"]["zero_sum_trades"] += 1
+                elif economic_metrics["value_destroying"]:
+                    self.game_data["game_metadata"]["value_destroying_trades"] += 1
+
+            elif outcome == "Rejected":
+                turn_data["trades_data"]["rejected_trades"] += 1
+
+            self.game_data["game_metadata"]["total_attempted_trades"] += 1
+            self.game_data["game_metadata"]["total_trades"] += turn_data["trades_data"]["successful_trades"]
+
+    def _check_for_new_offer(self, player_id: int, action: str):
+        """
+        Check if the player's action contains a new trade offer.
+
+        Args:
+            player_id (int): ID of the player making the offer.
+            action (str): The action string.
+        """
+        if not self.state.done:
+            offer_match = self.offer_pattern.search(action)
+            if offer_match:
+                matched_offer = offer_match.group(1).strip()
+                parsed_offer = self._parse_offer(matched_offer)
+                if parsed_offer:
+                    if self._check_if_sufficient_resources(
+                            trade_resources=parsed_offer["offered_resources"],
+                            player_resources=self.state.game_state["player_resources"][player_id]
+                    ):
+                        # Add the offer to the game state with consistent keys
+                        self.state.game_state["current_offer"] = {
+                            "from_player": player_id,
+                            "to_player": 1 - player_id,
+                            "offered_resources": parsed_offer["offered_resources"],
+                            "requested_resources": parsed_offer["requested_resources"],
+                            "outcome": None  # Initialize outcome as None
+                        }
+
+                        # Display trade metrics to inform players about the economics of the offer
+                        economic_metrics = self._is_favorable_trade(self.state.game_state["current_offer"])
+                        trade_message = (
+                            f"Player {player_id} made the following offer to Player {1 - player_id}: "
+                            f"{self._offer_to_str(parsed_offer)}\n"
+                        )
+
+                        # Add economic analysis to help players understand the trade
+                        if economic_metrics["mutually_favorable"]:
+                            trade_message += "This trade would benefit both players."
+                        elif economic_metrics["favorable_to_initiator"] and not economic_metrics[
+                            "favorable_to_recipient"]:
+                            trade_message += "This trade primarily benefits the initiator."
+                        elif economic_metrics["favorable_to_recipient"] and not economic_metrics[
+                            "favorable_to_initiator"]:
+                            trade_message += "This trade primarily benefits the recipient."
+
+                        if economic_metrics["value_destroying"]:
+                            trade_message += " Note: This trade would reduce total economic value."
+
+                        self.state.add_observation(
+                            from_id=ta.GAME_ID,
+                            to_id=-1,  # Broadcast to all
+                            message=trade_message
+                        )
+                    else:
+                        self.state.set_invalid_move(
+                            player_id=player_id,
+                            reason=f"Player {player_id} tried to make a trade offer without having the necessary resources."
+                        )
+                else:
+                    self.state.set_invalid_move(
+                        player_id=player_id,
+                        reason=f"Player {player_id} made a trade offer in an incorrect format."
+                    )
+
+    def _calculate_trade_value(self, resources: Dict[str, int], player_id: int) -> float:
+        """
+        Calculate the total value of resources in a trade for a specific player.
+
+        Args:
+            resources (Dict[str, int]): Resources involved in the trade
+            player_id (int): ID of the player whose values to use
+
+        Returns:
+            float: Total value of the resources
+        """
+        return sum(
+            qty * self.state.game_state["player_values"][player_id][resource]
+            for resource, qty in resources.items()
+        )
+
+    def save_game_data(self) -> Dict:
+        """
+        Finalize and save the game data with enhanced economic metrics.
+
+        Returns:
+            Dict: Complete game data structure with economic analysis
+        """
+        # Update final value changes
+        for player_id in [0, 1]:
+            self.game_data["game_metadata"][f"delta_value_player_{player_id}"] = (
+                self.state.game_state["inventory_value"][player_id]["change"]
+            )
+
+        # Add final economic analysis summaries
+        if "price_equilibrium" in self.game_data["game_metadata"]:
+            for resource_pair, ratios in self.game_data["game_metadata"]["price_equilibrium"].items():
+                if ratios:  # Only calculate if there are recorded trades
+                    self.game_data["game_metadata"][f"final_{resource_pair}_price"] = sum(ratios) / len(ratios)
+
+        return self.game_data
+
+
     def reset(self, seed: Optional[int] = None):
         """
         Reset the Negotiation Game to its initial state.
@@ -119,11 +454,11 @@ class NegotiationEnv(ta.Env):
                 "change": 0,
             }
 
-        self.state.reset(
+        self._initialize_game_data() # Moved before the return statement.
+        return self.state.reset(
             game_state=game_state,
             player_prompt_function=self._generate_player_prompt
         )
-
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         """
@@ -143,45 +478,53 @@ class NegotiationEnv(ta.Env):
             for_logging=True
         )
 
-        # Check if the player is responding to an existing offer
+        # Get current offer state before processing new action
+        previous_offer = self.state.game_state.get("current_offer")
+
+        # Process response to existing offer
         self._check_and_execute_existing_offer(
             player_id=self.state.current_player_id,
             action=action
         )
 
-        # Check if the player's action contains a new trade offer
+        # Check for new offer
         self._check_for_new_offer(
             player_id=self.state.current_player_id,
             action=action
         )
 
-        # If turn limit, determine winner
-        if self.state.turn == self.state.max_turns-1:
+        # Update turn data if there was an offer that got processed
+        if previous_offer or self.state.game_state.get("current_offer"):
+            self._update_turn_data(
+                turn_number=self.state.turn,
+                trade_data=previous_offer if previous_offer else self.state.game_state.get("current_offer")
+            )
+
+        # If turn limit reached, determine winner
+        if self.state.turn == self.state.max_turns - 1:
             self._determine_winner()
+
+        # If game is ending, save final game data
+        if self.state.done:
+            self.state.game_state["final_game_data"] = self.save_game_data()
 
         return self.state.step()
 
     def _check_and_execute_existing_offer(self, player_id: int, action: str) -> None:
-        """
-        Check if the player accepts or denies the current offer and execute accordingly.
-
-        Args:
-            player_id (int): ID of the player responding to the offer.
-            action (str): The action string.
-        """
-        # check if there is a current offer
+        """Check if the player accepts or denies the current offer and execute accordingly."""
         current_offer = self.state.game_state.get("current_offer")
-        
-        # check if an offer exists, and whether it was accepted
-        if current_offer and self.accept_pattern.search(action):
-            self._attempt_to_execute_trade(
-                player_id=player_id,
-                action=action
-            )
-        else:
-            # make sure the offer is reset
-            self.state.game_state["current_offer"] = None  # Reset
 
+        if current_offer:
+            if self.accept_pattern.search(action):
+                self._attempt_to_execute_trade(
+                    player_id=player_id,
+                    action=action
+                )
+            elif self.deny_pattern.search(action):
+                # Update trade history for rejected trades
+                if self.state.game_state["current_offer"] is not None:
+                    self.state.game_state["current_offer"]["outcome"] = "Rejected"
+                self.state.game_state["current_offer"] = None
 
     def _attempt_to_execute_trade(self, player_id: int, action: str) -> None:
         """
@@ -195,20 +538,6 @@ class NegotiationEnv(ta.Env):
         proposer_id = current_offer["from_player"]
         acceptor_id = player_id
 
-        # # Check if the proposer has enough resources
-        # proposer_valid = self._check_if_sufficient_resources(
-        #     trade_resources=current_offer["offered_resources"],
-        #     player_resources=self.state.game_state["player_resources"][proposer_id]
-        # )
-
-        # # Check if the acceptor has enough resources
-        # acceptor_valid = self._check_if_sufficient_resources(
-        #     trade_resources=current_offer["requested_resources"],
-        #     player_resources=self.state.game_state["player_resources"][acceptor_id]
-        # )
-
-        # # Check if the trade can be executed
-        # if proposer_valid and acceptor_valid:
         if self._check_if_sufficient_resources(
             trade_resources=current_offer["requested_resources"],
             player_resources=self.state.game_state["player_resources"][acceptor_id]
@@ -227,14 +556,8 @@ class NegotiationEnv(ta.Env):
                 message=f"Player {acceptor_id} accepted the trade offer from Player {proposer_id}."
             )
 
-            # Update trade history with outcome
-            self.state.game_state["trade_history"].append({
-                "from_player": proposer_id,
-                "to_player": acceptor_id,
-                "offered_resources": current_offer["offered_resources"],
-                "requested_resources": current_offer["requested_resources"],
-                "outcome": "Accepted"
-            })
+            if self.state.game_state["current_offer"] is not None:
+                self.state.game_state["current_offer"]["outcome"] = "Accepted"
 
             # Update player inventory value
             self._update_inventory_values()
@@ -248,19 +571,6 @@ class NegotiationEnv(ta.Env):
                 player_id=acceptor_id,
                 reason=f"Player {acceptor_id} tried accepting a trade without having the necessary resources."
             )
-            # player_ids = []
-            # reasons = []
-            # if not proposer_valid:
-            #     player_ids.append(proposer_id)
-            #     reasons.append(f"Player {proposer_id} does not have enough resources to offer.")
-            # if not acceptor_valid:
-            #     player_ids.append(acceptor_id)
-            #     reasons.append(f"Player {acceptor_id} does not have enough resources to fulfill the request.")
-
-            # self.state.set_invalid_move(
-            #     player_ids=player_ids,
-            #     reasons=reasons
-            # )
 
     def _check_if_sufficient_resources(self, trade_resources: Dict[str, int], player_resources: Dict[str, int]) -> bool:
         """
@@ -286,38 +596,27 @@ class NegotiationEnv(ta.Env):
             player_id (int): ID of the player making the offer.
             action (str): The action string.
         """
-        # Check if the game has already done
         if not self.state.done:
             offer_match = self.offer_pattern.search(action)
             if offer_match:
                 matched_offer = offer_match.group(1).strip()
                 parsed_offer = self._parse_offer(matched_offer)
                 if parsed_offer:
-
-                    # check if necessary resourcs
                     if self._check_if_sufficient_resources(
-                        trade_resources=parsed_offer["offered_resources"],
-                        player_resources=self.state.game_state["player_resources"][player_id]
+                            trade_resources=parsed_offer["offered_resources"],
+                            player_resources=self.state.game_state["player_resources"][player_id]
                     ):
-
-
-
                         # Add the offer to the game state with consistent keys
                         self.state.game_state["current_offer"] = {
                             "from_player": player_id,
                             "to_player": 1 - player_id,
                             "offered_resources": parsed_offer["offered_resources"],
-                            "requested_resources": parsed_offer["requested_resources"]
+                            "requested_resources": parsed_offer["requested_resources"],
+                            "outcome": None  # Initialize outcome as None
                         }
 
-                        # Update trade history with the new offer
-                        self.state.game_state["trade_history"].append({
-                            "from_player": player_id,
-                            "to_player": 1 - player_id,
-                            "offered_resources": parsed_offer["offered_resources"],
-                            "requested_resources": parsed_offer["requested_resources"],
-                            "outcome": None  # To be updated upon acceptance
-                        })
+                        # DO NOT add to trade_history yet.  Wait for outcome.
+                        # self.state.game_state["trade_history"].append(...)  <-- REMOVE THIS
 
                         self.state.add_observation(
                             from_id=ta.GAME_ID,
@@ -330,7 +629,6 @@ class NegotiationEnv(ta.Env):
                             reason=f"Player {player_id} tried to make a trade offer without having the necessary resources."
                         )
                 else:
-                    # Erroneous offer
                     self.state.set_invalid_move(
                         player_id=player_id,
                         reason=f"Player {player_id} made a trade offer in an incorrect format."
