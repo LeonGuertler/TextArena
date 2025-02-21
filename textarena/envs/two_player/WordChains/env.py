@@ -1,35 +1,22 @@
-import re, random 
-from typing import Any, Dict, Optional, Tuple 
+import random
+import re
+from typing import Any, Dict, Optional, Tuple
 
-import nltk 
-import enchant 
-from nltk.corpus import words 
-nltk.download("words")
-
-import textarena as ta 
+import textarena as ta
+from textarena.envs.utils.word_lists import EnglishDictionary
 
 
 class WordChainsEnv(ta.Env):
-    """ Environment for playing the Word Chains game """
-    
-    def __init__(self, max_turns: Optional[int]=None):
-        """ 
+    """Environment for playing the Word Chains game"""
+
+    def __init__(self, max_turns: Optional[int] = None):
+        """
         Initialize the Word Chains game environment
 
         Args:
             max_turns (int): Maximum number of turns before the game ends in a draw.
         """
-
-        # Ensure NLTK words are loaded
-        self.word_list = list((set(word.lower() for word in words.words())))
-
-        # Initialize Enchant dictionaries for US and UK English
-        try:
-            self.word_checker_us = enchant.Dict("en_US")
-            self.word_checker_uk = enchant.Dict("en_GB")
-        except enchant.errors.DictNotFoundError as e:
-            raise ValueError(f"Enchant dictionary not found: {e}. Ensure that the en_US and en_GB dictionaries are installed.")
-
+        self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
 
         # Initialize game state variables
         self.state = ta.State(
@@ -37,16 +24,15 @@ class WordChainsEnv(ta.Env):
             max_turns=max_turns,
         )
 
-    @property 
+    @property
     def offline_renderer(self):
         raise NotImplementedError
 
-    @property 
+    @property
     def terminal_render_keys(self):
         return ["current_word", "required_start_letter"]
 
-
-    def reset(self, seed: Optional[int]=None):
+    def reset(self, seed: Optional[int] = None):
         """
         Reset the game to its initial state.
         Args:
@@ -56,19 +42,21 @@ class WordChainsEnv(ta.Env):
             random.seed(seed)
 
         # pick a starting word
-        starting_word = random.choice(self.word_list)
+        starting_word = random.choice(self.dictionary.get_all_words())
 
         # reset state
         self.state.reset(
             game_state={
                 "current_word": starting_word,
                 "used_words": set(starting_word),
-                "required_start_letter": starting_word[-1].lower()
+                "required_start_letter": starting_word[-1].lower(),
             },
-            player_prompt_function=self._generate_player_prompt
+            player_prompt_function=self._generate_player_prompt,
         )
 
-    def _generate_player_prompt(self, player_id: int, game_state: Dict[str, Any]) -> str:
+    def _generate_player_prompt(
+        self, player_id: int, game_state: Dict[str, Any]
+    ) -> str:
         """
         Generate the initial prompt for a player.
         Args:
@@ -101,9 +89,9 @@ class WordChainsEnv(ta.Env):
         # add action to log and observation
         self.state.add_observation(
             from_id=self.state.current_player_id,
-            to_id=-1, # Broadcast to all 
+            to_id=-1,  # Broadcast to all
             message=action,
-            for_logging=True
+            for_logging=True,
         )
 
         # Extract the word from the action
@@ -112,7 +100,7 @@ class WordChainsEnv(ta.Env):
             # Invalid action format
             self.state.set_invalid_move(
                 player_id=self.state.current_player_id,
-                reason=f"The Player {self.state.current_player_id} did not provide a word in the valid format."
+                reason=f"The Player {self.state.current_player_id} did not provide a word in the valid format.",
             )
 
         else:
@@ -122,24 +110,23 @@ class WordChainsEnv(ta.Env):
                 # Invalid format
                 self.state.set_invalid_move(
                     player_id=self.state.current_player_id,
-                    reason=f"The word provided by Player {self.state.current_player_id} did start with the correct letter."
+                    reason=f"The word provided by Player {self.state.current_player_id} did start with the correct letter.",
                 )
 
             # check if the word is a valid english word
-            elif not (self.word_checker_us.check(word) or self.word_checker_uk.check(word)):
+            elif not (self.dictionary.is_english_word(word)):
                 # Invalid word
                 self.state.set_invalid_move(
                     player_id=self.state.current_player_id,
-                    reason=f"The word provided by Player {self.state.current_player_id} is not a valid english word."
+                    reason=f"The word provided by Player {self.state.current_player_id} is not a valid english word.",
                 )
 
             # Check if the word has already been used
             elif word in self.state.game_state["used_words"]:
                 self.state.set_invalid_move(
                     player_id=self.state.current_player_id,
-                    reason=f"Player {self.state.current_player_id} repeated the word '{word}', which has already been used."
+                    reason=f"Player {self.state.current_player_id} repeated the word '{word}', which has already been used.",
                 )
-
 
             # The move is valid: update the game state
             else:
@@ -151,8 +138,7 @@ class WordChainsEnv(ta.Env):
                 self.state.add_observation(
                     from_id=ta.GAME_ID,
                     to_id=-1,  # Broadcast to all players
-                    message=f"Player {self.state.current_player_id} played the word: [{word}]. Next word must start with '{word[-1].lower()}'."
+                    message=f"Player {self.state.current_player_id} played the word: [{word}]. Next word must start with '{word[-1].lower()}'.",
                 )
 
         return self.state.step()
-
