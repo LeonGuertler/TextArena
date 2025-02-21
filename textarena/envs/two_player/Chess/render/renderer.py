@@ -17,10 +17,19 @@ class ChessRenderer(BaseRenderer):
         # Copy piece images from assets
         assets_dir = Path(__file__).parent / "assets" / "pieces"
         if assets_dir.exists():
-            for piece in ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k']:
-                src = assets_dir / f"{piece}.png"
-                if src.exists():
-                    shutil.copy(src, pieces_dir / f"{piece}.png")
+                piece_map = {
+                    'P': 'white_pawn', 'N': 'white_knight', 'B': 'white_bishop', 
+                    'R': 'white_rook', 'Q': 'white_queen', 'K': 'white_king',  # White pieces
+                    'p': 'black_pawn', 'n': 'black_knight', 'b': 'black_bishop', 
+                    'r': 'black_rook', 'q': 'black_queen', 'k': 'black_king'   # Black pieces
+                }
+                
+                for piece, filename in piece_map.items():
+                    src = assets_dir / f"{filename}.png"
+                    if src.exists():
+                        dest = pieces_dir / f"{filename}.png"
+                        shutil.copy(src, dest)
+
 
     def get_state(self) -> dict:
         """Get chess-specific state"""
@@ -88,10 +97,17 @@ class ChessRenderer(BaseRenderer):
                 const char = row[i];
                 if (isNaN(char)) {
                     if (currentFile === file) {
+                        const pieceMap = {
+                            'P': 'white_pawn', 'N': 'white_knight', 'B': 'white_bishop', 
+                            'R': 'white_rook', 'Q': 'white_queen', 'K': 'white_king',
+                            'p': 'black_pawn', 'n': 'black_knight', 'b': 'black_bishop', 
+                            'r': 'black_rook', 'q': 'black_queen', 'k': 'black_king'
+                        };
+                        const filename = `${pieceMap[char]}.png`;
                         return (
                             <img 
-                                src={`/static/pieces/${char}.png`}
-                                alt={char}
+                                src={`/static/pieces/${filename}`}
+                                alt={pieceMap[char].replace('_', ' ')}
                                 className="piece-img"
                             />
                         );
