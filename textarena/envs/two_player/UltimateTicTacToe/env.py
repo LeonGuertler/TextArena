@@ -42,10 +42,7 @@ class UltimateTicTacToeEnv(ta.Env):
         Reset the environment to the initial state.
         
         Args:
-            seed: Seed for the 
-            
-            
-            number generator.
+            seed: Seed for the number generator.
         """
         if seed is not None:
             random.seed(seed)

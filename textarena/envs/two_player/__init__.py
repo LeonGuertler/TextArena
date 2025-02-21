@@ -418,3 +418,7 @@ register(
         "tv",
     ],
 )
+register(
+    id="TicTacToe-v0",
+    entry_point="textarena.envs.two_player.TicTacToe.env:TicTacToeEnv",
+)
