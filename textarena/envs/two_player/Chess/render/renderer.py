@@ -18,8 +18,10 @@ class ChessRenderer(BaseRenderer):
         assets_dir = Path(__file__).parent / "assets" / "pieces"
         if assets_dir.exists():
                 piece_map = {
-                    'P': 'wP', 'N': 'wN', 'B': 'wB', 'R': 'wR', 'Q': 'wQ', 'K': 'wK',  # White pieces
-                    'p': 'bp', 'n': 'bn', 'b': 'bb', 'r': 'br', 'q': 'bq', 'k': 'bk'   # Black pieces
+                    'P': 'white_pawn', 'N': 'white_knight', 'B': 'white_bishop', 
+                    'R': 'white_rook', 'Q': 'white_queen', 'K': 'white_king',  # White pieces
+                    'p': 'black_pawn', 'n': 'black_knight', 'b': 'black_bishop', 
+                    'r': 'black_rook', 'q': 'black_queen', 'k': 'black_king'   # Black pieces
                 }
                 
                 for piece, filename in piece_map.items():
@@ -96,8 +98,10 @@ class ChessRenderer(BaseRenderer):
                 if (isNaN(char)) {
                     if (currentFile === file) {
                         const pieceMap = {
-                            'P': 'wP', 'N': 'wN', 'B': 'wB', 'R': 'wR', 'Q': 'wQ', 'K': 'wK',
-                            'p': 'bp', 'n': 'bn', 'b': 'bb', 'r': 'br', 'q': 'bq', 'k': 'bk'
+                            'P': 'white_pawn', 'N': 'white_knight', 'B': 'white_bishop', 
+                            'R': 'white_rook', 'Q': 'white_queen', 'K': 'white_king',
+                            'p': 'black_pawn', 'n': 'black_knight', 'b': 'black_bishop', 
+                            'r': 'black_rook', 'q': 'black_queen', 'k': 'black_king'
                         };
                         const filename = `${pieceMap[char]}.png`;
                         return (
