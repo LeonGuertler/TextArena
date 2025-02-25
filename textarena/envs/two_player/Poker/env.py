@@ -232,7 +232,10 @@ class PokerEnv(ta.Env):
             return "call", None 
         elif bet_match:
             amount = int(bet_match.group(1))
-            return "bet", amount 
+            if amount >= self.state.game_state["current_bet"]:
+                return "bet", amount
+            else:
+                return "invalid_bet", None
         elif raise_match:
             amount = int(raise_match.group(1))
             return "raise", amount 
@@ -245,13 +248,20 @@ class PokerEnv(ta.Env):
         action_type, bet_amount = self._parse_action(action)
 
         # check if valid
-        if action_type == "invalid":
-            self.state.set_invalid_move(
-                player_id=player_id,
+        if "invalid" in action_type:
+            if "invalid_bet" == action_type:
+                reason = (
+                f"Player {player_id} did not provide a valid poker action.",
+                f"A placed bet cannot decrease the current bet."
+            )
+            else:
                 reason=(
                     f"Player {player_id} did not provide a valid poker action.",
                     f"You need to either [check], [fold], [call], [bet <amount>] or [raise <amount]."
                 )
+            self.state.set_invalid_move(
+                player_id=player_id,
+                reason=reason
             )
             return
 
