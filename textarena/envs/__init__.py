@@ -57,8 +57,8 @@ register(id="WordLadder-v0-medium", entry_point="textarena.envs.WordLadder.env:W
 register(id="WordLadder-v0-hard", entry_point="textarena.envs.WordLadder.env:WordLadderEnv", min_distance=13, max_distance=15, max_turns=100)
 
 # Wordle (single-player)
-# register(id="Wordle-v0", entry_point="textarena.envs.Wordle.env:WordleEnv", max_turns=6)
-# register(id="Wordle-v0-hardcore", entry_point="textarena.envs.Wordle.env:WordleEnv", hardcore=True, max_turns=10)
+register(id="Wordle-v0", entry_point="textarena.envs.Wordle.env:WordleEnv", max_turns=6)
+register(id="Wordle-v0-hardcore", entry_point="textarena.envs.Wordle.env:WordleEnv", hardcore=True, max_turns=10)
 
 # WordSearch (single-player)
 register(id="WordSearch-v0", entry_point="textarena.envs.WordSearch.env:WordSearchEnv", hardcore=False)
