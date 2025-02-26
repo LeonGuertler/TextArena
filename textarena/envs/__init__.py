@@ -57,8 +57,8 @@ register(id="WordLadder-v0-medium", entry_point="textarena.envs.WordLadder.env:W
 register(id="WordLadder-v0-hard", entry_point="textarena.envs.WordLadder.env:WordLadderEnv", min_distance=13, max_distance=15, max_turns=100)
 
 # Wordle (single-player)
-# register(id="Wordle-v0", entry_point="textarena.envs.Wordle.env:WordleEnv", max_turns=6)
-# register(id="Wordle-v0-hardcore", entry_point="textarena.envs.Wordle.env:WordleEnv", hardcore=True, max_turns=10)
+register(id="Wordle-v0", entry_point="textarena.envs.Wordle.env:WordleEnv", max_turns=6)
+register(id="Wordle-v0-hardcore", entry_point="textarena.envs.Wordle.env:WordleEnv", hardcore=True, max_turns=10)
 
 # WordSearch (single-player)
 register(id="WordSearch-v0", entry_point="textarena.envs.WordSearch.env:WordSearchEnv", hardcore=False)
@@ -228,4 +228,6 @@ register(id="CharacterConclave-v0-extreme", entry_point="textarena.envs.Characte
 # Diplomacy (3-7 players)
 register(id="Diplomacy-v0", entry_point="textarena.envs.Diplomacy.env:DiplomacyEnv", max_turns=1_000)
 
-
+# Codenames (4 players)
+register(id="Codenames-v0", entry_point="textarena.envs.Codenames.env:CodenamesEnv", max_turns=25)
+register(id="Codenames-v0-hardcore", entry_point="textarena.envs.Codenames.env:CodenamesEnv", max_turns=35)
