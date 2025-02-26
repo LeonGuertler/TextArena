@@ -228,4 +228,6 @@ register(id="CharacterConclave-v0-extreme", entry_point="textarena.envs.Characte
 # Diplomacy (3-7 players)
 register(id="Diplomacy-v0", entry_point="textarena.envs.Diplomacy.env:DiplomacyEnv", max_turns=1_000)
 
-
+# Codenames (4 players)
+register(id="Codenames-v0", entry_point="textarena.envs.Codenames.env:CodenamesEnv", max_turns=25)
+register(id="Codenames-v0-hardcore", entry_point="textarena.envs.Codenames.env:CodenamesEnv", max_turns=35)
