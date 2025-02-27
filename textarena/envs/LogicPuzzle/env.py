@@ -67,7 +67,7 @@ class LogicPuzzleEnv(ta.Env):
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment to its initial state """
         ## initialize the game state
-        self.state = ta.State(num_players=1, min_players=1, max_players=1)
+        self.state = ta.State(num_players=num_players, min_players=1, max_players=1)
 
         
         ## load the game board

@@ -344,6 +344,10 @@ class Env(ABC):
     
     @property
     def terminal_render_keys(self):
+        # If this instance is wrapping another environment, delegate to it
+        if hasattr(self, 'env') and self.env is not None:
+            return self.env.terminal_render_keys
+        # Default for non-wrapped (base) environments that don't override
         return []
 
     def get_observation(self):

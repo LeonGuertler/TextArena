@@ -163,6 +163,11 @@ register(id="Stratego-v0", entry_point="textarena.envs.Stratego.env:StrategoEnv"
 # SpiteAndMalice (two-player)
 register(id="SpiteAndMalice-v0", entry_point="textarena.envs.SpiteAndMalice.env:SpiteAndMaliceEnv")
 
+# Tak (two-player)
+register(id="Tak-v0", entry_point="textarena.envs.Tak.env:TakEnv", board_size=4, stones=15, capstones=1)
+register(id="Tak-v0-medium", entry_point="textarena.envs.Tak.env:TakEnv", board_size=5, stones=21, capstones=1)
+register(id="Tak-v0-hard", entry_point="textarena.envs.Tak.env:TakEnv", board_size=6, stones=30, capstones=1)
+
 # TruthAndDeception (two-player) [TODO can extend to more players]
 register(id="TruthAndDeception-v0", entry_point="textarena.envs.TruthAndDeception.env:TruthAndDeceptionEnv", max_turns=6)
 register(id="TruthAndDeception-v0-long", entry_point="textarena.envs.TruthAndDeception.env:TruthAndDeceptionEnv", max_turns=12)

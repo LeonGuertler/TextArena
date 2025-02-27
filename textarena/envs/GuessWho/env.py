@@ -109,7 +109,7 @@ class GuessWhoEnv(ta.Env):
         """ Reset the environment """
 
         # Initialize the game state
-        self.state = ta.State(num_players=1, min_players=1, max_players=1, max_turns=self.max_turns)
+        self.state = ta.State(num_players=num_players, min_players=1, max_players=1, max_turns=self.max_turns)
         
         ## select a random character
         self.target_character = random.choice(self.characters)

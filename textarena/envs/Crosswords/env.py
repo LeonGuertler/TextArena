@@ -74,7 +74,7 @@ class CrosswordsEnv(ta.Env):
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the game to its initial state """
         ## initialise the game_state
-        self.state = ta.State(num_players=1, min_players=1, max_players=1, max_turns=self.max_turns)
+        self.state = ta.State(num_players=num_players, min_players=1, max_players=1, max_turns=self.max_turns)
 
         ## load the game board
         self.game_board, self.placed_words, self.clues = self._generate_board() ## generate the game board and the placed words for the clues
@@ -111,7 +111,7 @@ class CrosswordsEnv(ta.Env):
 
         prompt += "\n\nHere are the clues for the words you need to find:\n"
         prompt += self._clue_generator()
-        prompt += ("\n\nYou may provide one response in one move. However, note that any wrong guesses will result in you losing. Hence, plan your approach and risk appetite. Only guesses in the format of [row column letter] will be fetched from your response, e.g. [0 0 d], [1 2 G].\n"
+        prompt += ("\n\nYou can only provide one response per turn. Hence, plan your approach and risk appetite. Only guesses in the format of [row column letter] will be fetched from your response, e.g. [0 0 d], [1 2 G].\n"
                    "As you play, the history of your choices will be appended below. Use the information to complete the game.\n")
     
         return prompt
