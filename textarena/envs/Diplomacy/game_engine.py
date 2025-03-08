@@ -240,10 +240,25 @@ class Power:
         self.controlled_centers: List[str] = [] # List of currently controlled supply centers
         self.is_waiting: bool = True
         self.is_defeated: bool = False
+        self.experience: List[str] = []
+        self.phase_summary: str = ""
+        self.plans: List[str] = []
 
     def __str__(self) -> str:
         return self.name
     
+    def add_experience(self, experience: str) -> None:
+        """ Add experience to this power """
+        self.experience.append(experience)
+
+    def add_phase_summary(self, phase_summary: str) -> None:
+        """ Add phase summary to this power """
+        self.phase_summary = phase_summary
+    
+    def add_plan(self, plan: str) -> None:
+        """ Add a plan to this power """
+        self.plans.append(plan)
+
     def add_unit(self, unit: Unit) -> None:
         """ Add a unit to this power """
         unit.power = self.name

@@ -31,18 +31,29 @@ class DiplomacyEnv(ta.Env):
         r"\[Submit\s+Orders\]([\s\S]*?)(?=\[|$)",
         re.IGNORECASE
     )
+    
+    # Summary pattern to extract summaries from agent responses
+    summary_pattern = re.compile(
+        r"\[Please provide a brief summary(.*?)(?=\[|$)",
+        re.IGNORECASE | re.DOTALL
+    )
 
     def __init__(self, max_turns: int = 30, 
-                negotiations_per_phase: int = 3):
+                negotiations_per_phase: int = 3,
+                request_summaries: bool = True):
         """
         Initialize the Diplomacy game environment
 
         Args:
             max_turns (int): Maximum number of game years before ending in a draw
             negotiations_per_phase (int): How many negotiation rounds per game phase
+            request_summaries (bool): Whether to request game state summaries from agents
         """
         self.max_turns = max_turns
         self.negotiations_per_phase = negotiations_per_phase
+        self.request_summaries = request_summaries
+        self.summary_prompt = "\n\n[Please provide a brief summary of the current game state in 3-5 sentences. Include your position, key threats, and opportunities.]"
+        self.player_summaries = {}  # Store summaries by player ID
         
         # Game state
         self.engine = None
@@ -117,110 +128,22 @@ class DiplomacyEnv(ta.Env):
         if not power_name:
             return "You are not an active player in this game."
             
-        power_state = game_state['powers_info'].get(power_name, {})
+        # Load the base prompt template
+        with open("textarena/envs/Diplomacy/prompts/player_base_prompt.txt", "r") as f:
+            prompt_template = f.read()
         
-        # Build the comprehensive prompt
-        prompt = [
-            f"# DIPLOMACY GAME - YOU ARE {power_name} (PLAYER {player_id})",
-            "",
-            "## GAME OVERVIEW",
-            "Diplomacy is a strategic board game of negotiation, alliance-building, and tactical warfare set in pre-WWI Europe.",
-            "The game revolves around diplomatic relations, military maneuvers, and territorial control.",
-            "",
-            "### GAME STRUCTURE",
-            "- Each game year consists of Spring and Fall seasons, plus a Winter adjustment phase",
-            "- Each season has a Movement phase and possibly a Retreat phase",
-            "- After Fall, there's an Adjustment phase where you build new units or disband excess units",
-            "- The game lasts until one power controls 18+ supply centers or until the maximum number of turns",
-            f"- This game will last at most {self.max_turns} years",
-            "",
-            "### YOUR OBJECTIVE",
-            "To win, you must control the majority of supply centers (currently 18 out of 34). This requires:",
-            "1. Forming strategic alliances with other powers",
-            "2. Coordinating attacks against common enemies",
-            "3. Eventually outmaneuvering your allies to claim victory",
-        ]
-        
-        prompt.extend([
-            "",
-            "## GAME MECHANICS",
-            "",
-            "### UNITS",
-            "- Armies (A): Move on land, can be convoyed across water by fleets",
-            "- Fleets (F): Move on water and coastal provinces, can convoy armies",
-            "",
-            "### ORDERS",
-            "During Movement phases, you can issue these orders:",
-            "- Hold: A unit from your power stays in place (e.g., 'A PAR H')",
-            "- Move: A unit from your power moves to an adjacent territory (e.g., 'A PAR - BUR')",
-            "- Support: A unit from your power supports another unit's position or move (e.g., 'A PAR S A MAR' or 'A PAR S A MAR - BUR')",
-            "- Convoy: A fleet transports an army across water (e.g., 'F NTH C A LON - BEL')",
-            "",
-            "During Retreat phases, you can:",
-            "- Retreat: Move a dislodged unit to an empty adjacent territory (e.g., 'A PAR R BUR')",
-            "- Disband: Remove a dislodged unit from play (e.g., 'A PAR D')",
-            "",
-            "During Adjustment phases, depending on your center count vs. unit count (Build count = center count - unit count):",
-            "- Build: Create new units in your unoccupied home centers (e.g., 'A PAR B')",
-            "- Disband: Remove existing units if you have too many (e.g., 'A PAR D')",
-            "- Waive: Choose not to build an allowed unit (e.g., 'WAIVE')",
-            "",
-            "### COMBAT RESOLUTION",
-            "- All units have equal strength (1)",
-            "- Support adds +1 strength per supporting unit",
-            "- The unit with highest strength wins; equal strength units bounce (no movement)",
-            "- A unit supporting a move is cut if attacked (unless the attack comes from the unit being supported)",
-            "- A dislodged unit must retreat or be disbanded",
-            "",
-            f"## NEGOTIATION PROCESS ({self.negotiations_per_phase} ROUNDS PER PHASE)",
-            f"Each game phase has {self.negotiations_per_phase} negotiation rounds before orders are submitted.",
-            "Use these rounds to coordinate with other players through messages and form agreements.",
-            "In the final negotiation round, you must submit your orders.",
-            "",
-            "## COMMUNICATION OPTIONS",
-            "You can interact in the following ways:",
-            "",
-            "1. **Broadcast messages** - Send a message to all players",
-            "   Example: [Broadcast: I propose we all focus on containing Russia this turn]",
-            "   Alternative: [Broadcast] Let's coordinate our attacks against Turkey",
-            "",
-            "2. **Whisper messages** - Send a private message to another player",
-            "   Example: [Whisper to 2: Would you be interested in coordinating against Germany?]",
-            "   Alternative: [Whisper to 3 (ITALY): I can support your move to Trieste]",
-            "",
-            "3. **Submit orders** (final negotiation round only) - Send your orders for the current phase",
-            "   Example:",
-            "   ```",
-            "   [Submit Orders]",
-            "   A PAR - BUR",
-            "   A MAR S A PAR - BUR",
-            "   F BRE - MAO",
-            "   ```",
-            "",
-            "You can combine multiple communication types in a single response:",
-            "",
-            "```",
-            "[Broadcast: I'm looking to form alliances this turn]",
-            "",
-            "[Whisper to 1: I noticed England is threatening your northern border. I could help you against them if you agree not to attack me.]",
-            "",
-            "[Whisper to 3: Let's coordinate our fleets in the Mediterranean]",
-            "```",
-            "",
-            "## STRATEGY TIPS",
-            "1. Diplomacy is primarily a game of negotiation - communicate actively",
-            "2. Form mutually beneficial alliances, but be prepared to break them when necessary",
-            "3. Try to coordinate attacks with allies to ensure successful movements",
-            "4. Defend your supply centers while looking for opportunities to capture others",
-            "5. Balance short-term tactical gains with long-term strategic positioning",
-            "",
-            "### STATE SPECIFIC INSTRUCTIONS",
-            f"{get_state_specific_prompt(power_name)}",
-            "",
-        ])
+        # Format the template with player-specific information
+        prompt = prompt_template.format(
+            power_name=power_name,
+            player_id=player_id,
+            max_turns=self.max_turns,
+            negotiations_per_phase=self.negotiations_per_phase,
+            state_specific_prompt=get_state_specific_prompt(power_name)
+        )
         
         if start_of_game:
-            prompt.extend([
+            # Add game start information
+            start_game_info = [
                 "## CURRENT GAME STATE",
                 f"It is {game_state['season']} {game_state['year']}, {game_state['phase']} phase.",
                 f"This is negotiation round 1 of {game_state['total_negotiation_rounds']}.",
@@ -228,9 +151,10 @@ class DiplomacyEnv(ta.Env):
                 "The game has just begun. Use this first negotiation round to establish initial diplomacy.",
                 "",
                 "Good luck, and may your diplomacy be successful!"
-            ])
+            ]
+            prompt += "\n" + "\n".join(start_game_info)
         
-        return "\n".join(prompt)
+        return prompt
 
     def format_power_units_and_centers(self, player_id: int):
         """
@@ -309,7 +233,7 @@ class DiplomacyEnv(ta.Env):
         }
         
         # Get supply centers for context
-        supply_centers = set(self.engine.map.scs)
+        supply_centers = set(self.engine.map.get_supply_centers())
         
         # Get current supply center ownership
         power_centers = {}
@@ -428,14 +352,13 @@ class DiplomacyEnv(ta.Env):
             possible_orders_text=game_state['possible_orders_text'],
         )
 
-        print(prompt)
         game_settings_prompt = self._generate_player_prompt(player_power_map=self.player_power_map, player_id=player_id, game_state=game_state, start_of_game=False)
 
         return game_settings_prompt + "\n\n" + prompt
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         """
-        Process player actions
+        Process player actions and extract summaries if present
         
         Args:
             action (str): Player's action as a multi-line string
@@ -444,52 +367,27 @@ class DiplomacyEnv(ta.Env):
             Tuple[bool, ta.Info]: Game completion status and additional info
         """
         current_pid = self.state.current_player_id
-        power_name = self.player_power_map.get(current_pid)
         
-        if not power_name:
-            done, info = self.state.step(rotate_player=False)
-            info['reason'] = "Skipped"
-            info['detailed_reason'] = "You are not an active player in this game."
-            return done, info
-        
-        # Always add the player's full action as an observation to themselves
-        self.add_observation(from_id=current_pid, to_id=current_pid, message=action)
-        
-        # Process communications and orders
-        actions, game_state_changed = self._process_player_action(current_pid, power_name, action)
-        
-        if game_state_changed: # Meaning all players have submitted orders
-            # Check if game is over
-            game_completed = self.engine.game_over
-            if game_completed:
-                self._announce_game_result()
-                done, info = self.state.step(rotate_player=False)
-                info.update({
-                    'reason': "Game Over",
-                    'detailed_reason': f"Game ended after {self.engine.turn_number} turns. The winners are {self.engine.winners}.",
-                    'winners': self.engine.winners,
-                    'winning_players': [self.power_player_map[power] for power in self.engine.winners] if self.engine.winners else [],
-                    'final_sc_count': {power: len(self.engine.powers[power].controlled_centers) for power in self.engine.powers},
-                    'turn_number': self.engine.turn_number
-                })
-                return done, info
+        # Extract summary if present and we're requesting summaries
+        if self.request_summaries:
+            summary_match = self.summary_pattern.search(action)
+            if summary_match:
+                # Extract the summary text
+                summary_text = summary_match.group(1).strip()
+                if summary_text:
+                    # Find the first line break after the prompt
+                    first_line_break = summary_text.find('\n')
+                    if first_line_break != -1:
+                        summary_text = summary_text[first_line_break:].strip()
+                    
+                    # Store the summary for this player
+                    self.player_summaries[current_pid] = summary_text
                 
-        # Move to next player or negotiate a new round
-        # self._rotate_players()
+                # Remove the summary request and response from the action
+                action = action[:summary_match.start()] + action[summary_match.end():]
         
-        done, info = self.state.step(rotate_player=True)
-        # If we've completed a full round of negotiations
-        if self.state.current_player_id == 0 and not game_state_changed:
-            self._advance_negotiation_round()
-        
-        # Add detailed game state info
-        info.update({
-            'current_player': current_pid,
-            'current_power': power_name,
-            'actions': actions
-        })
-        
-        return done, info
+        # Continue with the regular step logic
+        return super().step(action)
 
     def _process_player_action(self, player_id: int, power_name: str, action: str) -> Tuple[Dict, bool]:
         """
@@ -878,3 +776,29 @@ class DiplomacyEnv(ta.Env):
         prompt = prompt.format(phase_history=phase_history, game_state_changes=game_state_changes)
         
         # ... rest of the function remains the same ...
+
+    def get_observation(self):
+        """Get the current player's observation, optionally adding a summary request"""
+        player_id, observation = super().get_observation()
+        
+        # If we're requesting summaries, add the summary prompt
+        if self.request_summaries:
+            # Convert observation list to string for easier processing
+            observation_str = "\n\n".join([f"[{self.state.role_mapping.get(sender_id, f'Player {sender_id}')}] {message}" 
+                                          for sender_id, message in observation])
+            
+            # Add the summary prompt
+            observation_str += self.summary_prompt
+            
+            # Return the modified observation
+            return player_id, observation_str
+        
+        return player_id, observation
+
+    def get_player_summary(self, player_id: int) -> Optional[str]:
+        """Get the latest summary provided by a player"""
+        return self.player_summaries.get(player_id)
+    
+    def get_all_summaries(self) -> Dict[int, str]:
+        """Get all player summaries"""
+        return self.player_summaries
