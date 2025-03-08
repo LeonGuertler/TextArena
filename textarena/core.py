@@ -66,8 +66,8 @@ class State:
 
     def reset(
         self,
-        game_state: Dict[str, Any],
-        player_prompt_function: Callable,
+        game_state: Optional[Dict[str, Any]]=None,
+        player_prompt_function: Optional[Callable]=None,
         executable_on_reset: Optional[List[Callable]] = None,
         seed: Optional[int] = None,
         role_mapping = None
@@ -95,16 +95,17 @@ class State:
         self._reset_game_parameters()
 
         # generate the player prompts
-        for player_id in range(self.num_players):
-            self.add_observation(
-                from_id=GAME_ID,
-                to_id=player_id,
-                message=player_prompt_function(
-                    player_id=player_id,
-                    game_state=self.game_state
-                ),
-                for_logging=False,
-            )
+        if player_prompt_function is not None:
+            for player_id in range(self.num_players):
+                self.add_observation(
+                    from_id=GAME_ID,
+                    to_id=player_id,
+                    message=player_prompt_function(
+                        player_id=player_id,
+                        game_state=self.game_state
+                    ),
+                    for_logging=False,
+                )
         # try to execute relevant functions
         if executable_on_reset is not None:
             for executable in executable_on_reset:
@@ -301,6 +302,23 @@ class State:
             )
             self.info["reason"] = f"Invalid Move: {reason}"
             self.done = True
+
+    def set_custom_game_outcome(self, player_reward_dict: Dict[int, float], reason: Optional[str]=None):
+        # set the rewards
+        self.rewards = player_reward_dict
+
+        # log the reason & update info
+        if reason is not None:
+            self.logs.append((GAME_ID, reason))
+            self.add_observation(
+                from_id=GAME_ID,
+                to_id=-1,
+                message=f"Custom Game Outcome. Reason: {reason}",
+                for_logging=False
+            )
+
+        self.info["reason"] = reason
+        self.done = True
 
 class Env(ABC):
     """

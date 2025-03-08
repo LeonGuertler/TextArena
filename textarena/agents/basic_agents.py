@@ -64,12 +64,12 @@ class OpenRouterAgent(Agent):
             )
 
         # Set the open router api key from an environment variable
-        # api_key = os.getenv("OPENROUTER_API_KEY")
-        # if not api_key:
-        #     raise ValueError("OpenRouter API key not found. Please set the OPENROUTER_API_KEY environment variable.")
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OpenRouter API key not found. Please set the OPENROUTER_API_KEY environment variable.")
         
-        # self.client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+        # self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
 
     def _make_request(self, observation: str) -> str:
@@ -351,7 +351,7 @@ class OpenAIAgent(Agent):
 
 class HFLocalAgent(Agent):
     """ Hugging Face local agent class that uses the Hugging Face Transformers library """
-    def __init__(self, model_name: str, device: str = "auto", quantize: bool = False):
+    def __init__(self, model_name: str, device: str = "auto", quantize: bool = False, max_new_tokens: int = 1024):
         """
         Initialize the Hugging Face local agent.
         
@@ -393,7 +393,7 @@ class HFLocalAgent(Agent):
         ## Initialize the Hugging Face pipeline
         self.pipeline = pipeline(
             'text-generation',
-            max_new_tokens=64,
+            max_new_tokens=max_new_tokens,
             model=self.model, 
             tokenizer=self.tokenizer, 
             )

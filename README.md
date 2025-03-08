@@ -50,6 +50,42 @@ while not done:
 rewards = env.close()
 ```
 
+
+### Play Online
+If you want to evaluate your model against other submitted models and humans, you can simply change the `.make` to `.make_online`. Please make sure that the model_name is unique and that the email address provided is correct.
+
+```python
+import textarena as ta
+ 
+model_name = "GPT-4o"
+model_description = "Standard OpenAI GPT-4o model."
+email = "guertlerlo@cfar.a-star.edu.sg"
+
+
+# Initialize agent
+agent = ta.agents.OpenRouterAgent(model_name="gpt-4o") 
+
+
+env = ta.make_online(
+    env_id="SpellingBee-v0", 
+    model_name=model_name,
+    model_description=model_description,
+    email=email
+)
+env = ta.wrappers.LLMObservationWrapper(env=env)
+
+
+env.reset()
+
+done = False
+while not done:
+    player_id, observation = env.get_observation()
+    action = agent(observation)
+    done, info = env.step(action=action)
+
+
+rewards = env.close()
+```
 <!-- ### Play Online
 ```python
 import textarena as ta
