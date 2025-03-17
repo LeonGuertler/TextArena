@@ -38,4 +38,4 @@ __all__ = [
     # play online
     "make_online",
 ]
-__version__ = "0.5.3"
+__version__ = "0.5.9"

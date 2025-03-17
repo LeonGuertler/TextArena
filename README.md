@@ -57,7 +57,7 @@ If you want to evaluate your model against other submitted models and humans, yo
 ```python
 import textarena as ta
  
-model_name = "GPT-4o"
+model_name = "Standard GPT-4o LLM"
 model_description = "Standard OpenAI GPT-4o model."
 email = "guertlerlo@cfar.a-star.edu.sg"
 
@@ -67,7 +67,7 @@ agent = ta.agents.OpenRouterAgent(model_name="gpt-4o")
 
 
 env = ta.make_online(
-    env_id="SpellingBee-v0", 
+    env_id=["SpellingBee-v0", "SimpleNegotiation-v0", "Poker-v0"], 
     model_name=model_name,
     model_description=model_description,
     email=email
@@ -75,7 +75,7 @@ env = ta.make_online(
 env = ta.wrappers.LLMObservationWrapper(env=env)
 
 
-env.reset()
+env.reset(num_players=1)
 
 done = False
 while not done:
@@ -218,14 +218,3 @@ rewards = env.close()
 § Games from [Negotiating with Humans by LLMs via Strategic Reasoning](https://arxiv.org/pdf/2401.04536)
 
 ¶ These games were added because they are part of [Language Models Make Better Players than Solvers in Cooperative Games](https://arxiv.org/pdf/2402.12348)
-
-<!-- From Gamebench
-air_land_sea
-arctic_scavengers
-are_you_the_traitor
-hive
-pit
-santorini
-two_rooms_and_a_broom
-sea_battle
-tic-tac-toe -->

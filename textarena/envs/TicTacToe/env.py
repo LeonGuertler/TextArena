@@ -20,10 +20,7 @@ class TicTacToeEnv(ta.Env):
         self.state = ta.State(num_players=2, min_players=2, max_players=2)
 
         self.board = [['' for _ in range(3)] for _ in range(3)]
-        game_state = {
-            "board": self.board,
-            "rendered_board": self._render_board()
-        }
+        game_state = {"board": self.board, "rendered_board": self._render_board()}
         self.state.reset(seed=seed, game_state=game_state, player_prompt_function=self._generate_player_prompt)
 
     def _render_board(self):
@@ -98,6 +95,11 @@ class TicTacToeEnv(ta.Env):
                     self.state.set_winners(player_ids=[player_id], reason=f"Player {player_id} has won!")
                 elif self._is_draw():
                     self.state.set_draw(reason="The game is a draw!")
+            
+            else:
+                # Invalid move
+                reason=f"Invalid move. Player {player_id} selected a square that is either already occupied or outside the game board."
+                self.state.set_invalid_move(player_id=player_id, reason=reason)
 
         self.state.game_state["rendered_board"] = self._render_board()
         return self.state.step()

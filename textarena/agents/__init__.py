@@ -7,7 +7,8 @@ from textarena.agents.basic_agents import (
     HFLocalAgent,
     CerebrasAgent,
     AWSBedrockAgent,
-    AnthropicAgent
+    AnthropicAgent,
+    AsyncAnthropicAgent,
 )
 
 from textarena.agents import wrappers
@@ -22,4 +23,5 @@ __all__ = [
     "CerebrasAgent",
     "AWSBedrockAgent",
     "AnthropicAgent",
+    "AsyncAnthropicAgent",
 ]
