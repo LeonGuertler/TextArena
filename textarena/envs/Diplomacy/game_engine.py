@@ -2529,3 +2529,105 @@ class DiplomacyGameEngine:
         
         # Apply the values to the template
         return DIPLOMACY_MAP_TEMPLATE.format(**values)
+
+    def bfs_shortest_path(self, start, match_func, allowed_unit_types=None):
+        """
+        Find shortest path from start to a territory matching match_func.
+        
+        Args:
+            start: Starting territory
+            match_func: Function that returns the territory if it matches, None otherwise
+            allowed_unit_types: Set of unit types ('A', 'F') allowed for movement
+        
+        Returns:
+            (path, matched_territory) or (None, None) if no path found
+        """
+        if match_func(start):
+            return [start], start
+            
+        visited = set([start])
+        queue = deque([(start, [start])])
+        
+        while queue:
+            current, path = queue.popleft()
+            
+            # Check adjacent territories
+            if current in self.map.regions:
+                for adj_name in self.map.regions[current].adjacencies:
+                    # Skip if already visited
+                    if adj_name in visited:
+                        continue
+                        
+                    # Check if unit type can move along this edge
+                    if allowed_unit_types:
+                        can_move = False
+                        for unit_type in allowed_unit_types:
+                            if unit_type in self.map.regions[current].adjacencies[adj_name]:
+                                can_move = True
+                                break
+                        if not can_move:
+                            continue
+                    
+                    # Check if this territory matches
+                    matched = match_func(adj_name)
+                    if matched:
+                        return path + [adj_name], matched
+                    
+                    # Add to queue for further exploration
+                    visited.add(adj_name)
+                    queue.append((adj_name, path + [adj_name]))
+                    
+        return None, None
+        
+    def bfs_nearest_adjacent(self, start, occupant_map, allowed_unit_types=None):
+        """
+        Find shortest path from start to a territory adjacent to one in occupant_map.
+        
+        Args:
+            start: Starting territory
+            occupant_map: Dict mapping territory -> unit
+            allowed_unit_types: Set of unit types ('A', 'F') allowed for movement
+        
+        Returns:
+            (path, (matched_territory, matched_unit)) or (None, (None, None)) if no path found
+        """
+        # Check if start is already adjacent to an occupied territory
+        if start in self.map.regions:
+            for adj_name in self.map.regions[start].adjacencies:
+                if adj_name in occupant_map:
+                    return [start], (adj_name, occupant_map[adj_name])
+        
+        visited = set([start])
+        queue = deque([(start, [start])])
+        
+        while queue:
+            current, path = queue.popleft()
+            
+            # Check adjacent territories
+            if current in self.map.regions:
+                for adj_name in self.map.regions[current].adjacencies:
+                    # Skip if already visited
+                    if adj_name in visited:
+                        continue
+                        
+                    # Check if unit type can move along this edge
+                    if allowed_unit_types:
+                        can_move = False
+                        for unit_type in allowed_unit_types:
+                            if unit_type in self.map.regions[current].adjacencies[adj_name]:
+                                can_move = True
+                                break
+                        if not can_move:
+                            continue
+                    
+                    # Check if this territory is adjacent to an occupied territory
+                    if adj_name in self.map.regions:
+                        for adj_adj_name in self.map.regions[adj_name].adjacencies:
+                            if adj_adj_name in occupant_map:
+                                return path + [adj_name], (adj_adj_name, occupant_map[adj_adj_name])
+                    
+                    # Add to queue for further exploration
+                    visited.add(adj_name)
+                    queue.append((adj_name, path + [adj_name]))
+                    
+        return None, (None, None)

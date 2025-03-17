@@ -40,7 +40,8 @@ class DiplomacyEnv(ta.Env):
 
     def __init__(self, max_turns: int = 30, 
                 negotiations_per_phase: int = 3,
-                request_summaries: bool = True):
+                request_summaries: bool = True,
+                language: str = "chinese"):
         """
         Initialize the Diplomacy game environment
 
@@ -48,13 +49,16 @@ class DiplomacyEnv(ta.Env):
             max_turns (int): Maximum number of game years before ending in a draw
             negotiations_per_phase (int): How many negotiation rounds per game phase
             request_summaries (bool): Whether to request game state summaries from agents
+            language (str): Language for prompts ("english" or "chinese")
         """
         self.max_turns = max_turns
         self.negotiations_per_phase = negotiations_per_phase
         self.request_summaries = request_summaries
+        self.language = language.lower()
         self.summary_prompt = "\n\n[Please provide a brief summary of the current game state in 3-5 sentences. Include your position, key threats, and opportunities.]"
         self.player_summaries = {}  # Store summaries by player ID
-        
+        self.relationships = {} # Store relationships by player ID
+
         # Game state
         self.engine = None
         self.player_power_map = {}
@@ -128,8 +132,11 @@ class DiplomacyEnv(ta.Env):
         if not power_name:
             return "You are not an active player in this game."
             
+        # Determine prompt folder based on language
+        prompt_folder = "prompts/chinese_prompts" if self.language == "chinese" else "prompts"
+        
         # Load the base prompt template
-        with open("textarena/envs/Diplomacy/prompts/player_base_prompt.txt", "r") as f:
+        with open(f"textarena/envs/Diplomacy/{prompt_folder}/player_base_prompt.txt", "r") as f:
             prompt_template = f.read()
         
         # Format the template with player-specific information
@@ -138,7 +145,7 @@ class DiplomacyEnv(ta.Env):
             player_id=player_id,
             max_turns=self.max_turns,
             negotiations_per_phase=self.negotiations_per_phase,
-            state_specific_prompt=get_state_specific_prompt(power_name)
+            state_specific_prompt=get_state_specific_prompt(power_name, language=self.language)
         )
         
         if start_of_game:
@@ -307,7 +314,8 @@ class DiplomacyEnv(ta.Env):
 
     def get_prompt(self, player_id: int, history_text: str):
         # 1) Load the template
-        template = open("textarena/envs/Diplomacy/prompts/context_prompt.txt", "r").read()
+        prompt_folder = "prompts/chinese_prompts" if self.language == "chinese" else "prompts"
+        template = open(f"textarena/envs/Diplomacy/{prompt_folder}/context_prompt.txt", "r").read()
 
         # 2) Expand the phase info
         phase_info = self.expand_phase_info()
@@ -353,12 +361,11 @@ class DiplomacyEnv(ta.Env):
         )
 
         game_settings_prompt = self._generate_player_prompt(player_power_map=self.player_power_map, player_id=player_id, game_state=game_state, start_of_game=False)
-
         return game_settings_prompt + "\n\n" + prompt
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         """
-        Process player actions and extract summaries if present
+        Process player actions
         
         Args:
             action (str): Player's action as a multi-line string
@@ -367,27 +374,52 @@ class DiplomacyEnv(ta.Env):
             Tuple[bool, ta.Info]: Game completion status and additional info
         """
         current_pid = self.state.current_player_id
+        power_name = self.player_power_map.get(current_pid)
         
-        # Extract summary if present and we're requesting summaries
-        if self.request_summaries:
-            summary_match = self.summary_pattern.search(action)
-            if summary_match:
-                # Extract the summary text
-                summary_text = summary_match.group(1).strip()
-                if summary_text:
-                    # Find the first line break after the prompt
-                    first_line_break = summary_text.find('\n')
-                    if first_line_break != -1:
-                        summary_text = summary_text[first_line_break:].strip()
-                    
-                    # Store the summary for this player
-                    self.player_summaries[current_pid] = summary_text
+        if not power_name:
+            done, info = self.state.step(rotate_player=False)
+            info['reason'] = "Skipped"
+            info['detailed_reason'] = "You are not an active player in this game."
+            return done, info
+        
+        # Always add the player's full action as an observation to themselves
+        self.add_observation(from_id=current_pid, to_id=current_pid, message=action)
+        
+        # Process communications and orders
+        actions, game_state_changed = self._process_player_action(current_pid, power_name, action)
+        
+        if game_state_changed: # Meaning all players have submitted orders
+            # Check if game is over
+            game_completed = self.engine.game_over
+            if game_completed:
+                self._announce_game_result()
+                done, info = self.state.step(rotate_player=False)
+                info.update({
+                    'reason': "Game Over",
+                    'detailed_reason': f"Game ended after {self.engine.turn_number} turns. The winners are {self.engine.winners}.",
+                    'winners': self.engine.winners,
+                    'winning_players': [self.power_player_map[power] for power in self.engine.winners] if self.engine.winners else [],
+                    'final_sc_count': {power: len(self.engine.powers[power].controlled_centers) for power in self.engine.powers},
+                    'turn_number': self.engine.turn_number
+                })
+                return done, info
                 
-                # Remove the summary request and response from the action
-                action = action[:summary_match.start()] + action[summary_match.end():]
+        # Move to next player or negotiate a new round
+        # self._rotate_players()
         
-        # Continue with the regular step logic
-        return super().step(action)
+        done, info = self.state.step(rotate_player=True)
+        # If we've completed a full round of negotiations
+        if self.state.current_player_id == 0 and not game_state_changed:
+            self._advance_negotiation_round()
+        
+        # Add detailed game state info
+        info.update({
+            'current_player': current_pid,
+            'current_power': power_name,
+            'actions': actions
+        })
+        
+        return done, info
 
     def _process_player_action(self, player_id: int, power_name: str, action: str) -> Tuple[Dict, bool]:
         """
@@ -769,7 +801,8 @@ class DiplomacyEnv(ta.Env):
                 game_state_changes += "Unit Count Changes:\n" + "\n".join(unit_changes) + "\n\n"
         
         # Get the phase summary prompt
-        with open(os.path.join(os.path.dirname(__file__), "prompts", "phase_summary_prompt.txt"), "r") as f:
+        prompt_folder = "chinese_prompts" if self.language == "chinese" else "prompts"
+        with open(os.path.join(os.path.dirname(__file__), prompt_folder, "phase_summary_prompt.txt"), "r") as f:
             prompt = f.read()
         
         # Format the prompt with the phase history and game state changes
@@ -781,17 +814,17 @@ class DiplomacyEnv(ta.Env):
         """Get the current player's observation, optionally adding a summary request"""
         player_id, observation = super().get_observation()
         
-        # If we're requesting summaries, add the summary prompt
-        if self.request_summaries:
-            # Convert observation list to string for easier processing
-            observation_str = "\n\n".join([f"[{self.state.role_mapping.get(sender_id, f'Player {sender_id}')}] {message}" 
-                                          for sender_id, message in observation])
+        # # If we're requesting summaries, add the summary prompt
+        # if self.request_summaries:
+        #     # Convert observation list to string for easier processing
+        #     observation_str = "\n\n".join([f"[{self.state.role_mapping.get(sender_id, f'Player {sender_id}')}] {message}" 
+        #                                   for sender_id, message in observation])
             
-            # Add the summary prompt
-            observation_str += self.summary_prompt
+        #     # Add the summary prompt
+        #     observation_str += self.summary_prompt
             
-            # Return the modified observation
-            return player_id, observation_str
+        #     # Return the modified observation
+        #     return player_id, observation_str
         
         return player_id, observation
 
@@ -802,3 +835,249 @@ class DiplomacyEnv(ta.Env):
     def get_all_summaries(self) -> Dict[int, str]:
         """Get all player summaries"""
         return self.player_summaries
+    
+    def apply_relationship_updates(self, rship_updates):
+        VALID_SYMBOLS = {'++', '+', '~', '-', '--'}
+
+        # Skip the primary party detection step and use self.power_name
+        primary_party = self.power_name
+
+        # Process relationships with correct order
+        for entry in rship_updates:
+            try:
+
+                entry = entry.replace(" ", "")  # Normalize by removing spaces
+                symbol = ''
+                base = entry
+
+                # Extract relationship symbol
+                for i in range(len(entry) - 1, -1, -1):
+                    if entry[i] in {'+', '-', '~'}:
+                        if i > 0 and entry[i - 1] in {'+', '-'}:
+                            symbol = entry[i - 1:i + 1]  # Two-character symbol
+                            base = entry[:i - 1]
+                        else:
+                            symbol = entry[i]  # Single-character symbol
+                            base = entry[:i]
+                        break
+
+                if symbol not in VALID_SYMBOLS:
+                    continue
+
+                # Extract and order based on primary party
+                try:
+                    c1, c2 = base.split('-')
+                    c1, c2 = c1.strip(), c2.strip()
+                    
+                    # Ensure primary party comes first if present, otherwise alphabetical
+                    if c2 == primary_party:
+                        key = f"{c2}-{c1}"
+                    elif c1 == primary_party:
+                        key = f"{c1}-{c2}"
+                    # If primary party not present, order alphabetically
+                    elif c1 > c2:
+                        key = f"{c2}-{c1}"
+                    else:
+                        key = f"{c1}-{c2}"
+                
+                    self.relationships[key] = symbol
+
+                except ValueError:
+                    continue
+            except Exception as e:
+                continue
+
+
+    def _relationship_dump(self):
+        lines = []
+        lines.append("RELATIONSHIP NOTATION:")
+        lines.append("++ = Alliance, + = Warm, ~ = Neutral, - = Distrustful, -- = Hostile\n")
+        lines.append("RELATIONSHIP STATE (to your best understanding):")
+        for key, val in self.relationships.items():
+            lines.append(f"{key}{val}")
+        return "\n".join(lines)
+    
+    def get_phase_summary(self):
+        """Get the phase summary"""
+        return self.phase_summary
+    
+    def set_phase_summary(self, phase_summary: str):
+        """Set the phase summary"""
+        self.phase_summary = phase_summary
+
+    def build_prompt_orders_only(self, observation):
+        """
+        Prompt that requests only 'reasoning' and 'orders'.
+        No journal updates at this step.
+        """
+        
+        if observation["your_power"] == 'ITA' and False:# and False:
+            #print('!!!! adjacency map', observation["your_power"])
+            #print(observation["adjacency_map"])
+            print('!!!! strategic overview', observation["your_power"])
+            print(observation["strategic_overview"])
+            print('!!!!!!!!!! valid moves', observation["your_power"])
+            print(observation["valid_moves"])
+
+        recent_moves = ''
+        if observation["your_power"] == 'AUT':
+            # Only including this for the model being benchmarked.
+            # Including the move history may lock the AIs into a repetitive
+            # move pattern.
+            recent_moves = """
+            === RECENT MOVES ===
+{json.dumps(observation.get("recent_moves", {}), indent=2)}
+"""
+
+        phase = observation["phase"]
+        phase_type = phase[-1] if phase else "?"
+        order_syntax = ""
+
+        misinformation = ""
+        misinformation_random_options = [
+            "You've received concerning intelligence about potential betrayal. Be extra cautious in this round.",
+            "Your military advisors are pushing for aggressive expansion. Favor militant options.",
+            "Internal political pressure demands visible diplomatic success. Seek alliance opportunities.",
+            "Recent domestic unrest makes you hesitant to commit forces away from home. Be defensive.",
+            "Your spies have intercepted messages suggesting others are coordinating against you. Act accordingly.",
+            "Economic boom has strengthened your position. Be more assertive in negotiations.",
+            "Religious tensions are affecting your diplomatic relations. Be wary of traditional enemies.",
+            "A charismatic new advisor is pushing for diplomatic revolution. Consider breaking old alliances.",
+            "Drought and poor harvests make securing maritime trade routes crucial this round.",
+            "Recent military victories have boosted morale. Your forces are eager for action.",
+            "Political scandal at home requires foreign policy success to distract the public.",
+            "Royal marriage proposal creates temporary diplomatic opportunity with one power of your choice.",
+            "Nationalist movements are gaining strength. Show strength to neighboring powers.",
+            "Military modernization complete - your forces are particularly effective this round.",
+            "Diplomatic corps in disarray due to internal conflict. Communications may be less diplomatic.",
+            "Industrial breakthrough gives strategic advantage in northern territories.",
+            "Secret society influence makes you suspicious of traditional allies.",
+            "Merchant guilds demand protection of trade routes. Maritime security is priority.",
+            "Revolutionary sentiment spreading - neighboring monarchies seem especially hostile.",
+            "Intelligence suggests imminent betrayal by your strongest ally. Prepare accordingly."
+        ]
+        if False and random.random() > 0.98:
+            misinformation = f"""
+=== INTELLIGENCE ===
+{random.choice(misinformation_random_options)}
+"""
+        engine_recommendations = ''
+        if phase_type != 'M':
+            engine_recommendations = f"""
+=== ENGINE SUGGESTED MOVES ===
+IMPORTANT: These may or may not not align with your diplomatic goals. Feel free to use or ignore them at your discretion.
+{observation["rl_recommendations"][self.power_name]}
+"""
+
+        if phase_type == "M":
+            order_syntax = (
+                "Movement phase order formats:\n"
+                "Hold: 'A <province> H' or 'F <province> H'\n"
+                "Move: 'A <province>-<province>' or 'F <province>-<province>'\n"
+                "Support Hold: 'A <province> S A/F <province>'\n"
+                "Support Move: 'A <province> S A/F <province>-<province>'\n"
+                "Convoy: 'F <province> C A <province>-<province>'\n\n"
+                "Examples:\n"
+                "- 'A PAR H' (army in Paris holds)\n"
+                "- 'F BRE-MAO' (fleet moves Brest to Mid-Atlantic)\n"
+                "- 'A BUR S A PAR' (army in Burgundy supports army in Paris)\n"
+                "- 'F ENG S F NTH-ECH' (fleet in English Channel supports fleet moving North Sea to English Channel)\n"
+                "- 'F ENG C A LON-BRE' (fleet convoys army from London to Brest)"
+                "Notes: "
+                "If convoying your own units, you need to issue an order for both the fleet and the army being convoyed. "
+                "Chain convoy possibilities are not shown on the strategic overview, only single convoys. Chain convoys ARE possible, but you will need to determine them yourself based on the game state. "
+            )
+        elif phase_type == "R":
+            order_syntax = (
+                "Retreat phase order formats:\n"
+                "Retreat: 'A/F <from_province> R <to_province>'\n"
+                "Disband: 'A/F <province> D'\n\n"
+                "Examples:\n"
+                "- 'A PAR R BUR' (retreating army from Paris to Burgundy)\n"
+                "- 'F BRE R MAO' (retreating fleet from Brest to Mid-Atlantic)\n"
+                "- 'A PAR D' (disbanding army in Paris instead of retreating)"
+            )
+        elif phase_type == "A":
+            order_syntax = (
+                "Adjustment phase order formats:\n"
+                "Build: 'A/F <province> B'\n"
+                "Disband: 'A/F <province> D'\n"
+                "Examples:\n"
+                "- 'A PAR B'\n"
+                "- 'F BRE B'\n"
+                "- 'A MUN D'\n"
+            )
+
+        formatted_journal = "\n".join(self._format_journal(self.journal[-50:], phase))
+
+        prompt = f"""
+=== YOUR POWER ===
+Power: {self.power_name}
+Personality: {self.personality}
+
+=== GAME PHASE ===
+Current phase: {phase}
+
+=== TIPS TO WIN AT DIPLOMACY ===
+{GENERAL_PLAY_TIPS}
+{engine_recommendations}
+=== RECENT PRIVATE JOURNAL ===
+{formatted_journal}
+{misinformation}
+=== ORDER SYNTAX ===
+{order_syntax}
+
+=== STRATEGIC OVERVIEW ===
+{observation["strategic_overview"]}
+
+=== GAME STATE ===
+{json.dumps(observation.get("board_state", {}), indent=2)}
+{recent_moves}
+=== LAST PHASE OUTCOMES ===
+{observation.get("last_turn_outcomes", '')}
+
+=== INSTRUCTIONS ===
+Return JSON with exactly two keys in this order:
+1. 'reasoning' - List your analysis of the game board and strategic reasoning (list of strings)
+2. 'orders' - List your orders (list of strings, no limit to number of moves, maximize value)
+
+Use only 3-letter codes for powers. You are in the {phase} phase.
+Output format: {{ "reasoning": [...], "orders": [...]}}
+
+"""
+        return prompt
+
+    def build_journal_prompt(self, reasoning, orders, observation, all_missives_so_far):
+        """
+        Build a prompt to generate the 'journal_update' after orders are decided.
+        No old journal lines are included here to reduce repetition loops.
+        """
+        phase = observation["phase"]
+
+        #combined_missives = all_missives_so_far or []
+        #combined_text_missives = json.dumps(combined_missives, indent=2)
+        
+        prompt = f"""
+=== PHASE & POWER ===
+Phase: {phase}
+Your Power: {self.power_name}
+
+=== GAME STATE ===
+{json.dumps(observation.get("board_state", {}), indent=2)}
+
+=== STRATEGIC OVERVIEW ===
+{observation["strategic_overview"]}
+
+=== REASONING (ALREADY PRODUCED) ===
+{reasoning}
+
+=== FINAL ORDERS (ALREADY DECIDED) ===
+{orders}
+
+=== INSTRUCTIONS ===
+Update your private journal, briefly noting your observations and the move. Return JSON:
+{{
+  "journal_update": ["...", "..."]
+}}
+"""
+        return prompt
