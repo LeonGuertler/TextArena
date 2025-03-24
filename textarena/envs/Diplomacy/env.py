@@ -6,6 +6,26 @@ import textarena as ta
 from textarena.envs.Diplomacy.game_engine import DiplomacyGameEngine
 from textarena.envs.Diplomacy.prompts.prompt import get_state_specific_prompt
 import os
+import logging
+import json
+
+logger = logging.getLogger(__name__)
+
+def extract_json(raw_text):
+    """
+    Extracts the JSON segment from a raw text response.
+    It finds the first '{' and the last '}', then attempts to parse the substring.
+    """
+    start = raw_text.find('{')
+    end = raw_text.rfind('}')
+    
+    if start != -1 and end != -1 and start < end:
+        json_segment = raw_text[start:end+1]
+        try:
+            return json.loads(json_segment)
+        except json.JSONDecodeError:
+            logger.warning("Extracted JSON segment is still invalid.")
+    return None
 
 class DiplomacyEnv(ta.Env):
     """Environment for Diplomacy with negotiation support"""
@@ -40,8 +60,8 @@ class DiplomacyEnv(ta.Env):
 
     def __init__(self, max_turns: int = 30, 
                 negotiations_per_phase: int = 3,
-                request_summaries: bool = True,
-                language: str = "chinese"):
+                # request_summaries: bool = True,
+                language: str = "english"):
         """
         Initialize the Diplomacy game environment
 
@@ -53,12 +73,11 @@ class DiplomacyEnv(ta.Env):
         """
         self.max_turns = max_turns
         self.negotiations_per_phase = negotiations_per_phase
-        self.request_summaries = request_summaries
         self.language = language.lower()
-        self.summary_prompt = "\n\n[Please provide a brief summary of the current game state in 3-5 sentences. Include your position, key threats, and opportunities.]"
         self.player_summaries = {}  # Store summaries by player ID
         self.relationships = {} # Store relationships by player ID
-
+        self.goals = {} # Store goals by player ID
+        
         # Game state
         self.engine = None
         self.player_power_map = {}
@@ -70,6 +89,12 @@ class DiplomacyEnv(ta.Env):
         self.current_year = None
         self.current_phase = None
         self.chat_history: List[Dict[str, Any]] = []
+        
+        # Initialize the phase manager
+        self.phase_manager = DiplomacyPhaseManager(self)
+        self.phase_manager.max_negotiation_rounds = self.negotiations_per_phase
+        self.phase_summary = {}
+        self.experience_prompt = "Please provide your experience update for this phase."
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment and start a new game """
@@ -114,6 +139,10 @@ class DiplomacyEnv(ta.Env):
         
         # Send initial game state announcement to all players
         self._announce_game_state()
+        
+        # Reset the phase manager
+        self.phase_manager = DiplomacyPhaseManager(self)
+        self.phase_manager.max_negotiation_rounds = self.negotiations_per_phase
         
         return self.state
 
@@ -385,38 +414,33 @@ class DiplomacyEnv(ta.Env):
         # Always add the player's full action as an observation to themselves
         self.add_observation(from_id=current_pid, to_id=current_pid, message=action)
         
-        # Process communications and orders
-        actions, game_state_changed = self._process_player_action(current_pid, power_name, action)
+        # Process communications and orders using the phase manager
+        player_actions = {current_pid: action}
+        self.phase_manager.process_actions(player_actions)
         
-        if game_state_changed: # Meaning all players have submitted orders
-            # Check if game is over
-            game_completed = self.engine.game_over
-            if game_completed:
-                self._announce_game_result()
-                done, info = self.state.step(rotate_player=False)
-                info.update({
-                    'reason': "Game Over",
-                    'detailed_reason': f"Game ended after {self.engine.turn_number} turns. The winners are {self.engine.winners}.",
-                    'winners': self.engine.winners,
-                    'winning_players': [self.power_player_map[power] for power in self.engine.winners] if self.engine.winners else [],
-                    'final_sc_count': {power: len(self.engine.powers[power].controlled_centers) for power in self.engine.powers},
-                    'turn_number': self.engine.turn_number
-                })
-                return done, info
-                
-        # Move to next player or negotiate a new round
-        # self._rotate_players()
+        # Check if game is over
+        if self.engine.game_over:
+            self._announce_game_result()
+            done, info = self.state.step(rotate_player=False)
+            info.update({
+                'reason': "Game Over",
+                'detailed_reason': f"Game ended after {self.engine.turn_number} turns. The winners are {self.engine.winners}.",
+                'winners': self.engine.winners,
+                'winning_players': [self.power_player_map[power] for power in self.engine.winners] if self.engine.winners else [],
+                'final_sc_count': {power: len(self.engine.powers[power].controlled_centers) for power in self.engine.powers},
+                'turn_number': self.engine.turn_number
+            })
+            return done, info
         
+        # Move to next player
         done, info = self.state.step(rotate_player=True)
-        # If we've completed a full round of negotiations
-        if self.state.current_player_id == 0 and not game_state_changed:
-            self._advance_negotiation_round()
         
         # Add detailed game state info
         info.update({
             'current_player': current_pid,
             'current_power': power_name,
-            'actions': actions
+            'current_stage': self.phase_manager.current_stage,
+            'negotiation_round': self.phase_manager.negotiation_round
         })
         
         return done, info
@@ -479,6 +503,28 @@ class DiplomacyEnv(ta.Env):
             # Check if all players have submitted orders and it's time to process them
             if len(self.orders_submitted) == len(self.player_power_map):
                 game_state_changed = self._process_orders()
+
+        # Process Phase Summary
+        for match in self.phase_summary_pattern.finditer(action):
+            message = match.group(1)
+            if message:
+                action_summary["phase_summary"].append(message)
+                # Extract JSON from message
+                json_data = extract_json(message)
+                if json_data:
+                    # Add to goals dictionary
+                    self.phase_summary[player_id] = json_data
+                
+        # Process experience updates
+        for match in self.experience_pattern.finditer(action):
+            message = match.group(1)
+            if message:
+                action_summary["experience_updates"].append(message)
+                # Extract JSON from message
+                json_data = extract_json(message)
+                if json_data:
+                    # Add to goals dictionary
+                    self.goals[player_id] = json_data
 
         return action_summary, game_state_changed
 
@@ -896,188 +942,185 @@ class DiplomacyEnv(ta.Env):
         for key, val in self.relationships.items():
             lines.append(f"{key}{val}")
         return "\n".join(lines)
-    
-    def get_phase_summary(self):
-        """Get the phase summary"""
-        return self.phase_summary
-    
-    def set_phase_summary(self, phase_summary: str):
-        """Set the phase summary"""
-        self.phase_summary = phase_summary
 
-    def build_prompt_orders_only(self, observation):
-        """
-        Prompt that requests only 'reasoning' and 'orders'.
-        No journal updates at this step.
-        """
+    def process_negotiation_round(self, player_actions):
+        """Process a negotiation round"""
+        game_state_changed = False
         
-        if observation["your_power"] == 'ITA' and False:# and False:
-            #print('!!!! adjacency map', observation["your_power"])
-            #print(observation["adjacency_map"])
-            print('!!!! strategic overview', observation["your_power"])
-            print(observation["strategic_overview"])
-            print('!!!!!!!!!! valid moves', observation["your_power"])
-            print(observation["valid_moves"])
-
-        recent_moves = ''
-        if observation["your_power"] == 'AUT':
-            # Only including this for the model being benchmarked.
-            # Including the move history may lock the AIs into a repetitive
-            # move pattern.
-            recent_moves = """
-            === RECENT MOVES ===
-{json.dumps(observation.get("recent_moves", {}), indent=2)}
-"""
-
-        phase = observation["phase"]
-        phase_type = phase[-1] if phase else "?"
-        order_syntax = ""
-
-        misinformation = ""
-        misinformation_random_options = [
-            "You've received concerning intelligence about potential betrayal. Be extra cautious in this round.",
-            "Your military advisors are pushing for aggressive expansion. Favor militant options.",
-            "Internal political pressure demands visible diplomatic success. Seek alliance opportunities.",
-            "Recent domestic unrest makes you hesitant to commit forces away from home. Be defensive.",
-            "Your spies have intercepted messages suggesting others are coordinating against you. Act accordingly.",
-            "Economic boom has strengthened your position. Be more assertive in negotiations.",
-            "Religious tensions are affecting your diplomatic relations. Be wary of traditional enemies.",
-            "A charismatic new advisor is pushing for diplomatic revolution. Consider breaking old alliances.",
-            "Drought and poor harvests make securing maritime trade routes crucial this round.",
-            "Recent military victories have boosted morale. Your forces are eager for action.",
-            "Political scandal at home requires foreign policy success to distract the public.",
-            "Royal marriage proposal creates temporary diplomatic opportunity with one power of your choice.",
-            "Nationalist movements are gaining strength. Show strength to neighboring powers.",
-            "Military modernization complete - your forces are particularly effective this round.",
-            "Diplomatic corps in disarray due to internal conflict. Communications may be less diplomatic.",
-            "Industrial breakthrough gives strategic advantage in northern territories.",
-            "Secret society influence makes you suspicious of traditional allies.",
-            "Merchant guilds demand protection of trade routes. Maritime security is priority.",
-            "Revolutionary sentiment spreading - neighboring monarchies seem especially hostile.",
-            "Intelligence suggests imminent betrayal by your strongest ally. Prepare accordingly."
-        ]
-        if False and random.random() > 0.98:
-            misinformation = f"""
-=== INTELLIGENCE ===
-{random.choice(misinformation_random_options)}
-"""
-        engine_recommendations = ''
-        if phase_type != 'M':
-            engine_recommendations = f"""
-=== ENGINE SUGGESTED MOVES ===
-IMPORTANT: These may or may not not align with your diplomatic goals. Feel free to use or ignore them at your discretion.
-{observation["rl_recommendations"][self.power_name]}
-"""
-
-        if phase_type == "M":
-            order_syntax = (
-                "Movement phase order formats:\n"
-                "Hold: 'A <province> H' or 'F <province> H'\n"
-                "Move: 'A <province>-<province>' or 'F <province>-<province>'\n"
-                "Support Hold: 'A <province> S A/F <province>'\n"
-                "Support Move: 'A <province> S A/F <province>-<province>'\n"
-                "Convoy: 'F <province> C A <province>-<province>'\n\n"
-                "Examples:\n"
-                "- 'A PAR H' (army in Paris holds)\n"
-                "- 'F BRE-MAO' (fleet moves Brest to Mid-Atlantic)\n"
-                "- 'A BUR S A PAR' (army in Burgundy supports army in Paris)\n"
-                "- 'F ENG S F NTH-ECH' (fleet in English Channel supports fleet moving North Sea to English Channel)\n"
-                "- 'F ENG C A LON-BRE' (fleet convoys army from London to Brest)"
-                "Notes: "
-                "If convoying your own units, you need to issue an order for both the fleet and the army being convoyed. "
-                "Chain convoy possibilities are not shown on the strategic overview, only single convoys. Chain convoys ARE possible, but you will need to determine them yourself based on the game state. "
-            )
-        elif phase_type == "R":
-            order_syntax = (
-                "Retreat phase order formats:\n"
-                "Retreat: 'A/F <from_province> R <to_province>'\n"
-                "Disband: 'A/F <province> D'\n\n"
-                "Examples:\n"
-                "- 'A PAR R BUR' (retreating army from Paris to Burgundy)\n"
-                "- 'F BRE R MAO' (retreating fleet from Brest to Mid-Atlantic)\n"
-                "- 'A PAR D' (disbanding army in Paris instead of retreating)"
-            )
-        elif phase_type == "A":
-            order_syntax = (
-                "Adjustment phase order formats:\n"
-                "Build: 'A/F <province> B'\n"
-                "Disband: 'A/F <province> D'\n"
-                "Examples:\n"
-                "- 'A PAR B'\n"
-                "- 'F BRE B'\n"
-                "- 'A MUN D'\n"
-            )
-
-        formatted_journal = "\n".join(self._format_journal(self.journal[-50:], phase))
-
-        prompt = f"""
-=== YOUR POWER ===
-Power: {self.power_name}
-Personality: {self.personality}
-
-=== GAME PHASE ===
-Current phase: {phase}
-
-=== TIPS TO WIN AT DIPLOMACY ===
-{GENERAL_PLAY_TIPS}
-{engine_recommendations}
-=== RECENT PRIVATE JOURNAL ===
-{formatted_journal}
-{misinformation}
-=== ORDER SYNTAX ===
-{order_syntax}
-
-=== STRATEGIC OVERVIEW ===
-{observation["strategic_overview"]}
-
-=== GAME STATE ===
-{json.dumps(observation.get("board_state", {}), indent=2)}
-{recent_moves}
-=== LAST PHASE OUTCOMES ===
-{observation.get("last_turn_outcomes", '')}
-
-=== INSTRUCTIONS ===
-Return JSON with exactly two keys in this order:
-1. 'reasoning' - List your analysis of the game board and strategic reasoning (list of strings)
-2. 'orders' - List your orders (list of strings, no limit to number of moves, maximize value)
-
-Use only 3-letter codes for powers. You are in the {phase} phase.
-Output format: {{ "reasoning": [...], "orders": [...]}}
-
-"""
-        return prompt
-
-    def build_journal_prompt(self, reasoning, orders, observation, all_missives_so_far):
-        """
-        Build a prompt to generate the 'journal_update' after orders are decided.
-        No old journal lines are included here to reduce repetition loops.
-        """
-        phase = observation["phase"]
-
-        #combined_missives = all_missives_so_far or []
-        #combined_text_missives = json.dumps(combined_missives, indent=2)
+        for player_id, action in player_actions.items():
+            power_name = self.player_power_map.get(player_id)
+            if not power_name:
+                continue
+            
+            # Process broadcasts
+            for match in self.broadcast_pattern.finditer(action):
+                message = match.group(1) or match.group(2) or match.group(3)
+                if message:
+                    # broadcast to all 
+                    self.add_observation(from_id=player_id, to_id=-1, message=message)
+            
+            # Process whispers
+            for match in self.whisper_pattern.finditer(action):
+                target_id = int(match.group(1))
+                target_power = match.group(2)
+                message = match.group(3)
+                
+                # Validate target_power if provided
+                if target_power and self.player_power_map.get(target_id) != target_power:
+                    continue
+                
+                # add observation to the whisperee
+                self.add_observation(from_id=player_id, to_id=target_id, message=message)
         
-        prompt = f"""
-=== PHASE & POWER ===
-Phase: {phase}
-Your Power: {self.power_name}
+        return game_state_changed
 
-=== GAME STATE ===
-{json.dumps(observation.get("board_state", {}), indent=2)}
+    def process_order_submissions(self, player_actions):
+        """Process order submissions from players"""
+        for player_id, action in player_actions.items():
+            power_name = self.player_power_map.get(player_id)
+            if not power_name:
+                continue
+            
+            # Process order submission
+            for match in self.submit_orders_pattern.finditer(action):
+                orders_text = match.group(1).strip()
+                if orders_text:
+                    self._handle_orders_submission(player_id, power_name, orders_text)
+        
+        # Check if all players have submitted orders
+        return len(self.orders_submitted) == len(self.player_power_map)
 
-=== STRATEGIC OVERVIEW ===
-{observation["strategic_overview"]}
+    def process_experience_updates(self, player_actions):
+        """Process experience updates from players"""
+        for player_id, action in player_actions.items():
+            power_name = self.player_power_map.get(player_id)
+            if not power_name:
+                continue
+            
+            # Process experience updates
+            for match in self.experience_pattern.finditer(action):
+                message = match.group(1)
+                if message:
+                    # Extract JSON from message
+                    json_data = extract_json(message)
+                    if json_data:
+                        # Add to goals dictionary
+                        self.goals[player_id] = json_data
+        
+        # Check if all players have submitted experience updates
+        return len(self.goals) == len(self.player_power_map)
 
-=== REASONING (ALREADY PRODUCED) ===
-{reasoning}
+    def _advance_phase(self):
+        """Advance to the next game phase"""
+        # Reset for next phase
+        self.orders_submitted = set()
+        self.pending_orders = {}
+        self.current_negotiation_round = 0
+        self.goals = {}
+        
+        # Update game state
+        self.current_season = self.engine.season
+        self.current_year = self.engine.year
+        self.current_phase = self.engine.phase
+        self.state.game_state['current_negotiation_round'] = 0
 
-=== FINAL ORDERS (ALREADY DECIDED) ===
-{orders}
+    def get_player_observation(self, player_id):
+        """Get observation for a specific player"""
+        # This method should return the observation for the specified player
+        # You'll need to implement this based on your game's requirements
+        observation = {
+            "your_power": self.player_power_map.get(player_id),
+            "phase": f"{self.current_season.value}{self.current_year}{self.current_phase.value[0]}",
+            "strategic_overview": self.format_power_units_and_centers(player_id),
+            "board_state": {
+                "powers": {power: {
+                    "home_centers": self.engine.powers[power].home_centers,
+                    "controlled_centers": self.engine.powers[power].controlled_centers,
+                    "units": [str(unit) for unit in self.engine.powers[power].units],
+                } for power in self.player_power_map.values()},
+                "season": self.current_season.value,
+                "year": self.current_year,
+                "phase": self.current_phase.value
+            },
+            "valid_moves": self.engine.get_possible_orders(self.player_power_map[player_id])
+        }
+        
+        # Add RL recommendations if available
+        observation["rl_recommendations"] = {}
+        
+        return observation
 
-=== INSTRUCTIONS ===
-Update your private journal, briefly noting your observations and the move. Return JSON:
-{{
-  "journal_update": ["...", "..."]
-}}
-"""
-        return prompt
+    # Add the experience pattern regex
+    experience_pattern = re.compile(
+        r"\[Experience Update\]([\s\S]*?)(?=\[|$)",
+        re.IGNORECASE
+    )
+
+    # Add the phase summary pattern regex
+    phase_summary_pattern = re.compile(
+        r"\[Phase Summary\]([\s\S]*?)(?=\[|$)",
+        re.IGNORECASE
+    )
+
+class DiplomacyPhaseManager:
+    def __init__(self, env):
+        self.env = env
+        self.current_stage = "negotiation"
+        self.negotiation_round = 0
+        self.max_negotiation_rounds = 3
+        
+    def process_actions(self, player_actions):
+        if self.current_stage == "negotiation":
+            self._process_negotiation(player_actions)
+        elif self.current_stage == "orders":
+            self._process_orders(player_actions)
+        elif self.current_stage == "experience":
+            self._process_experience_updates(player_actions)
+    
+    def _process_negotiation(self, player_actions):
+        game_state_changed = self.env.process_negotiation_round(player_actions)
+        
+        # Check if we should move to orders stage
+        self.negotiation_round += 1
+        if self.negotiation_round >= self.max_negotiation_rounds - 1:
+            self.current_stage = "orders"
+            self._prompt_for_orders()
+    
+    def _process_orders(self, player_actions):
+        # Process order submissions
+        all_orders_submitted = self.env.process_order_submissions(player_actions)
+        
+        if all_orders_submitted:
+            # Process orders and generate phase summary
+            self.env._process_orders()
+            self.env.generate_phase_summary(self.env.get_phase_history())
+            
+            # Move to experience update stage
+            self.current_stage = "experience"
+            self._prompt_for_experience()
+    
+    def _process_experience_updates(self, player_actions):
+        # Process experience updates
+        all_experiences_submitted = self.env.process_experience_updates(player_actions)
+        
+        if all_experiences_submitted:
+            # Advance to next phase
+            self.env._advance_phase()
+            self.env._announce_game_state()
+            
+            # Reset for next phase
+            self.current_stage = "negotiation"
+            self.negotiation_round = 0
+    
+    def _prompt_for_orders(self):
+        # Send order prompts to all players
+        for player_id in self.env.player_power_map:
+            observation = self.env.get_player_observation(player_id)
+            prompt = self.env.build_prompt_orders_only(observation)
+            self.env.add_observation(from_id=ta.GAME_ID, to_id=player_id, message=prompt)
+    
+    def _prompt_for_experience(self):
+        # Send experience update prompts to all players
+        for player_id in self.env.player_power_map:
+            prompt = self.env.experience_prompt
+            self.env.add_observation(from_id=ta.GAME_ID, to_id=player_id, message=prompt)
