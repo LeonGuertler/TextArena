@@ -1210,9 +1210,9 @@ class TwoRoomsAndABoomEnv(ta.Env):
         sanitized_action = action.strip()
 
         # Limit message length if needed
-        MAX_MESSAGE_LENGTH = 500  # Characters
+        MAX_MESSAGE_LENGTH = float('inf')  # Characters
         if len(sanitized_action) > MAX_MESSAGE_LENGTH:
-            sanitized_action = sanitized_action[:MAX_MESSAGE_LENGTH] + "... (message truncated)"
+            sanitized_action = sanitized_action[:] + "... (message truncated)"
             truncate_notice = "Your message was truncated due to length."
             self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=truncate_notice)
 
