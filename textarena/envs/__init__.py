@@ -93,7 +93,7 @@ register(id="Checkers-v0-long", entry_point="textarena.envs.Checkers.env:Checker
 register(id="ConnectFour-v0", entry_point="textarena.envs.ConnectFour.env:ConnectFourEnv", is_open=True, num_rows=6, num_cols=7)
 register(id="ConnectFour-v0-blind", entry_point="textarena.envs.ConnectFour.env:ConnectFourEnv", is_open=False, num_rows=6, num_cols=7)
 register(id="ConnectFour-v0-large", entry_point="textarena.envs.ConnectFour.env:ConnectFourEnv", is_open=True, num_rows=12, num_cols=15)
- 
+
 # DontSayIt (two-player)
 register(id="DontSayIt-v0", entry_point="textarena.envs.DontSayIt.env:DontSayItEnv", hardcore=False, max_turns=20)
 register(id="DontSayIt-v0-hardcore", entry_point="textarena.envs.DontSayIt.env:DontSayItEnv", hardcore=True, max_turns=30)
@@ -234,12 +234,14 @@ register(id="CharacterConclave-v0-extreme", entry_point="textarena.envs.Characte
 register(id="Diplomacy-v0", entry_point="textarena.envs.Diplomacy.env:DiplomacyEnv", max_turns=1_000)
 
 # SecretMafia (5-15 players)
-register(id="SecretMafia-v0", entry_point="textarena.envs.SecretMafia.env:SecretMafiaEnv", mafia_ratio=0.25, discussion_rounds=3) 
+register(id="SecretMafia-v0", entry_point="textarena.envs.SecretMafia.env:SecretMafiaEnv", mafia_ratio=0.25, discussion_rounds=3)
+
+# TwoRoomsAndABoom (6-20 players)
+register(id="TwoRoomsAndABoom-v0", entry_point="textarena.envs.TwoRoomsAndABoom.env:TwoRoomsAndABoomEnv", num_rounds=3, cards_per_room=3)
 
 
 
-
-# classical evals as single-player envs 
+# classical evals as single-player envs
 
 # GSM8K - Grade School Math Word Problems
 register(id="GSM8K-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="gsm8k/test.jsonl", n_samples=None)
