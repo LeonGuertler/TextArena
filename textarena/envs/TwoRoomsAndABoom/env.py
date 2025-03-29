@@ -75,6 +75,10 @@ class TwoRoomsAndABoomEnv(ta.Env):
         self.rooms = [[], []]  # Two rooms
         self.leaders = [None, None]  # Leaders for each room
 
+        # Use cards_per_room to ensure we have at least that many players per room
+        # But make sure we don't exceed the total number of players
+        min_room_size = min(self.cards_per_room, num_players // 2)
+
         # Determine how many players per team
         half_players = num_players // 2
 
@@ -101,7 +105,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
         # Distribute players to rooms (initially equal distribution)
         all_players = list(range(num_players))
         random.shuffle(all_players)
-        room_size = num_players // 2
+        room_size = max(min_room_size, num_players // 2)  # Ensure minimum room size
 
         self.rooms[0] = all_players[:room_size]
         self.rooms[1] = all_players[room_size:]
@@ -195,19 +199,27 @@ class TwoRoomsAndABoomEnv(ta.Env):
             for room_idx, leader_id in enumerate(self.state.game_state["leaders"]):
                 # Get all players in the room except the leader
                 room_players = [pid for pid in self.state.game_state["rooms"][room_idx] if pid != leader_id]
-                player_options = ", ".join([f"'[{pid}]'" for pid in room_players])
 
-                leader_observation = (
-                    f"Round {self.state.game_state['round']}: As the Leader of Room {room_idx}, "
-                    f"you must select one player to trade with the other room.\n"
-                    f"Simply reply in the following format: '[Player X]' or '[X]'\n"
-                    f"Valid options: {player_options}"
-                )
+                # Only proceed if there are players to select
+                if room_players:
+                    player_options = ", ".join([f"'[{pid}]'" for pid in room_players])
 
-                self.state.add_observation(from_id=ta.GAME_ID, to_id=leader_id, message=leader_observation)
+                    leader_observation = (
+                        f"Round {self.state.game_state['round']}: As the Leader of Room {room_idx}, "
+                        f"you must select one player to trade with the other room.\n"
+                        f"Simply reply in the following format: '[Player X]' or '[X]'\n"
+                        f"Valid options: {player_options}"
+                    )
+
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=leader_id, message=leader_observation)
 
             # Leaders act in sequence
-            self.next_player_ids = self.state.game_state["leaders"].copy()
+            self.next_player_ids = [leader for leader in self.state.game_state["leaders"] if leader is not None]
+
+            # If no leaders are left, move to the next phase
+            if not self.next_player_ids:
+                self.state.game_state["current_phase"] = "Trade_Execution"
+                self._phase_transition_player_prompts(new_phase="Trade_Execution")
 
         elif new_phase == "Trade_Execution":
             # Execute the trade and inform players
@@ -246,6 +258,9 @@ class TwoRoomsAndABoomEnv(ta.Env):
                 # Advance to the next round
                 self.state.game_state["round"] += 1
 
+                # Move to Discussion phase for the next round
+                self.state.game_state["current_phase"] = "Discussion"
+                self._phase_transition_player_prompts(new_phase="Discussion")
         else:
             raise Exception(f"{new_phase} phase not recognized.")
 
@@ -262,15 +277,21 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
             if current_phase == "Discussion":
                 new_phase = "Leader_Selection"
+                self.state.game_state["current_phase"] = new_phase
+                self._phase_transition_player_prompts(new_phase=new_phase)
             elif current_phase == "Leader_Selection":
                 new_phase = "Trade_Execution"
+                self.state.game_state["current_phase"] = new_phase
+                self._phase_transition_player_prompts(new_phase=new_phase)
             elif current_phase == "Trade_Execution":
-                new_phase = "Discussion"
-
-            self.state.game_state["current_phase"] = new_phase
-            self._phase_transition_player_prompts(new_phase=new_phase)
+                # Trade_Execution phase is handled automatically by _phase_transition_player_prompts
+                pass
 
         if not self.next_player_ids:
+            # If there are no more players to act this step, try again after phase transition
+            # But prevent infinite recursion if something is wrong
+            if self.state.terminal:
+                return
             self._transition_current_pid()
         else:
             # Pop next pid and update state
@@ -292,32 +313,41 @@ class TwoRoomsAndABoomEnv(ta.Env):
                     bomber_room = room_idx
 
         # Determine winner
-        if president_room == bomber_room:
-            # Red team wins
-            red_team_pids = [pid for pid, role in self.state.game_state["player_roles"].items()
-                          if role == "Red" or role == "Bomber"]
-            reason = "The Red Team wins! The Bomber and President are in the same room."
-            self.state.set_winners(player_ids=red_team_pids, reason=reason)
+        if president_room is not None and bomber_room is not None:
+            if president_room == bomber_room:
+                # Red team wins
+                red_team_pids = [pid for pid, role in self.state.game_state["player_roles"].items()
+                            if role == "Red" or role == "Bomber"]
+                reason = "The Red Team wins! The Bomber and President are in the same room."
+                self.state.set_winners(player_ids=red_team_pids, reason=reason)
+            else:
+                # Blue team wins
+                blue_team_pids = [pid for pid, role in self.state.game_state["player_roles"].items()
+                            if role == "Blue" or role == "President"]
+                reason = "The Blue Team wins! The Bomber and President are in different rooms."
+                self.state.set_winners(player_ids=blue_team_pids, reason=reason)
         else:
-            # Blue team wins
+            # Default to Blue team win if roles can't be found (shouldn't happen in normal gameplay)
             blue_team_pids = [pid for pid, role in self.state.game_state["player_roles"].items()
-                           if role == "Blue" or role == "President"]
-            reason = "The Blue Team wins! The Bomber and President are in different rooms."
+                            if role == "Blue" or role == "President"]
+            reason = "The Blue Team wins by default due to confusion about roles."
             self.state.set_winners(player_ids=blue_team_pids, reason=reason)
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         """ Process a single step (action) from the current player """
         current_pid = self.state.current_player_id
+        current_phase = self.state.game_state["current_phase"]
 
         # Check game phase
-        if self.state.game_state["current_phase"] == "Discussion":
+        if current_phase == "Discussion":
             self._handle_discussion(current_pid=current_pid, action=action)
-
-        elif self.state.game_state["current_phase"] == "Leader_Selection":
+        elif current_phase == "Leader_Selection":
             self._handle_leader_selection(current_pid=current_pid, action=action)
+        # Trade_Execution phase doesn't require player actions
 
-        # Rotate players
-        self._transition_current_pid()
+        # Only transition if the move wasn't invalid
+        if not self.state.prevent_player_change:
+            self._transition_current_pid()
 
         return self.state.step(rotate_player=False)
 
@@ -334,16 +364,34 @@ class TwoRoomsAndABoomEnv(ta.Env):
     def _handle_leader_selection(self, current_pid, action):
         """ Handle leader selection of hostages to trade """
         # Verify this is actually a leader
+        if current_pid not in self.state.game_state["leaders"]:
+            self.state.set_invalid_move(
+                player_id=current_pid,
+                reason="Only room leaders can select hostages."
+            )
+            return
+
         room_idx = 0 if current_pid == self.state.game_state["leaders"][0] else 1
 
         # Extract and validate selection
         match = self.target_pattern.search(action)
         if not match:
             # Invalid selection format
-            self.state.set_invalid_move(player_id=current_pid, reason="The selection was not submitted in the correct format.")
+            self.state.set_invalid_move(
+                player_id=current_pid,
+                reason="The selection was not submitted in the correct format."
+            )
             return
 
-        selected_pid = int(match.group(1))
+        try:
+            selected_pid = int(match.group(1))
+        except ValueError:
+            # Handle case where match isn't a valid integer
+            self.state.set_invalid_move(
+                player_id=current_pid,
+                reason="Selected player ID must be a number."
+            )
+            return
 
         # Verify the selected player is in the leader's room
         if selected_pid not in self.state.game_state["rooms"][room_idx]:
