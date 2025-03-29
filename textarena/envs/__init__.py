@@ -237,7 +237,7 @@ register(id="Diplomacy-v0", entry_point="textarena.envs.Diplomacy.env:DiplomacyE
 register(id="SecretMafia-v0", entry_point="textarena.envs.SecretMafia.env:SecretMafiaEnv", mafia_ratio=0.25, discussion_rounds=3)
 
 # TwoRoomsAndABoom (6-20 players)
-register(id="TwoRoomsAndABoom-v0", entry_point="textarena.envs.TwoRoomsAndABoom.env:TwoRoomsAndABoomEnv", num_rounds=3, cards_per_room=3)
+register(id="TwoRoomsAndABoom-v0", entry_point="textarena.envs.TwoRoomsAndABoom.env:TwoRoomsAndABoomEnv", num_rounds=3, cards_per_room=3, discussion_rounds=2)
 
 
 

@@ -1,12 +1,32 @@
-import re, random
+import re
+import random
 from typing import Any, Dict, Optional, Tuple, List, Set
+from collections import deque
 
 import textarena as ta
 
+
 class TwoRoomsAndABoomEnv(ta.Env):
-    # Message patterns for player actions and card reveals
+    """
+    Two Rooms and a Boom game environment for the textarena framework.
+
+    A social deduction game where players are split between two teams (Red and Blue) and
+    placed in two different rooms. The Red Team aims to get the Bomber and President in
+    the same room by the end, while the Blue Team wants to keep them in different rooms.
+    """
+
+    # Message patterns for player actions and card reveals (improved with more specific patterns)
     target_pattern = re.compile(r'.*\[(?:player\s*)?(\d+)\].*', re.IGNORECASE)
-    reveal_pattern = re.compile(r'.*reveal.*(?:card|role).*', re.IGNORECASE)
+    reveal_pattern = re.compile(r'.*\breveal\b.*(?:\bcard\b|\brole\b).*', re.IGNORECASE)
+
+    # Maximum number of role reveals per player per game
+    MAX_REVEALS_PER_PLAYER = 5
+
+    # Maximum message history per room
+    MAX_MESSAGE_HISTORY = 200
+
+    # Maximum recursion depth for player transitions
+    MAX_RECURSION_DEPTH = 10
 
     def __init__(self, num_rounds: int = 3, cards_per_room: int = 3, discussion_rounds: int = 2):
         """
@@ -17,14 +37,18 @@ class TwoRoomsAndABoomEnv(ta.Env):
             cards_per_room (int): Number of cards to initially place in each room (default: 3)
             discussion_rounds (int): Number of discussion turns per player per round (default: 2)
         """
+        # Game configuration parameters
         self.num_rounds = num_rounds
         self.cards_per_room = cards_per_room
         self.discussion_rounds = discussion_rounds
 
+        # For tracking recursion depth in _transition_current_pid to avoid infinite recursion
+        self.transition_recursion_depth = 0
+
         # History tracking for messages and actions
         self.history = []
 
-        # Role definitions
+        # Role definitions with team affiliations and descriptions
         self.roles = {
             "Red": {
                 "team": "Red Team",
@@ -50,7 +74,13 @@ class TwoRoomsAndABoomEnv(ta.Env):
         return ["round", "rooms", "player_roles", "leaders", "current_phase"]
 
     def reset(self, num_players: int, seed: Optional[int] = None):
-        """ Reset the environment """
+        """
+        Reset the environment for a new game
+
+        Args:
+            num_players (int): Number of players in the game
+            seed (Optional[int]): Random seed for reproducibility
+        """
         # Validate minimum and maximum players
         min_players = 6  # Absolute minimum for gameplay
         max_players = 20  # Reasonable maximum for communication
@@ -60,25 +90,35 @@ class TwoRoomsAndABoomEnv(ta.Env):
         if num_players > max_players:
             raise ValueError(f"Game supports a maximum of {max_players} players")
 
+        # Initialize state
         self.state = ta.State(num_players=num_players, min_players=min_players, max_players=max_players)
 
         # Initialize game state with seed for reproducibility
         if seed is not None:
             random.seed(seed)
 
-        # Initialize game components
+        # Initialize game components and assign roles
         self._assign_roles_and_rooms(num_players)
+
+        # Reset recursion depth counter
+        self.transition_recursion_depth = 0
 
         # Initialize message history
         self.history = []
-        self.revealed_roles = {i: [] for i in range(num_players)}  # Track which roles each player has seen
 
-        # Store initial room assignments to check for leaders being traded
+        # Track which roles each player has seen
+        self.revealed_roles = {i: [] for i in range(num_players)}
+
+        # Count reveals per player
+        self.reveal_counts = {i: 0 for i in range(num_players)}
+
+        # Store initial room assignments for reference
         self.original_room_assignments = {}
         for room_idx, room_players in enumerate(self.rooms):
             for pid in room_players:
                 self.original_room_assignments[pid] = room_idx
 
+        # Create initial game state
         game_state = {
             "round": 1,
             "current_phase": "Discussion",
@@ -88,61 +128,204 @@ class TwoRoomsAndABoomEnv(ta.Env):
             "hostages_to_trade": {},
             "message_history": {},  # Track message history per room
             "revealed_roles": self.revealed_roles,
+            "reveal_counts": self.reveal_counts,
             "original_room_assignments": self.original_room_assignments,
             "team_discussions": {},  # Private team discussions
         }
 
+        # Reset state with game setup
         self.state.reset(seed=seed, game_state=game_state, player_prompt_function=self._generate_player_prompt)
 
         # Start with Discussion phase
         self._phase_transition_player_prompts(new_phase="Discussion")
         self._transition_current_pid()
 
+        # Final validation after initialization
+        self._validate_game_state()
+
     def _validate_game_state(self):
-        """Validate game state consistency to catch bugs"""
-        # Check if every player is in exactly one room
-        all_players = set(range(self.state.num_players))
-        room_players = set(self.state.game_state["rooms"][0] + self.state.game_state["rooms"][1])
+        """
+        Validate game state consistency to catch bugs and perform recovery actions
+        """
+        try:
+            # Check if every player is in exactly one room
+            all_players = set(range(self.state.num_players))
+            room_players = set(self.state.game_state["rooms"][0] + self.state.game_state["rooms"][1])
 
-        # All players should be in a room
-        if all_players != room_players:
-            missing = all_players - room_players
-            duplicates = []
+            # All players should be in a room
+            if all_players != room_players:
+                missing = all_players - room_players
+                duplicates = []
 
-            for p in all_players:
-                if (p in self.state.game_state["rooms"][0] and
-                    p in self.state.game_state["rooms"][1]):
-                    duplicates.append(p)
+                # Check for duplicates
+                for p in all_players:
+                    if (p in self.state.game_state["rooms"][0] and
+                        p in self.state.game_state["rooms"][1]):
+                        duplicates.append(p)
 
-            if missing:
-                raise ValueError(f"Players {missing} not assigned to any room")
-            if duplicates:
-                raise ValueError(f"Players {duplicates} assigned to multiple rooms")
+                # Handle missing players
+                if missing:
+                    for p in missing:
+                        # Add to smaller room for balance
+                        room_idx = 0 if len(self.state.game_state["rooms"][0]) <= len(self.state.game_state["rooms"][1]) else 1
+                        self.state.game_state["rooms"][room_idx].append(p)
+                    self.state.add_observation(
+                        from_id=ta.GAME_ID,
+                        to_id=-1,
+                        message=f"Game state recovery: Players {missing} were not assigned to any room and have been placed."
+                    )
 
-        # Verify both rooms have leaders
-        if None in self.state.game_state["leaders"]:
-            room_idx = self.state.game_state["leaders"].index(None)
-            if self.state.game_state["rooms"][room_idx]:  # If room has players but no leader
-                # Assign new leader
-                self.state.game_state["leaders"][room_idx] = random.choice(self.state.game_state["rooms"][room_idx])
+                # Handle duplicate players
+                if duplicates:
+                    for p in duplicates:
+                        # Remove from the larger room
+                        if len(self.state.game_state["rooms"][0]) >= len(self.state.game_state["rooms"][1]):
+                            self.state.game_state["rooms"][0].remove(p)
+                        else:
+                            self.state.game_state["rooms"][1].remove(p)
+                    self.state.add_observation(
+                        from_id=ta.GAME_ID,
+                        to_id=-1,
+                        message=f"Game state recovery: Players {duplicates} were assigned to multiple rooms and have been fixed."
+                    )
 
-                # Notify players in the room
-                message = f"Room {room_idx} had no leader. Player {self.state.game_state['leaders'][room_idx]} has been appointed as the new leader."
-                for pid in self.state.game_state["rooms"][room_idx]:
-                    self.state.add_observation(from_id=ta.GAME_ID, to_id=pid, message=message)
+            # Verify both rooms have leaders
+            for room_idx in range(2):
+                # Skip if room is empty
+                if not self.state.game_state["rooms"][room_idx]:
+                    self.state.game_state["leaders"][room_idx] = None
+                    continue
 
-        # Verify special roles exist
-        president_exists = False
-        bomber_exists = False
+                # If the leader is None or not in this room, assign a new one
+                if (self.state.game_state["leaders"][room_idx] is None or
+                    self.state.game_state["leaders"][room_idx] not in self.state.game_state["rooms"][room_idx]):
+                    # Choose a new leader, prioritizing regular players over special roles
+                    regular_players = [
+                        pid for pid in self.state.game_state["rooms"][room_idx]
+                        if self.state.game_state["player_roles"][pid] not in ["President", "Bomber"]
+                    ]
 
-        for pid, role in self.state.game_state["player_roles"].items():
-            if role == "President":
-                president_exists = True
-            elif role == "Bomber":
-                bomber_exists = True
+                    if regular_players:
+                        new_leader = random.choice(regular_players)
+                    else:
+                        new_leader = random.choice(self.state.game_state["rooms"][room_idx])
 
-        if not president_exists or not bomber_exists:
-            raise ValueError(f"Special roles missing: President={president_exists}, Bomber={bomber_exists}")
+                    self.state.game_state["leaders"][room_idx] = new_leader
+
+                    # Notify players in the room
+                    message = f"Room {room_idx} has a new leader: Player {new_leader}"
+                    for pid in self.state.game_state["rooms"][room_idx]:
+                        self.state.add_observation(from_id=ta.GAME_ID, to_id=pid, message=message)
+
+            # Verify special roles exist
+            president_exists = False
+            bomber_exists = False
+
+            for pid, role in self.state.game_state["player_roles"].items():
+                if role == "President":
+                    president_exists = True
+                elif role == "Bomber":
+                    bomber_exists = True
+
+            # Critical error if special roles are missing - this should never happen
+            # but we have a recovery path just in case
+            if not president_exists or not bomber_exists:
+                error_msg = f"Critical: Special roles missing: President={president_exists}, Bomber={bomber_exists}"
+                self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=error_msg)
+
+                # Emergency recovery - assign missing roles if needed
+                all_pids = list(range(self.state.num_players))
+
+                if not president_exists:
+                    # Find a Blue player to make President
+                    blue_players = [
+                        pid for pid, role in self.state.game_state["player_roles"].items()
+                        if "Blue" in self.roles[role]["team"] and role != "Bomber"
+                    ]
+                    if blue_players:
+                        new_president = random.choice(blue_players)
+                    else:
+                        # Last resort - pick any non-Bomber player
+                        non_bombers = [
+                            pid for pid, role in self.state.game_state["player_roles"].items()
+                            if role != "Bomber"
+                        ]
+                        new_president = random.choice(non_bombers if non_bombers else all_pids)
+
+                    self.state.game_state["player_roles"][new_president] = "President"
+                    recovery_msg = f"Recovery: Player {new_president} has been assigned as President."
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=recovery_msg)
+
+                if not bomber_exists:
+                    # Find a Red player to make Bomber
+                    red_players = [
+                        pid for pid, role in self.state.game_state["player_roles"].items()
+                        if "Red" in self.roles[role]["team"] and role != "President"
+                    ]
+                    if red_players:
+                        new_bomber = random.choice(red_players)
+                    else:
+                        # Last resort - pick any non-President player
+                        non_presidents = [
+                            pid for pid, role in self.state.game_state["player_roles"].items()
+                            if role != "President"
+                        ]
+                        new_bomber = random.choice(non_presidents if non_presidents else all_pids)
+
+                    self.state.game_state["player_roles"][new_bomber] = "Bomber"
+                    recovery_msg = f"Recovery: Player {new_bomber} has been assigned as Bomber."
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=recovery_msg)
+
+            # Verify room balance is reasonable (no completely empty rooms if possible)
+            if not self.state.game_state["rooms"][0] and self.state.game_state["rooms"][1]:
+                # Room 0 is empty but Room 1 has players
+                if len(self.state.game_state["rooms"][1]) >= 2:
+                    # Move half the players to balance rooms
+                    players_to_move = self.state.game_state["rooms"][1][:len(self.state.game_state["rooms"][1])//2]
+                    for p in players_to_move:
+                        self.state.game_state["rooms"][0].append(p)
+                        self.state.game_state["rooms"][1].remove(p)
+
+                    balance_msg = f"Room balance adjusted: {len(players_to_move)} players moved to Room 0"
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=balance_msg)
+
+            elif not self.state.game_state["rooms"][1] and self.state.game_state["rooms"][0]:
+                # Room 1 is empty but Room 0 has players
+                if len(self.state.game_state["rooms"][0]) >= 2:
+                    # Move half the players to balance rooms
+                    players_to_move = self.state.game_state["rooms"][0][:len(self.state.game_state["rooms"][0])//2]
+                    for p in players_to_move:
+                        self.state.game_state["rooms"][1].append(p)
+                        self.state.game_state["rooms"][0].remove(p)
+
+                    balance_msg = f"Room balance adjusted: {len(players_to_move)} players moved to Room 1"
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=balance_msg)
+
+            # Check for extreme imbalance between rooms
+            if (self.state.game_state["rooms"][0] and self.state.game_state["rooms"][1] and
+                (len(self.state.game_state["rooms"][0]) > 3 * len(self.state.game_state["rooms"][1]) or
+                 len(self.state.game_state["rooms"][1]) > 3 * len(self.state.game_state["rooms"][0]))):
+                # Identify larger and smaller rooms
+                larger_room = 0 if len(self.state.game_state["rooms"][0]) > len(self.state.game_state["rooms"][1]) else 1
+                smaller_room = 1 - larger_room
+
+                # Calculate number of players to move for better balance
+                imbalance = len(self.state.game_state["rooms"][larger_room]) - len(self.state.game_state["rooms"][smaller_room])
+                players_to_move = self.state.game_state["rooms"][larger_room][:imbalance//2]
+
+                # Move players
+                for p in players_to_move:
+                    self.state.game_state["rooms"][smaller_room].append(p)
+                    self.state.game_state["rooms"][larger_room].remove(p)
+
+                if players_to_move:
+                    rebalance_msg = f"Extreme room imbalance corrected: {len(players_to_move)} players moved to Room {smaller_room}"
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=rebalance_msg)
+
+        except Exception as e:
+            # Catch-all for unexpected errors in validation
+            error_msg = f"Game state validation error: {str(e)}"
+            self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=error_msg)
 
     def _assign_roles_and_rooms(self, num_players: int):
         """
@@ -176,25 +359,28 @@ class TwoRoomsAndABoomEnv(ta.Env):
         bomber_idx = random.choice(red_indices)
         role_pool[bomber_idx] = "Bomber"
 
-        # Shuffle and assign roles
-        random.shuffle(role_pool)
+        # Shuffle and assign roles - directly map to player IDs to avoid confusion
         for i in range(num_players):
             self.player_roles[i] = role_pool[i]
 
-        # Find the President and Bomber IDs
+        # Find the President and Bomber IDs after direct assignment
         president_id = None
         bomber_id = None
-        for pid, role in enumerate(role_pool):
+        for pid, role in self.player_roles.items():
             if role == "President":
                 president_id = pid
             elif role == "Bomber":
                 bomber_id = pid
 
+        # Ensure both special roles were assigned
+        if president_id is None or bomber_id is None:
+            raise ValueError("Failed to assign special roles properly")
+
         # Initially distribute players to rooms - ensuring President and Bomber in different rooms
         all_players = list(range(num_players))
         random.shuffle(all_players)
 
-        # Remove President and Bomber from initial list
+        # Remove President and Bomber from initial list to place them separately
         all_players.remove(president_id)
         all_players.remove(bomber_id)
 
@@ -215,8 +401,9 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
         # Assign leaders for each room, avoiding special roles if possible
         for room_idx in range(2):
+            # Prefer regular players as leaders
             regular_players = [pid for pid in self.rooms[room_idx]
-                            if self.player_roles[pid] not in ["President", "Bomber"]]
+                              if self.player_roles[pid] not in ["President", "Bomber"]]
 
             if regular_players:
                 self.leaders[room_idx] = random.choice(regular_players)
@@ -225,12 +412,29 @@ class TwoRoomsAndABoomEnv(ta.Env):
                 self.leaders[room_idx] = random.choice(self.rooms[room_idx])
 
     def _generate_player_prompt(self, player_id: int, game_state: Dict[str, Any]) -> str:
-        """ Generate the initial prompt for each player, including their role and objectives """
+        """
+        Generate the initial prompt for each player, including their role and objectives
+
+        Args:
+            player_id (int): The player's ID
+            game_state (Dict[str, Any]): Current game state
+
+        Returns:
+            str: Personalized prompt for the player
+        """
+        # Get player's role and team info
         role = game_state["player_roles"][player_id]
         role_info = self.roles[role]
 
         # Determine which room the player is in
-        player_room = 0 if player_id in game_state["rooms"][0] else 1
+        player_room = None
+        if player_id in game_state["rooms"][0]:
+            player_room = 0
+        elif player_id in game_state["rooms"][1]:
+            player_room = 1
+        else:
+            # Failsafe for missing room assignment
+            player_room = "unknown"
 
         # Determine if player is a leader
         is_leader = player_id in game_state["leaders"]
@@ -247,7 +451,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
             f"The game progresses through {self.num_rounds} rounds:\n"
             f"• In each round, players in the same room can talk to each other\n"
             f"• Room Leaders can choose one player to trade to the other room\n"
-            f"• After discussion, you can choose to privately reveal your card to another player\n"
+            f"• During discussions, you can choose to privately reveal your card to another player\n"
             f"• At the end of all rounds, the game checks which room contains the President and Bomber\n\n"
             f"The Red Team wins if the President and Bomber are in the same room at the end.\n"
             f"The Blue Team wins if the President and Bomber are in different rooms at the end.\n\n"
@@ -282,6 +486,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
             "Role Revealing:\n"
             "• During discussions, you can say 'I reveal my card to [Player X]' to show your role to another player\n"
             "• The other player will receive a private message with your true role\n"
+            f"• You can reveal your role up to {self.MAX_REVEALS_PER_PLAYER} times per game\n"
             "• This is a way to build trust, but be careful who you reveal to!\n\n"
         )
 
@@ -299,6 +504,9 @@ class TwoRoomsAndABoomEnv(ta.Env):
         """
         During a phase transition, provide relevant prompts to all players
         and update game state
+
+        Args:
+            new_phase (str): The new game phase to transition to
         """
         # Validate game state before any phase transition to catch issues early
         self._validate_game_state()
@@ -306,6 +514,10 @@ class TwoRoomsAndABoomEnv(ta.Env):
         if new_phase == "Discussion":
             # All players in each room can discuss with each other
             for room_idx, room_players in enumerate(self.state.game_state["rooms"]):
+                # Skip empty rooms
+                if not room_players:
+                    continue
+
                 # Initialize message history for this room if not present
                 if str(room_idx) not in self.state.game_state["message_history"]:
                     self.state.game_state["message_history"][str(room_idx)] = []
@@ -371,6 +583,10 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
             for _ in range(self.discussion_rounds):  # Each player gets multiple turns to speak
                 for room_players in self.state.game_state["rooms"]:
+                    # Skip empty rooms
+                    if not room_players:
+                        continue
+
                     # Shuffle players within each room for variety
                     shuffled_players = room_players.copy()
                     random.shuffle(shuffled_players)
@@ -379,23 +595,36 @@ class TwoRoomsAndABoomEnv(ta.Env):
         elif new_phase == "Leader_Selection":
             # Check each room for leader status
             for room_idx in range(2):
+                # Skip empty rooms
+                if not self.state.game_state["rooms"][room_idx]:
+                    self.state.game_state["leaders"][room_idx] = None
+                    continue
+
                 # If the leader is no longer in this room (traded), assign a new one
                 current_leader = self.state.game_state["leaders"][room_idx]
                 if current_leader not in self.state.game_state["rooms"][room_idx]:
-                    # Select a new leader from the room
-                    if self.state.game_state["rooms"][room_idx]:  # Make sure room is not empty
-                        new_leader = random.choice(self.state.game_state["rooms"][room_idx])
-                        self.state.game_state["leaders"][room_idx] = new_leader
+                    # Select a new leader from the room, preferring regular players
+                    regular_players = [
+                        pid for pid in self.state.game_state["rooms"][room_idx]
+                        if self.state.game_state["player_roles"][pid] not in ["President", "Bomber"]
+                    ]
 
-                        # Notify all players in the room about the new leader
-                        leader_change_msg = f"Room {room_idx} has a new leader: Player {new_leader}"
-                        for pid in self.state.game_state["rooms"][room_idx]:
-                            self.state.add_observation(from_id=ta.GAME_ID, to_id=pid, message=leader_change_msg)
+                    if regular_players:
+                        new_leader = random.choice(regular_players)
+                    else:
+                        new_leader = random.choice(self.state.game_state["rooms"][room_idx])
+
+                    self.state.game_state["leaders"][room_idx] = new_leader
+
+                    # Notify all players in the room about the new leader
+                    leader_change_msg = f"Room {room_idx} has a new leader: Player {new_leader}"
+                    for pid in self.state.game_state["rooms"][room_idx]:
+                        self.state.add_observation(from_id=ta.GAME_ID, to_id=pid, message=leader_change_msg)
 
             # Leaders select players to trade
             for room_idx, leader_id in enumerate(self.state.game_state["leaders"]):
                 # Skip empty rooms or None leaders
-                if leader_id is None:
+                if leader_id is None or not self.state.game_state["rooms"][room_idx]:
                     continue
 
                 # Get all players in the room except the leader
@@ -442,22 +671,28 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
                     self.state.add_observation(from_id=ta.GAME_ID, to_id=leader_id, message=leader_observation)
 
-            # Leaders act in sequence
+            # Leaders act in sequence, filtering out None values
             self.next_player_ids = [leader for leader in self.state.game_state["leaders"] if leader is not None]
 
             # If no leaders are left or no valid leaders, force trade with random selection
-            if not self.next_player_ids:
+            if not self.next_player_ids and self.state.game_state["round"] < self.num_rounds:
                 # Force random selection for rooms without leaders
                 for room_idx in range(2):
-                    if self.state.game_state["leaders"][room_idx] is None and self.state.game_state["rooms"][room_idx]:
-                        room_players = self.state.game_state["rooms"][room_idx]
-                        hostage = random.choice(room_players)
-                        self.state.game_state["hostages_to_trade"][room_idx] = hostage
+                    if (self.state.game_state["leaders"][room_idx] is None and
+                        self.state.game_state["rooms"][room_idx]):
+                        eligible_players = [
+                            pid for pid in self.state.game_state["rooms"][room_idx]
+                            if pid != self.state.game_state["leaders"][room_idx]
+                        ]
 
-                        # Inform the room
-                        message = f"With no leader, Player {hostage} was randomly selected to be traded."
-                        for pid in room_players:
-                            self.state.add_observation(from_id=ta.GAME_ID, to_id=pid, message=message)
+                        if eligible_players:
+                            hostage = random.choice(eligible_players)
+                            self.state.game_state["hostages_to_trade"][room_idx] = hostage
+
+                            # Inform the room
+                            message = f"With no leader, Player {hostage} was randomly selected to be traded."
+                            for pid in self.state.game_state["rooms"][room_idx]:
+                                self.state.add_observation(from_id=ta.GAME_ID, to_id=pid, message=message)
 
                 # Move to trade execution
                 self.state.game_state["current_phase"] = "Trade_Execution"
@@ -466,10 +701,16 @@ class TwoRoomsAndABoomEnv(ta.Env):
         elif new_phase == "Trade_Execution":
             # Ensure both rooms have selected hostages (crucial game mechanic)
             for room_idx in range(2):
-                if room_idx not in self.state.game_state["hostages_to_trade"] and self.state.game_state["rooms"][room_idx]:
+                # Skip empty rooms
+                if not self.state.game_state["rooms"][room_idx]:
+                    continue
+
+                if room_idx not in self.state.game_state["hostages_to_trade"]:
                     # Room has players but no hostage selected - make random selection
-                    eligible_players = [p for p in self.state.game_state["rooms"][room_idx]
-                                      if p != self.state.game_state["leaders"][room_idx]]
+                    eligible_players = [
+                        p for p in self.state.game_state["rooms"][room_idx]
+                        if p != self.state.game_state["leaders"][room_idx]
+                    ]
 
                     # Only proceed if there are eligible players
                     if eligible_players:
@@ -491,27 +732,78 @@ class TwoRoomsAndABoomEnv(ta.Env):
             # Track if trade was executed
             trade_executed = False
 
+            # Both rooms have hostages - standard trade
             if room0_hostage is not None and room1_hostage is not None:
-                # Remove players from their current rooms
-                self.state.game_state["rooms"][0].remove(room0_hostage)
-                self.state.game_state["rooms"][1].remove(room1_hostage)
+                # Verify both hostages are actually in their respective rooms
+                if (room0_hostage in self.state.game_state["rooms"][0] and
+                    room1_hostage in self.state.game_state["rooms"][1]):
 
-                # Add players to their new rooms
-                self.state.game_state["rooms"][0].append(room1_hostage)
-                self.state.game_state["rooms"][1].append(room0_hostage)
+                    # Remove players from their current rooms
+                    self.state.game_state["rooms"][0].remove(room0_hostage)
+                    self.state.game_state["rooms"][1].remove(room1_hostage)
 
-                trade_executed = True
+                    # Add players to their new rooms
+                    self.state.game_state["rooms"][0].append(room1_hostage)
+                    self.state.game_state["rooms"][1].append(room0_hostage)
 
-                # Inform all players about the trade
-                trade_observation = (
-                    f"Round {self.state.game_state['round']}: The Leaders have exchanged hostages.\n"
-                    f"Player {room0_hostage} moved from Room 0 to Room 1.\n"
-                    f"Player {room1_hostage} moved from Room 1 to Room 0."
-                )
+                    trade_executed = True
 
-                self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=trade_observation)
+                    # Inform all players about the trade
+                    trade_observation = (
+                        f"Round {self.state.game_state['round']}: The Leaders have exchanged hostages.\n"
+                        f"Player {room0_hostage} moved from Room 0 to Room 1.\n"
+                        f"Player {room1_hostage} moved from Room 1 to Room 0."
+                    )
 
-            # Check if one-sided trade is possible (if one room is empty)
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=trade_observation)
+                else:
+                    # Invalid hostage selection - hostages not in their rooms
+                    error_msg = "Trade error: Selected hostages are not in their expected rooms."
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=error_msg)
+
+                    # Try to find replacement hostages
+                    if (room0_hostage not in self.state.game_state["rooms"][0] and
+                        len(self.state.game_state["rooms"][0]) > 1):
+                        # Find a new hostage from room 0
+                        new_room0_hostage = random.choice([
+                            p for p in self.state.game_state["rooms"][0]
+                            if p != self.state.game_state["leaders"][0]
+                        ])
+                        self.state.game_state["hostages_to_trade"][0] = new_room0_hostage
+
+                    if (room1_hostage not in self.state.game_state["rooms"][1] and
+                        len(self.state.game_state["rooms"][1]) > 1):
+                        # Find a new hostage from room 1
+                        new_room1_hostage = random.choice([
+                            p for p in self.state.game_state["rooms"][1]
+                            if p != self.state.game_state["leaders"][1]
+                        ])
+                        self.state.game_state["hostages_to_trade"][1] = new_room1_hostage
+
+                    # Try trade again with new hostages
+                    room0_hostage = self.state.game_state["hostages_to_trade"].get(0)
+                    room1_hostage = self.state.game_state["hostages_to_trade"].get(1)
+
+                    if (room0_hostage is not None and room1_hostage is not None and
+                        room0_hostage in self.state.game_state["rooms"][0] and
+                        room1_hostage in self.state.game_state["rooms"][1]):
+
+                        # Execute trade with new hostages
+                        self.state.game_state["rooms"][0].remove(room0_hostage)
+                        self.state.game_state["rooms"][1].remove(room1_hostage)
+                        self.state.game_state["rooms"][0].append(room1_hostage)
+                        self.state.game_state["rooms"][1].append(room0_hostage)
+
+                        trade_executed = True
+
+                        recovery_msg = (
+                            f"Trade recovery: New hostages were selected.\n"
+                            f"Player {room0_hostage} moved from Room 0 to Room 1.\n"
+                            f"Player {room1_hostage} moved from Room 1 to Room 0."
+                        )
+                        self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=recovery_msg)
+
+            # One-sided trades (if one room is empty)
             elif room0_hostage is not None and not self.state.game_state["rooms"][1]:
                 # Only room 0 has players, just announce no trade
                 no_trade_msg = (
@@ -531,27 +823,42 @@ class TwoRoomsAndABoomEnv(ta.Env):
                   self.state.game_state["rooms"][0] and
                   self.state.game_state["rooms"][1]):
 
-                # Force a random trade
-                force_room0_hostage = random.choice([p for p in self.state.game_state["rooms"][0]
-                                                   if p != self.state.game_state["leaders"][0]])
-                force_room1_hostage = random.choice([p for p in self.state.game_state["rooms"][1]
-                                                   if p != self.state.game_state["leaders"][1]])
+                # Try to identify eligible players for forced trade
+                eligible_room0 = [
+                    p for p in self.state.game_state["rooms"][0]
+                    if p != self.state.game_state["leaders"][0]
+                ]
+                eligible_room1 = [
+                    p for p in self.state.game_state["rooms"][1]
+                    if p != self.state.game_state["leaders"][1]
+                ]
 
-                # Remove players from their current rooms
-                self.state.game_state["rooms"][0].remove(force_room0_hostage)
-                self.state.game_state["rooms"][1].remove(force_room1_hostage)
+                # Only proceed if both rooms have eligible players
+                if eligible_room0 and eligible_room1:
+                    force_room0_hostage = random.choice(eligible_room0)
+                    force_room1_hostage = random.choice(eligible_room1)
 
-                # Add players to their new rooms
-                self.state.game_state["rooms"][0].append(force_room1_hostage)
-                self.state.game_state["rooms"][1].append(force_room0_hostage)
+                    # Remove players from their current rooms
+                    self.state.game_state["rooms"][0].remove(force_room0_hostage)
+                    self.state.game_state["rooms"][1].remove(force_room1_hostage)
 
-                # Inform all players about the forced trade
-                forced_trade_msg = (
-                    f"Round {self.state.game_state['round']}: A trade had to be forced to continue the game.\n"
-                    f"Player {force_room0_hostage} moved from Room 0 to Room 1.\n"
-                    f"Player {force_room1_hostage} moved from Room 1 to Room 0."
-                )
-                self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=forced_trade_msg)
+                    # Add players to their new rooms
+                    self.state.game_state["rooms"][0].append(force_room1_hostage)
+                    self.state.game_state["rooms"][1].append(force_room0_hostage)
+
+                    # Inform all players about the forced trade
+                    forced_trade_msg = (
+                        f"Round {self.state.game_state['round']}: A trade had to be forced to continue the game.\n"
+                        f"Player {force_room0_hostage} moved from Room 0 to Room 1.\n"
+                        f"Player {force_room1_hostage} moved from Room 1 to Room 0."
+                    )
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=forced_trade_msg)
+                else:
+                    # Cannot force a trade - leaders are the only players
+                    no_trade_msg = (
+                        f"Round {self.state.game_state['round']}: No trade occurred as there are not enough eligible players."
+                    )
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=no_trade_msg)
 
             # Reset hostages for next round
             self.state.game_state["hostages_to_trade"] = {}
@@ -574,13 +881,36 @@ class TwoRoomsAndABoomEnv(ta.Env):
             raise Exception(f"{new_phase} phase not recognized.")
 
     def _transition_current_pid(self):
-        """ Handle player transitions and phase changes with safeguards against infinite recursion """
+        """
+        Handle player transitions and phase changes with safeguards against infinite recursion
+        """
         # Only transition if not invalid move
         if self.state.prevent_player_change:
             return
 
-        # Check if list is empty
-        if not self.next_player_ids:
+        # Increment recursion depth counter
+        self.transition_recursion_depth += 1
+
+        # Prevent infinite recursion
+        if self.transition_recursion_depth > self.MAX_RECURSION_DEPTH:
+            error_msg = f"Recursion depth exceeded in player transitions. Resetting to next phase."
+            self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=error_msg)
+
+            # Emergency phase transition
+            current_phase = self.state.game_state["current_phase"]
+            if current_phase == "Discussion":
+                self.state.game_state["current_phase"] = "Leader_Selection"
+                self._phase_transition_player_prompts(new_phase="Leader_Selection")
+            elif current_phase == "Leader_Selection":
+                self.state.game_state["current_phase"] = "Trade_Execution"
+                self._phase_transition_player_prompts(new_phase="Trade_Execution")
+
+            # Reset recursion counter
+            self.transition_recursion_depth = 0
+            return
+
+        # Check if list is empty or doesn't exist
+        if not hasattr(self, 'next_player_ids') or not self.next_player_ids:
             # Transition phase and replenish list
             current_phase = self.state.game_state["current_phase"]
 
@@ -597,9 +927,10 @@ class TwoRoomsAndABoomEnv(ta.Env):
                 pass
 
             # If we still don't have player IDs and we're in the final round, end the game
-            if not self.next_player_ids:
+            if not hasattr(self, 'next_player_ids') or not self.next_player_ids:
                 if self.state.game_state["round"] >= self.num_rounds:
                     self._determine_winner()
+                    self.transition_recursion_depth = 0
                     return
                 elif current_phase == "Trade_Execution":
                     # If we're in Trade_Execution phase and still have no players,
@@ -608,13 +939,12 @@ class TwoRoomsAndABoomEnv(ta.Env):
                     self._phase_transition_player_prompts(new_phase="Discussion")
 
                 # If we still don't have players, return to avoid infinite recursion
-                if not self.next_player_ids:
+                if not hasattr(self, 'next_player_ids') or not self.next_player_ids:
+                    self.transition_recursion_depth = 0
                     return
 
-        # Safety check - if next_player_ids exists but is empty, add a dummy action
-        # to prevent hanging
+        # Safety check - if next_player_ids exists but is empty, move to next phase
         if hasattr(self, 'next_player_ids') and not self.next_player_ids:
-            # This is a failsafe - should be impossible to reach if code is working correctly
             # Move to the next phase directly
             current_phase = self.state.game_state["current_phase"]
             if current_phase == "Discussion":
@@ -623,10 +953,12 @@ class TwoRoomsAndABoomEnv(ta.Env):
             elif current_phase == "Leader_Selection":
                 self.state.game_state["current_phase"] = "Trade_Execution"
                 self._phase_transition_player_prompts(new_phase="Trade_Execution")
+
+            self.transition_recursion_depth = 0
             return
 
         # Pop next pid and update state if we have players
-        if self.next_player_ids:
+        if hasattr(self, 'next_player_ids') and self.next_player_ids:
             next_pid = self.next_player_ids.pop(0)
 
             # Validate the player still exists in the game before updating
@@ -638,8 +970,13 @@ class TwoRoomsAndABoomEnv(ta.Env):
                 # Recursively call to get the next player
                 self._transition_current_pid()
 
+        # Reset recursion depth counter after successful transition
+        self.transition_recursion_depth = 0
+
     def _determine_winner(self):
-        """ Determine which team wins based on the final positions of President and Bomber """
+        """
+        Determine which team wins based on the final positions of President and Bomber
+        """
         # Find which rooms the President and Bomber are in
         president_room = None
         bomber_room = None
@@ -677,7 +1014,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
             if president_room == bomber_room:
                 # Red team wins
                 red_team_pids = [pid for pid, role in self.state.game_state["player_roles"].items()
-                            if self.roles[role]["team"] == "Red Team"]
+                               if self.roles[role]["team"] == "Red Team"]
 
                 reason = "The Red Team wins! The Bomber and President are in the same room."
                 final_state += reason
@@ -686,7 +1023,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
             else:
                 # Blue team wins
                 blue_team_pids = [pid for pid, role in self.state.game_state["player_roles"].items()
-                            if self.roles[role]["team"] == "Blue Team"]
+                                if self.roles[role]["team"] == "Blue Team"]
 
                 reason = "The Blue Team wins! The Bomber and President are in different rooms."
                 final_state += reason
@@ -705,7 +1042,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
             # Default to Blue team win as in original logic, but with explanation
             blue_team_pids = [pid for pid, role in self.state.game_state["player_roles"].items()
-                        if self.roles[role]["team"] == "Blue Team"]
+                            if self.roles[role]["team"] == "Blue Team"]
             reason = "The Blue Team wins by default due to missing special roles."
             self.state.set_winners(player_ids=blue_team_pids, reason=reason)
 
@@ -713,6 +1050,12 @@ class TwoRoomsAndABoomEnv(ta.Env):
         """
         Process a single step (action) from the current player
         with improved validation and error handling
+
+        Args:
+            action (str): The player's action
+
+        Returns:
+            Tuple[bool, ta.Info]: Game state update
         """
         # Validate game state consistency
         try:
@@ -745,61 +1088,9 @@ class TwoRoomsAndABoomEnv(ta.Env):
             self.state.prevent_player_change = True
             return self.state.step(rotate_player=False)
 
-        # Check if action contains card/role reveal
+        # Handle card/role reveal during Discussion phase
         if self.reveal_pattern.search(action) and current_phase == "Discussion":
-            # Extract target from revealing action if any
-            reveal_target_match = self.target_pattern.search(action)
-
-            if reveal_target_match:
-                try:
-                    target_pid = int(reveal_target_match.group(1))
-
-                    # Check if target is in the same room
-                    player_room = 0 if current_pid in self.state.game_state["rooms"][0] else 1
-
-                    if target_pid in self.state.game_state["rooms"][player_room]:
-                        # Process the role reveal
-                        true_role = self.state.game_state["player_roles"][current_pid]
-
-                        # Add this player to the target's revealed_roles list
-                        if target_pid not in self.state.game_state["revealed_roles"]:
-                            self.state.game_state["revealed_roles"][target_pid] = []
-
-                        self.state.game_state["revealed_roles"][target_pid].append(current_pid)
-
-                        # Send private message to the target
-                        reveal_msg = (
-                            f"[PRIVATE] Player {current_pid} has revealed their card to you. "
-                            f"Their true role is: {true_role}"
-                        )
-                        self.state.add_observation(from_id=current_pid, to_id=target_pid, message=reveal_msg)
-
-                        # Send confirmation to the revealing player
-                        confirm_msg = f"You revealed your role ({true_role}) to Player {target_pid}."
-                        self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=confirm_msg)
-
-                        # Create public version of the message without revealing the role
-                        public_msg = f"I am revealing my card to Player {target_pid}."
-
-                        # Process as normal discussion after handling the reveal
-                        self._handle_discussion(current_pid=current_pid, action=public_msg)
-
-                    else:
-                        error_msg = f"You can only reveal your card to players in the same room."
-                        self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-                        self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
-
-                except ValueError:
-                    # Handle case where match isn't a valid integer
-                    error_msg = "Could not determine who to reveal your card to. Please use format 'reveal my card to [Player X]'"
-                    self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-                    self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
-            else:
-                # Generic reveal without target
-                error_msg = "Please specify which player to reveal your card to using [Player X] format."
-                self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-                self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
-
+            self._handle_role_reveal(current_pid, action)
         # Normal phase handling
         elif current_phase == "Discussion":
             self._handle_discussion(current_pid=current_pid, action=action)
@@ -813,10 +1104,93 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
         return self.state.step(rotate_player=False)
 
+    def _handle_role_reveal(self, current_pid, action):
+        """
+        Handle a player revealing their role to another player
+        with improved validation and restrictions
+
+        Args:
+            current_pid (int): ID of the player revealing their role
+            action (str): The reveal action message
+        """
+        # Extract target from revealing action
+        reveal_target_match = self.target_pattern.search(action)
+
+        if reveal_target_match:
+            try:
+                target_pid = int(reveal_target_match.group(1))
+
+                # Check if player has reveals left
+                current_reveals = self.state.game_state["reveal_counts"].get(current_pid, 0)
+                if current_reveals >= self.MAX_REVEALS_PER_PLAYER:
+                    error_msg = f"You have already used all {self.MAX_REVEALS_PER_PLAYER} of your allowed role reveals."
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+                    self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+                    return
+
+                # Check if target is in the same room
+                player_room = 0 if current_pid in self.state.game_state["rooms"][0] else 1
+
+                if target_pid in self.state.game_state["rooms"][player_room]:
+                    # Process the role reveal
+                    true_role = self.state.game_state["player_roles"][current_pid]
+
+                    # Add this player to the target's revealed_roles list
+                    if target_pid not in self.state.game_state["revealed_roles"]:
+                        self.state.game_state["revealed_roles"][target_pid] = []
+
+                    # Update reveal count
+                    self.state.game_state["reveal_counts"][current_pid] = current_reveals + 1
+
+                    # Add to revealed roles if not already revealed
+                    if current_pid not in self.state.game_state["revealed_roles"][target_pid]:
+                        self.state.game_state["revealed_roles"][target_pid].append(current_pid)
+
+                    # Send private message to the target
+                    reveal_msg = (
+                        f"[PRIVATE] Player {current_pid} has revealed their card to you. "
+                        f"Their true role is: {true_role}"
+                    )
+                    self.state.add_observation(from_id=current_pid, to_id=target_pid, message=reveal_msg)
+
+                    # Send confirmation to the revealing player
+                    reveals_left = self.MAX_REVEALS_PER_PLAYER - (current_reveals + 1)
+                    confirm_msg = (
+                        f"You revealed your role ({true_role}) to Player {target_pid}. "
+                        f"You have {reveals_left} reveals remaining."
+                    )
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=confirm_msg)
+
+                    # Create public version of the message without revealing the role
+                    public_msg = f"I am revealing my card to Player {target_pid}."
+
+                    # Process as normal discussion after handling the reveal
+                    self._handle_discussion(current_pid=current_pid, action=public_msg)
+
+                else:
+                    error_msg = f"You can only reveal your card to players in the same room."
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+                    self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+
+            except ValueError:
+                # Handle case where match isn't a valid integer
+                error_msg = "Could not determine who to reveal your card to. Please use format 'reveal my card to [Player X]'"
+                self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+                self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+        else:
+            # Generic reveal without target
+            error_msg = "Please specify which player to reveal your card to using [Player X] format."
+            self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+            self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+
     def _handle_discussion(self, current_pid, action):
         """
         Handle discussion phase - broadcast message to all players in the same room
-        and store message history
+        and store message history with improved validation
+
+        Args:
+            current_pid (int): ID of the speaking player
+            action (str): The message being sent
         """
         # Determine which room the player is in
         player_room = None
@@ -831,20 +1205,39 @@ class TwoRoomsAndABoomEnv(ta.Env):
             self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
             return
 
-        # Store message in history
+        # Sanitize the message for safety
+        # This could be expanded to filter out inappropriate content or exploitative messages
+        sanitized_action = action.strip()
+
+        # Limit message length if needed
+        MAX_MESSAGE_LENGTH = 500  # Characters
+        if len(sanitized_action) > MAX_MESSAGE_LENGTH:
+            sanitized_action = sanitized_action[:MAX_MESSAGE_LENGTH] + "... (message truncated)"
+            truncate_notice = "Your message was truncated due to length."
+            self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=truncate_notice)
+
+        # Store message in history with room-specific tracking
         if str(player_room) not in self.state.game_state["message_history"]:
             self.state.game_state["message_history"][str(player_room)] = []
 
+        # Add message to history
         self.state.game_state["message_history"][str(player_room)].append({
             "from": current_pid,
-            "message": action,
+            "message": sanitized_action,
             "round": self.state.game_state["round"]
         })
+
+        # Limit message history size per room
+        if len(self.state.game_state["message_history"][str(player_room)]) > self.MAX_MESSAGE_HISTORY:
+            # Remove oldest messages
+            self.state.game_state["message_history"][str(player_room)] = (
+                self.state.game_state["message_history"][str(player_room)][-self.MAX_MESSAGE_HISTORY:]
+            )
 
         # Broadcast message to all players in the same room
         for pid in self.state.game_state["rooms"][player_room]:
             if pid != current_pid:  # Don't send to self
-                self.state.add_observation(from_id=current_pid, to_id=pid, message=action)
+                self.state.add_observation(from_id=current_pid, to_id=pid, message=sanitized_action)
 
         # Send confirmation to the speaking player
         confirm_msg = "Your message was sent to all players in your room."
@@ -870,12 +1263,18 @@ class TwoRoomsAndABoomEnv(ta.Env):
                 if player_team == leader_team:
                     # Same team - send strategic context to leader
                     team_msg = (
-                        f"[TEAM INFO] Player {current_pid} ({player_role}) on your team said: {action}"
+                        f"[TEAM INFO] Player {current_pid} ({player_role}) on your team said: {sanitized_action}"
                     )
                     self.state.add_observation(from_id=ta.GAME_ID, to_id=team_leader_pid, message=team_msg)
 
     def _handle_leader_selection(self, current_pid, action):
-        """ Handle leader selection of hostages to trade with additional validation """
+        """
+        Handle leader selection of hostages to trade with improved validation
+
+        Args:
+            current_pid (int): ID of the leader making a selection
+            action (str): The selection action
+        """
         # Verify this is actually a leader
         if current_pid not in self.state.game_state["leaders"]:
             self.state.set_invalid_move(
@@ -885,7 +1284,18 @@ class TwoRoomsAndABoomEnv(ta.Env):
             return
 
         # Determine which room the leader is in
-        room_idx = 0 if current_pid == self.state.game_state["leaders"][0] else 1
+        room_idx = None
+        if current_pid == self.state.game_state["leaders"][0]:
+            room_idx = 0
+        elif current_pid == self.state.game_state["leaders"][1]:
+            room_idx = 1
+        else:
+            # Should never happen due to earlier check, but just in case
+            self.state.set_invalid_move(
+                player_id=current_pid,
+                reason="Leader room assignment error."
+            )
+            return
 
         # Extract and validate selection
         match = self.target_pattern.search(action)
@@ -922,6 +1332,26 @@ class TwoRoomsAndABoomEnv(ta.Env):
                 reason="You cannot select yourself as a hostage."
             )
             return
+
+        # Verify not trading the President and Bomber directly (if leader knows their identities)
+        if selected_pid in self.state.game_state["revealed_roles"].get(current_pid, []):
+            selected_role = self.state.game_state["player_roles"][selected_pid]
+
+            # Check other room's selected hostage if already chosen
+            other_room = 1 - room_idx
+            other_hostage = self.state.game_state["hostages_to_trade"].get(other_room)
+
+            if other_hostage is not None and other_hostage in self.state.game_state["revealed_roles"].get(current_pid, []):
+                other_role = self.state.game_state["player_roles"][other_hostage]
+
+                # Prevent direct President-Bomber trade if leader knows both roles
+                if ((selected_role == "President" and other_role == "Bomber") or
+                    (selected_role == "Bomber" and other_role == "President")):
+                    warning_msg = (
+                        "Warning: You are about to trade the President and Bomber directly. "
+                        "This may help the other team. Proceeding anyway..."
+                    )
+                    self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=warning_msg)
 
         # Record the selection
         self.state.game_state["hostages_to_trade"][room_idx] = selected_pid
