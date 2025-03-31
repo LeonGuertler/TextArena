@@ -191,4 +191,4 @@ Player 5 moved from Room 1 to Room 0.
 Based on the party game "Two Rooms and a Boom" by Tuesday Knight Games.
 
 ### Contact
-If you have questions or face issues with this specific environment, please reach out directly to the Textarena team.
+If you have questions or face issues with this specific environment, please reach out directly to [benjaminliu.eecs@gmail.com](mailto:benjaminliu.eecs@gmail.com).
