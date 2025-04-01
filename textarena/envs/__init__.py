@@ -57,8 +57,10 @@ register(id="WordLadder-v0-medium", entry_point="textarena.envs.WordLadder.env:W
 register(id="WordLadder-v0-hard", entry_point="textarena.envs.WordLadder.env:WordLadderEnv", min_distance=13, max_distance=15, max_turns=100)
 
 # Wordle (single-player)
-# register(id="Wordle-v0", entry_point="textarena.envs.Wordle.env:WordleEnv", max_turns=6)
-# register(id="Wordle-v0-hardcore", entry_point="textarena.envs.Wordle.env:WordleEnv", hardcore=True, max_turns=10)
+register(id="Wordle-v0", entry_point="textarena.envs.Wordle.env:WordleEnv", hardcore=False, word_length=5, num_guesses=6)
+register(id="Wordle-v0-hardcore", entry_point="textarena.envs.Wordle.env:WordleEnv", hardcore=True, word_length=5, num_guesses=6)
+register(id="Wordle-v0-long", entry_point="textarena.envs.Wordle.env:WordleEnv", hardcore=False, word_length=7, num_guesses=9)
+register(id="Wordle-v0-long-hardcore", entry_point="textarena.envs.Wordle.env:WordleEnv", hardcore=True, word_length=7, num_guesses=9)
 
 # WordSearch (single-player)
 register(id="WordSearch-v0", entry_point="textarena.envs.WordSearch.env:WordSearchEnv", hardcore=False)
@@ -154,8 +156,23 @@ register(id="Taboo-v0-full", entry_point="textarena.envs.Taboo.env:TabooEnv", ma
 # TicTacToe (two-player)
 register(id="TicTacToe-v0", entry_point="textarena.envs.TicTacToe.env:TicTacToeEnv")
 
+# WildTicTacToe (two-player)
+register(id="WildTicTacToe-v0", entry_point="textarena.envs.WildTicTacToe.env:WildTicTacToeEnv")
+
+# ReverseTicTacToe (two-player)
+register(id="ReverseTicTacToe-v0", entry_point="textarena.envs.ReverseTicTacToe.env:ReverseTicTacToeEnv")
+
+# RandomizedTicTacToe (two-player)
+register(id="RandomizedTicTacToe-v0", entry_point="textarena.envs.RandomizedTicTacToe.env:RandomizedTicTacToeEnv")
+
+# QuantumTicTacToe (two-player)
+register(id="QuantumTicTacToe-v0", entry_point="textarena.envs.QuantumTicTacToe.env:QuantumTicTacToeEnv")
+
 # IteratedPrisonersDilemma (two-player)
 register(id="IteratedPrisonersDilemma-v0", entry_point="textarena.envs.IteratedPrisonersDilemma.env:IteratedPrisonersDilemmaEnv", num_rounds=10, communication_turns=3, cooperate_reward=3, defect_reward=5, sucker_reward=0, mutual_defect_reward=1)
+
+# IteratedRockPaperScissors (two-player)
+register(id="IteratedRockPaperScissors-v0", entry_point="textarena.envs.IteratedRockPaperScissors.env:IteratedRockPaperScissorsEnv", num_rounds=10)
 
 # Stratego (two-player)
 register(id="Stratego-v0", entry_point="textarena.envs.Stratego.env:StrategoEnv")
@@ -167,6 +184,12 @@ register(id="SpiteAndMalice-v0", entry_point="textarena.envs.SpiteAndMalice.env:
 register(id="Tak-v0", entry_point="textarena.envs.Tak.env:TakEnv", board_size=4, stones=15, capstones=1)
 register(id="Tak-v0-medium", entry_point="textarena.envs.Tak.env:TakEnv", board_size=5, stones=21, capstones=1)
 register(id="Tak-v0-hard", entry_point="textarena.envs.Tak.env:TakEnv", board_size=6, stones=30, capstones=1)
+
+# SimpleTak (two-player)
+register(id="SimpleTak-v0", entry_point="textarena.envs.SimpleTak.env:SimpleTakEnv", board_size=4)
+register(id="SimpleTak-v0-medium", entry_point="textarena.envs.SimpleTak.env:SimpleTakEnv", board_size=5)
+register(id="SimpleTak-v0-large", entry_point="textarena.envs.SimpleTak.env:SimpleTakEnv", board_size=6)
+register(id="SimpleTak-v0-extra-large", entry_point="textarena.envs.SimpleTak.env:SimpleTakEnv", board_size=8)
 
 # TruthAndDeception (two-player) [TODO can extend to more players]
 register(id="TruthAndDeception-v0", entry_point="textarena.envs.TruthAndDeception.env:TruthAndDeceptionEnv", max_turns=6)
@@ -239,7 +262,15 @@ register(id="SecretMafia-v0", entry_point="textarena.envs.SecretMafia.env:Secret
 # TwoRoomsAndABoom (6-20 players)
 register(id="TwoRoomsAndABoom-v0", entry_point="textarena.envs.TwoRoomsAndABoom.env:TwoRoomsAndABoomEnv", num_rounds=3, cards_per_room=3, discussion_rounds=2)
 
+# Codenames (4 players)
+register(id="Codenames-v0", entry_point="textarena.envs.Codenames.env:CodenamesEnv", hardcore=False) 
+register(id="Codenames-v0-hardcore", entry_point="textarena.envs.Codenames.env:CodenamesEnv", hardcore=True) 
 
+# EmojiCharade (4 players)
+register(id="EmojiCharade-v0", entry_point="textarena.envs.EmojiCharade.env:EmojiCharadeEnv") 
+
+# ThreePlayerTicTacToe (3 players)
+register(id="ThreePlayerTicTacToe-v0", entry_point="textarena.envs.ThreePlayerTicTacToe.env:ThreePlayerTicTacToeEnv")
 
 # classical evals as single-player envs
 
