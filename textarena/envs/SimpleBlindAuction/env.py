@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 
 import textarena as ta
+from textarena.envs.SimpleBlindAuction.renderer import create_board_str
 
 
 class SimpleBlindAuctionEnv(ta.Env):
@@ -50,11 +51,8 @@ class SimpleBlindAuctionEnv(ta.Env):
             "Emerald Ring", "Ivory Chess Set", "Pearl Earrings"
         ]
 
-
-    @property
-    def terminal_render_keys(self) -> List[str]:
-        """Keys for terminal rendering."""
-        return ["phase", "remaining_capital", "player_bids", "player_item_values", "auction_results"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """Reset the environment to its initial state."""

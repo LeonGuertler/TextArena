@@ -6,11 +6,8 @@ from textarena.core import (
     State, Message, Observations, Rewards, Info, GAME_ID,
 )
 from textarena.envs.registration import make, register, pprint_registry_detailed, check_env_exists
-
 from textarena.api import make_online
-
 import textarena.utils
-
 from textarena import wrappers, agents
 
 
@@ -38,4 +35,4 @@ __all__ = [
     # play online
     "make_online",
 ]
-__version__ = "0.6.0"
+__version__ = "0.6.3"

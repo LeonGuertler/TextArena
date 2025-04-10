@@ -2,6 +2,7 @@ import re, random, copy, string
 from typing import Any, Dict, Optional, Tuple, Union
 
 import textarena as ta
+from textarena.envs.WordSearch.renderer import create_board_str
 
 import nltk
 from nltk.corpus import words
@@ -25,9 +26,8 @@ class WordSearchEnv(ta.Env):
         ## load the word list
         self.word_list = words.words("en") if self.hardcore else words.words("en-basic")
 
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment """

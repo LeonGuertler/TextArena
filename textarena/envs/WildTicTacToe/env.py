@@ -2,6 +2,7 @@ import re
 from typing import Optional, Dict, Tuple, Any
 
 import textarena as ta
+from textarena.envs.WildTicTacToe.renderer import create_board_str
 
 class WildTicTacToeEnv(ta.Env):
     """ Wild Tic Tac Toe: Players can choose to place either X or O on any turn """
@@ -16,6 +17,9 @@ class WildTicTacToeEnv(ta.Env):
             player_prompt_function=self._generate_player_prompt
         )
         self._observer_current_state()
+
+    def get_board_str(self):
+        return create_board_str(board=self.state.game_state["board"])
 
     def _render_board(self):
         board = self.state.game_state["board"]

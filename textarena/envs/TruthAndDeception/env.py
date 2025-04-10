@@ -3,6 +3,7 @@ import importlib.resources
 from typing import Optional, Tuple, Dict, Any
 
 import textarena as ta 
+from textarena.envs.TruthAndDeception.renderer import create_board_str
 
 class TruthAndDeceptionEnv(ta.Env):
     """ Environment for Truth and Deception Game """
@@ -30,10 +31,8 @@ class TruthAndDeceptionEnv(ta.Env):
         self.guess_fact1_pattern = re.compile(r"\[Fact 1\]", re.IGNORECASE)
         self.guess_fact2_pattern = re.compile(r"\[Fact 2\]", re.IGNORECASE)
 
-
-    @property
-    def terminal_render_keys(self):
-        return ["correct_fact", "wrong_fact"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def _load_facts(self, data_path: Optional[str]) -> None:
         """Load the facts from the specified JSON file.

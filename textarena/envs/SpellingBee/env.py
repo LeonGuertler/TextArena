@@ -3,6 +3,7 @@ import re, random, string, numpy
 from typing import Optional, Tuple, List, Dict, Any
 
 import textarena as ta
+from textarena.envs.SpellingBee.renderer import create_board_str
 from textarena.utils.word_lists import EnglishDictionary
 
 
@@ -20,9 +21,9 @@ class SpellingBeeEnv(ta.Env):
         self.num_letters = num_letters
         self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
 
-    @property
-    def terminal_render_keys(self):
-        return ["allowed_letters"]
+
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def _check_word(self, word: str) -> bool:
         return self.dictionary.is_english_word(word)

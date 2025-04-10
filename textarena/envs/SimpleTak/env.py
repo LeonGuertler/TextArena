@@ -2,6 +2,7 @@ import re
 from typing import Optional, Dict, Tuple, List, Any
 
 import textarena as ta
+from textarena.envs.SimpleTak.renderer import create_board_str
 
 class SimpleTakEnv(ta.Env):
     """
@@ -29,6 +30,9 @@ class SimpleTakEnv(ta.Env):
             i: (i // board_size, i % board_size)
             for i in range(board_size * board_size)
         }
+
+    def get_board_str(self):
+        return create_board_str(board=self.state.game_state["board"], board_size=self.board_size)
 
     def reset(self, num_players: int = 2, seed: Optional[int] = None):
         """ Reset the environment to the initial state """

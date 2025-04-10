@@ -6,6 +6,7 @@ from nltk.corpus import words
 nltk.download("words")
 
 import textarena as ta 
+from textarena.envs.WordChains.renderer import create_board_str
 from textarena.utils.word_lists import EnglishDictionary
 
 
@@ -23,9 +24,8 @@ class WordChainsEnv(ta.Env):
         # Initialize dictionaries for US and UK English
         self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
 
-    @property 
-    def terminal_render_keys(self):
-        return ["current_word", "required_start_letter", "required_length"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int]=None):
         """ Reset the game to its initial state """

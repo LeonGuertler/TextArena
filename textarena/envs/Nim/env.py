@@ -2,6 +2,7 @@ import re
 from typing import Any, Dict, Optional, Tuple, List
 
 import textarena as ta
+from textarena.envs.Nim.renderer import create_board_str
 
 class NimEnv(ta.Env):
     """
@@ -31,12 +32,8 @@ class NimEnv(ta.Env):
         # This means remove 3 objects from pile #1.
         self.action_pattern = re.compile(r"\[\s*(\d+)\s+(\d+)\s*\]")
 
-    @property
-    def terminal_render_keys(self) -> List[str]:
-        """
-        Keys to render in the game state panel (optional).
-        """
-        return ["rendered_piles"]
+    def get_board_str(self):
+        return create_board_str(self.piles)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment with the given number of players """

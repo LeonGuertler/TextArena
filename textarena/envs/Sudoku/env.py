@@ -2,6 +2,7 @@ import re, random, copy
 from typing import Any, Dict, Optional, Tuple, List
 
 import textarena as ta
+from textarena.envs.Sudoku.renderer import create_board_str
 
 class SudokuEnv(ta.Env):
     """ Sudoku Game Environment """
@@ -17,9 +18,9 @@ class SudokuEnv(ta.Env):
         self.clues = clues
         self.max_turns = max_turns
 
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board"]
+    
+    def get_board_str(self):
+        return create_board_str(board=self.game_board)
 
     def _generate_board(self) -> List[List[int]]:
         """

@@ -1,9 +1,9 @@
-import re
-import random
+import re, random
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import textarena as ta
+from textarena.envs.Surround.renderer import create_board_str
 
 class SurroundEnv(ta.Env):
     """
@@ -30,6 +30,10 @@ class SurroundEnv(ta.Env):
         self.height = height
         self.max_turns = max_turns
         self.pending_actions = {}
+
+    def get_board_str(self):
+        return create_board_str(width=self.width, height=self.height, game_state=self.state.game_state)
+
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """

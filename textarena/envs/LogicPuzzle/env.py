@@ -3,6 +3,7 @@ import importlib.resources
 from typing import Any, Dict, List, Tuple, Optional
 
 import textarena as ta
+from textarena.envs.LogicPuzzle.renderer import create_board_str
 
 class LogicPuzzleEnv(ta.Env):
     """ Logic Puzzle environment """
@@ -60,9 +61,8 @@ class LogicPuzzleEnv(ta.Env):
             raise FileNotFoundError(f"Failed to load puzzle data: {str(e)}")
 
 
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
     
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment to its initial state """

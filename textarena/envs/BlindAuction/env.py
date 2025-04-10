@@ -1,8 +1,8 @@
 import re, random
 from typing import Any, Dict, List, Optional, Tuple
-from collections import defaultdict
 
 import textarena as ta
+from textarena.envs.BlindAuction.renderer import create_board_str
 
 
 class BlindAuctionEnv(ta.Env):
@@ -26,15 +26,8 @@ class BlindAuctionEnv(ta.Env):
         re.IGNORECASE | re.DOTALL
     )
 
-    whisper_pattern = re.compile(
-        r"\s*\[Whisper\s+(?:to\s+)?(?:Player\s+)?(\d+)\s*:\s*(.*?)\]",
-        re.IGNORECASE | re.DOTALL
-    )
-
-    bid_pattern = re.compile(
-        r"\[Bid\s+(?:on\s+)?(?:Item\s+)?(\d+)\s*:\s*(\d+)\]",
-        re.IGNORECASE
-    )
+    whisper_pattern = re.compile(r"\s*\[Whisper\s+(?:to\s+)?(?:Player\s+)?(\d+)\s*:\s*(.*?)\]", re.IGNORECASE | re.DOTALL)
+    bid_pattern = re.compile(r"\[Bid\s+(?:on\s+)?(?:Item\s+)?(\d+)\s*:\s*(\d+)\]", re.IGNORECASE)
 
     def __init__(
         self,
@@ -68,17 +61,8 @@ class BlindAuctionEnv(ta.Env):
             "Ruby Brooch", "Sapphire Tiara", "Telescope", "Amber Fossil"
         ]
 
-    @property
-    def terminal_render_keys(self):
-        """Keys that the environment's renderer might use to display state summary."""
-        return [
-            "phase",
-            "round",
-            "remaining_capital",
-            "player_bids",
-            "player_item_values",
-            "auction_results"
-        ]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """Reset the environment to its initial state."""
@@ -128,13 +112,6 @@ class BlindAuctionEnv(ta.Env):
         # Reset the state
         self.state.reset(seed=seed, game_state=game_state, player_prompt_function=self._generate_player_prompt)
         
-        # # Announce start of game
-        # self.state.add_observation(
-        #     from_id=ta.GAME_ID,
-        #     to_id=-1,
-        #     message=f"Starting a Blind Auction game with {num_players} players, {self.num_items} items, and {self.conversation_rounds} conversation rounds."
-        # )
-
     def _generate_player_prompt(self, player_id: int, game_state: Dict[str, Any]) -> str:
         """Generate the initial prompt for a player."""
         # Create a formatted list of items with values
@@ -305,11 +282,11 @@ class BlindAuctionEnv(ta.Env):
         auction_results = {
             "item_winners": {},                # {item_id: winner_pid}
             "winning_bids": {},                # {item_id: winning_bid_amount}
-            "player_wins": defaultdict(list),  # {player_id: [item_ids]}
-            "player_spent": defaultdict(int),  # {player_id: total_spent}
-            "player_value": defaultdict(int),  # {player_id: total_value_of_won_items}
-            "player_profit": defaultdict(int), # {player_id: total_value - total_spent}
-            "player_net_worth": defaultdict(int)  # {player_id: remaining_capital + item_value}
+            "player_wins": {}, # defaultdict(list),  # {player_id: [item_ids]}
+            "player_spent": {},# defaultdict(int),  # {player_id: total_spent}
+            "player_value": {},# defaultdict(int),  # {player_id: total_value_of_won_items}
+            "player_profit": {},#defaultdict(int), # {player_id: total_value - total_spent}
+            "player_net_worth": {},#defaultdict(int)  # {player_id: remaining_capital + item_value}
         }
         
         # Determine winners for each item
@@ -329,18 +306,25 @@ class BlindAuctionEnv(ta.Env):
             if winner_pid is not None and highest_bid > 0:
                 auction_results["item_winners"][item_id] = winner_pid
                 auction_results["winning_bids"][item_id] = highest_bid
+                if winner_pid not in auction_results["player_wins"]:
+                    auction_results["player_wins"][winner_pid] = [] 
                 auction_results["player_wins"][winner_pid].append(item_id)
+                if winner_pid not in auction_results["player_spent"]:
+                    auction_results["player_spent"][winner_pid] = 0 
                 auction_results["player_spent"][winner_pid] += highest_bid
                 
                 # Calculate value to the winner
                 item_value = game_state["player_item_values"][winner_pid][item_id]
+
+                if not winner_pid in auction_results["player_value"]:
+                    auction_results["player_value"][winner_pid] = 0 
                 auction_results["player_value"][winner_pid] += item_value
         
         # Calculate profit and net worth for each player
         for pid in range(num_players):
-            value = auction_results["player_value"][pid]
-            spent = auction_results["player_spent"][pid]
-            remaining = game_state["remaining_capital"][pid]
+            value = auction_results["player_value"].get(pid, 0)
+            spent = auction_results["player_spent"].get(pid, 0)
+            remaining = game_state["remaining_capital"].get(pid)
             
             # Profit = value of items - amount spent
             auction_results["player_profit"][pid] = value - spent
@@ -384,19 +368,19 @@ class BlindAuctionEnv(ta.Env):
             # Calculate remaining capital
             remaining = game_state["remaining_capital"][pid]
             initial = self.starting_capital
-            spent = results["player_spent"][pid]
-            value = results["player_value"][pid]
-            profit = results["player_profit"][pid]
+            spent = results["player_spent"].get(pid, 0) #pid]
+            value = results["player_value"].get(pid, 0) #[pid]
+            profit = results["player_profit"].get(pid, 0) #[pid]
             net_worth = remaining + value  # Net worth = remaining capital + value of items
             
             # Add net worth to player results
-            results["player_net_worth"] = defaultdict(int)
+            # results["player_net_worth"] = {} #defaultdict(int)
             results["player_net_worth"][pid] = net_worth
             
             message += f"- Player {pid}:\n"
             
             # Show items won with details
-            items_won = results["player_wins"][pid]
+            items_won = results["player_wins"].get(pid, [])
             if items_won:
                 message += f"  Items Won:\n"
                 for item_id in items_won:
@@ -430,8 +414,11 @@ class BlindAuctionEnv(ta.Env):
         
         # Find the player(s) with the highest net worth
         max_worth = max(results["player_net_worth"].values(), default=0)
-        winners = [pid for pid, worth in results["player_net_worth"].items() if worth == max_worth]
-        
+        winners = []
+        for pid, worth in results["player_net_worth"].items():
+            if worth == max_worth:
+                winners.append(pid)
+
         # Set the winner(s)
         if len(winners) == 1:
             winner = winners[0]

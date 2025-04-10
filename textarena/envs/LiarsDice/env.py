@@ -2,6 +2,7 @@ import re, random
 from typing import Any, Dict, Optional, Tuple, List
 
 import textarena as ta
+from textarena.envs.LiarsDice.renderer import create_board_str
 
 
 class LiarsDiceEnv(ta.Env):
@@ -24,14 +25,8 @@ class LiarsDiceEnv(ta.Env):
         self.bid_pattern = re.compile(r"\[bid\s*:?\s*(\d+)[,\s]+(\d+)\]", re.IGNORECASE)
         self.call_pattern = re.compile(r"\[call\]", re.IGNORECASE)
 
-    @property
-    def terminal_render_keys(self):
-        return [
-            *[["dice_rolls", pid] for pid in range(self.state.num_players)], 
-            "remaining_dice", 
-            ["current_bid", "quantity"],
-            ["current_bid", "face_value"],
-        ]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players:int, seed: Optional[int] = None):
         """ Reset the Liar's Dice game to its initial state """

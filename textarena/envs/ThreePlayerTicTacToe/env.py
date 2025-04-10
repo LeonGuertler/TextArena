@@ -2,6 +2,7 @@ import re
 from typing import Optional, Dict, Tuple, Any
 
 import textarena as ta
+from textarena.envs.ThreePlayerTicTacToe.renderer import create_board_str
 
 class ThreePlayerTicTacToeEnv(ta.Env):
     """ A Tic Tac Toe variant for three players on a 5x5 board. """
@@ -11,6 +12,9 @@ class ThreePlayerTicTacToeEnv(ta.Env):
         self.cell_mapping = {i * self.board_size + j: (i, j) for i in range(self.board_size) for j in range(self.board_size)}
         self.symbols = {0: 'A', 1: 'B', 2: 'C'}
 
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
+        
     def reset(self, num_players: int, seed: Optional[int] = None):
         if num_players != 3:
             raise ValueError("ThreePlayerTicTacToeEnv requires exactly 3 players.")

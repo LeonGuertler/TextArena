@@ -2,6 +2,7 @@ import re, random
 from typing import Tuple, Dict, Any, Optional
 
 import textarena as ta
+from textarena.envs.KuhnPoker.renderer import create_board_str
 
 # For reference:
 #  - J (Jack): numeric rank 0
@@ -47,10 +48,9 @@ class KuhnPokerEnv(ta.Env):
         # Regular expression to capture valid actions: e.g. [Check], [Bet], [Fold], [Call]
         self.action_pattern = re.compile(r"\[(Check|Bet|Fold|Call)\]", re.IGNORECASE)
 
-    @property
-    def terminal_render_keys(self):
-        """Keys to render when the game ends, if needed."""
-        return ["pot", "player_chips"]
+    def get_board_str(self):
+        return create_board_str(self.state.game_state)
+
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment """

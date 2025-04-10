@@ -2,6 +2,7 @@ import re, random, json, os
 from typing import Any, Dict, Optional, Tuple
 import importlib.resources
 import textarena as ta
+from textarena.envs.TwentyQuestions.renderer import create_board_str
 
 import nltk
 from nltk.corpus import words
@@ -76,9 +77,8 @@ class TwentyQuestionsEnv(ta.Env):
         except Exception as e:
             raise FileNotFoundError(f"Failed to load words data: {str(e)}")
 
-    @property
-    def terminal_render_keys(self):
-        return []
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
     
     def get_gamemaster_response(self, action: str) -> str:
         """
@@ -174,6 +174,11 @@ class TwentyQuestionsEnv(ta.Env):
         if not action_match or (action_match and '?' in action):
             ## if the action is not a guess, or if it is a action but contains a question mark, then it is a question
             gamemaster_response = self.get_gamemaster_response(action)
+
+            if "history" not in self.state.game_state:
+                self.state.game_state["history"] = []
+            self.state.game_state["history"].append((action, gamemaster_response))
+            
             if self.state.turn == self.state.max_turns-2:
                 gamemaster_response += "\nYou have run out of questions. What is your final guess?"
             self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=gamemaster_response)

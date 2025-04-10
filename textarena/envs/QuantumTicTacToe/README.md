@@ -3,7 +3,6 @@
 ## Overview
 **Quantum TicTacToe** is a futuristic twist on the classic 3x3 Tic Tac Toe game. In this version, each player places **spooky marks** in a *superposition* of two cells. These quantum moves remain entangled until a **cycle** is formed, triggering a **collapse** into classical marks. Players must carefully manage their entanglements to outmaneuver their opponent and be the first to form three classical marks in a row.
 
-This environment captures quantum concepts like entanglement and collapse in an intuitive gameplay format, ideal for research on planning, reasoning, and delayed outcomes.
 
 ## Action Space
 - **Format:** Each move places a spooky mark in two empty cells:

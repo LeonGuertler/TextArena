@@ -2,6 +2,7 @@ import re
 from typing import Any, Dict, Optional, Tuple, List, Callable
 
 import textarena as ta 
+from textarena.envs.ConnectFour.renderer import create_board_str
 
 class ConnectFourEnv(ta.Env):
     """ Environment for Connect Four Game. """
@@ -18,11 +19,10 @@ class ConnectFourEnv(ta.Env):
         self.num_rows = num_rows 
         self.num_cols = num_cols 
 
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board"]
+    # @property 
+    def get_board_str(self):
+        return create_board_str(board=self.state.game_state["board"])
 
-    
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the game to its initial state """
         # Initialize game state variables

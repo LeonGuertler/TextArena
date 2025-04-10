@@ -20,6 +20,7 @@ class GuessWhoEnv(ta.Env):
         # Load character list
         self.characters = self._load_characters()
 
+
     def _load_characters(self, characters_path: Optional[str] = None):
         """
         Load characters from a JSON file.

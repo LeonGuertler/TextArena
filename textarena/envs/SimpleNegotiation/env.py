@@ -2,17 +2,12 @@ import re, random
 from typing import Any, Dict, Optional, Tuple
 
 import textarena as ta
+from textarena.envs.SimpleNegotiation.renderer import create_board_str
 
 
 class SimpleNegotiationEnv(ta.Env):
     """ Environment for the SimpleNegotiation Game. """
     def __init__(self, max_turns: Optional[int] = 10):
-        """
-        Initialize the SimpleNegotiation Game environment.
-
-        Args:
-            max_turns (Optional[int]): Maximum number of turns before the game is truncated.
-        """
         self.max_turns = max_turns
         self.resource_names = ["Wheat", "Wood", "Sheep", "Brick", "Ore"]
         self.base_values = {"Wheat": 5, "Wood": 10, "Sheep": 15, "Brick": 25, "Ore": 40}
@@ -25,9 +20,13 @@ class SimpleNegotiationEnv(ta.Env):
             re.IGNORECASE | re.DOTALL
         )
 
-    @property
-    def terminal_render_keys(self):
-        return ["player_resources", "inventory_value"]
+    def get_board_str(self):
+        return create_board_str(
+            player_resources=self.state.game_state["player_resources"], 
+            player_values=self.state.game_state["player_values"], 
+            inventory_values=self.state.game_state["inventory_value"], 
+            current_offer=self.state.game_state["current_offer"]
+        )
 
     def _generate_player_prompt(self, player_id: int, game_state: Dict[int, Any]) -> str:
         """ Generate the initial prompt for a player """

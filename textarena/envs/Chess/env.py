@@ -24,27 +24,11 @@ class ChessEnv(ta.Env):
         # Regex patterns
         self.move_pattern = re.compile(r"\[[a-h][1-8][a-h][1-8][qrbn]?\]", re.IGNORECASE)
 
-    @property
-    def terminal_render_keys(self):
-        """Keys to render in the game state panel"""
-        return ["turn", "max_turns", "current_board"]
-
-    def create_board_str(self) -> str:
-        """
-        Generate a string representation of the chess board with pieces.
-        
-        Returns:
-            str: A multiline string representing the current board state
-        """
-        return create_board_str(str(self.board), grid_size=(3,7))
-
+    def get_board_str(self):
+        return create_board_str(board=self.state.game_state["board"])
 
     def reset(self, num_players: int, seed: Optional[int]=None):
-        """
-        Reset the game to its initial state.
-        Args:
-            seed (Optional[int]): Seed for random number generator to ensure reproducibility.
-        """
+        """ Reset the game to its initial state """
         # Initialize game state variables
         self.state = ta.State(
             num_players=num_players,
@@ -58,7 +42,7 @@ class ChessEnv(ta.Env):
         self.board = chess.Board()
 
         game_state = {
-            "current_board": str(self.board),
+            "board": self.board,
             "valid_moves": ', '.join([f'[{move.uci()}]' for move in self.board.legal_moves])
         }
         self.state.reset(seed=seed, game_state=game_state, player_prompt_function=self._generate_player_prompt)
@@ -99,12 +83,9 @@ class ChessEnv(ta.Env):
         self._agument_observations()
 
         # update the board state string
-        self.state.game_state["current_board"] = str(self.board)
+        self.state.game_state["board"] = self.board
 
         return self.state.step()
-
-
-
 
     def _execute_player_move(self, action: str):
         """Execute the player's move based on the action string."""
@@ -145,7 +126,6 @@ class ChessEnv(ta.Env):
             else:
                 winner_id = 0 if outcome == "1-0" else 1
                 self.state.set_winners(player_ids=[winner_id], reason=f"Player {winner_id} wins the match.")
-
 
     def _agument_observations(self):
         """Augment observations with current board state and valid moves."""

@@ -2,6 +2,7 @@ import re, random
 from typing import Optional, Dict, Tuple, List, Any
 
 import textarena as ta
+from textarena.envs.UltimateTicTacToe.renderer import create_board_str
 
 class UltimateTicTacToeEnv(ta.Env):
     """ Environment for a two-player game of Ultimate Tic Tac Toe """
@@ -13,10 +14,8 @@ class UltimateTicTacToeEnv(ta.Env):
         ## initialise the move history
         self.move_history = []
 
-
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board"]
+    def get_board_str(self):
+        return create_board_str(board=self.state.game_state["board"])
 
     def reset(self, num_players: int, seed: Optional[int]=None):
         """ Reset the environment to the initial state """

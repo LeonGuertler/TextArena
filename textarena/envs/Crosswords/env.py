@@ -1,9 +1,8 @@
+import re, random, json, copy
 from typing import Any, Dict, Optional, Tuple, Union
-import copy
-import random
+
 import textarena as ta
-import re
-import json
+from textarena.envs.Crosswords.renderer import create_board_str
 
 class CrosswordsEnv(ta.Env):
     """ Crosswords environment """
@@ -32,6 +31,9 @@ class CrosswordsEnv(ta.Env):
         with open("textarena/envs/Crosswords/words_clues.jsonl", "r") as f:
             word_data = f.readlines()
         self.word_data = [json.loads(x) for x in word_data if json.loads(x)["hardcore"]==hardcore]
+
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def _load_words(self, words_path: Optional[str] = None, hardcore: bool = False):
         """
@@ -84,8 +86,10 @@ class CrosswordsEnv(ta.Env):
         game_state={
             "board": self.game_board_hidden,
             "rendered_board": self._render_board(self.game_board_hidden, show_letters=True),
-            "clues": self._clue_generator(string_format=False)
+            "clues": self.clues,
+            "placed_words": self.placed_words
         }
+
         return self.state.reset(seed=seed, game_state=game_state, player_prompt_function=self._generate_player_prompt)
 
 

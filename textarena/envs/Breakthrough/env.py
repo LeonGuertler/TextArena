@@ -2,6 +2,7 @@ import re
 from typing import List, Dict, Tuple, Any, Optional
 
 import textarena as ta
+from textarena.envs.Breakthrough.renderer import create_board_str
 
 class BreakthroughEnv(ta.Env):
     """
@@ -45,10 +46,8 @@ class BreakthroughEnv(ta.Env):
             re.IGNORECASE
         )
 
-    @property
-    def terminal_render_keys(self):
-        """Optional keys the environment can display in e.g. a text UI."""
-        return ["board_str", "valid_moves"]
+    def get_board_str(self):
+        return create_board_str(board=self.board, board_size=self.board_size)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """

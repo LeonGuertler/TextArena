@@ -2,6 +2,7 @@ import re
 from typing import Optional, Dict, Tuple, List, Any
 
 import textarena as ta
+from textarena.envs.Othello.renderer import create_board_str
 
 class OthelloEnv(ta.Env):
     """ Environment for a two-player game of Othello (Reversi) """
@@ -27,10 +28,8 @@ class OthelloEnv(ta.Env):
             (1, -1),  (1, 0),  (1, 1)    # SW, S, SE
         ]
     
-    @property
-    def terminal_render_keys(self):
-        """ Keys to render in the game state panel """
-        return ["rendered_board", "black_count", "white_count", "turn"]
+    def get_board_str(self):
+        return create_board_str(self.board)
     
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the Othello game to its initial state """

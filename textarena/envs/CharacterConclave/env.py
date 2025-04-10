@@ -2,6 +2,7 @@ import re, random
 from typing import Optional, Tuple, Dict, Any
 
 import textarena as ta
+from textarena.envs.CharacterConclave.renderer import create_board_str
 
 class CharacterConclaveEnv(ta.Env):
     """
@@ -18,9 +19,8 @@ class CharacterConclaveEnv(ta.Env):
         """
         self.character_budget = character_budget
 
-    @property
-    def terminal_render_keys(self):
-        return ["budget_remaining"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment to its initial state """

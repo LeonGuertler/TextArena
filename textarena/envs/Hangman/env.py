@@ -2,6 +2,7 @@ import re, random, copy
 from typing import Any, Dict, List, Tuple, Optional, Union
 
 import textarena as ta
+from textarena.envs.Hangman.renderer import create_board_str
 
 ## use nltk to get the words
 import nltk
@@ -27,9 +28,8 @@ class HangmanEnv(ta.Env):
         else:
             self.word_list = words.words("en-basic")
 
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board", "tries_left"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment to its initial state """

@@ -3,6 +3,7 @@ import networkx as nx
 from typing import Any, Dict, List, Tuple, Optional, Union
 
 import textarena as ta
+from textarena.envs.WordLadder.renderer import create_board_str
 from textarena.utils.word_lists import EnglishDictionary
 
 ## use nltk to get the words
@@ -34,10 +35,8 @@ class WordLadderEnv(ta.Env):
         ## load the universal word list
         self.universal_word_list = self.load_universal_word_list()
 
-
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_text"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
     
     def load_universal_word_list(self):
         """
@@ -79,17 +78,7 @@ class WordLadderEnv(ta.Env):
         return prompt
     
     def _render_text(self) -> str:
-        """
-        Render the text for the player based on the current state of the game.
-
-        Returns:
-            str: The rendered text for the player.
-
-        """
-        ## render the history and also the target words
-        return (
-            f"Word Ladder History: {' -> '.join(self.history)}. Target Word: {self.target_word}\n", 
-        )
+        return f"Word Ladder History: {' -> '.join(self.history)}. Target Word: {self.target_word}\n"
     
     def _generate_word_graph(self, min_length=3, max_length=11):
         """

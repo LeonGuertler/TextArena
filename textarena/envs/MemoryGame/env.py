@@ -2,6 +2,7 @@ import re, random
 from typing import Any, Dict, Optional, Tuple, List
 
 import textarena as ta
+from textarena.envs.MemoryGame.renderer import create_board_str
 
 class MemoryGameEnv(ta.Env):
     """ Environment for Memory Game """
@@ -14,10 +15,8 @@ class MemoryGameEnv(ta.Env):
         """
         self.grid_size = grid_size
 
-
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board", "scores"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """

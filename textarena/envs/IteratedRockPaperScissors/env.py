@@ -2,17 +2,21 @@ import re, random
 from typing import Optional, Dict, Tuple, Any
 
 import textarena as ta
+from textarena.envs.IteratedRockPaperScissors.renderer import create_board_str
 
 class IteratedRockPaperScissorsEnv(ta.Env):
     """ Environment for a two-player iterated Rock-Paper-Scissors game """
     def __init__(self, num_rounds: int = 5):
         self.num_rounds = num_rounds
 
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
+
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment to the initial state """
         random.seed(seed)
         self.state = ta.State(num_players=2, min_players=2, max_players=2)
-        game_state = {"round": 1, "points": {0:0, 1:0}, "moves": {0:None, 1:None}}
+        game_state = {"round": 1, "points": {0:0, 1:0}, "moves": {0:None, 1:None}, "history": []}
         self.state.reset(game_state=game_state, player_prompt_function=self._generate_player_prompt)
 
     def _generate_player_prompt(self, player_id: int, game_state: Dict[str, Any]) -> str:
@@ -40,6 +44,7 @@ class IteratedRockPaperScissorsEnv(ta.Env):
                 p0_move = self.state.game_state["moves"][0]
                 p1_move = self.state.game_state["moves"][1]
                 result = self._resolve_round(p0_move, p1_move)
+                self.state.game_state["history"].append({0:p0_move,1:p1_move})
                 self.state.game_state["round"] += 1
                 self.state.game_state["moves"] = {0:None, 1:None}
 

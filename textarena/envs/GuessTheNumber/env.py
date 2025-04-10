@@ -1,8 +1,8 @@
+import re, random, copy
 from typing import Any, Dict, Optional, Tuple, Union
-import copy
-import random
+
 import textarena as ta
-import re
+from textarena.envs.GuessTheNumber.renderer import create_board_str
 
 class GuessTheNumberEnv(ta.Env):
     """ Guess the number game environment """
@@ -21,9 +21,8 @@ class GuessTheNumberEnv(ta.Env):
         self.max_number = max_number 
         self.max_turns = max_turns
 
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_text"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment """
@@ -38,6 +37,7 @@ class GuessTheNumberEnv(ta.Env):
         game_state = {
             "game_number": self.game_number,
             "rendered_text": "Guess the number between {} and {}.".format(self.min_number, self.max_number),
+            "guess_history": []
         }
         self.state.reset(seed=seed, game_state=game_state, player_prompt_function=self._generate_player_prompt)
     
@@ -81,12 +81,13 @@ class GuessTheNumberEnv(ta.Env):
                     reason=f"Congratulations! Player {player_id} guessed the correct number."
                     self.state.set_winners(player_ids=[player_id], reason=reason)
                 else:
-                    if player_guess < self.game_number:
+                    if player_guess > self.game_number:
                         hint = "lower"
                     else:
                         hint = "higher"
-                    message=f"Your guess of {player_guess} is {hint}."
+                    message=f"The target number is {hint}."
                     self.state.add_observation(from_id=ta.GAME_ID, to_id=player_id, message=message, for_logging=False)
+                    self.state.game_state["guess_history"].append((player_guess, hint))
 
             self.state.game_state["rendered_text"] = f"Player {player_id} guessed {player_guess}."
 

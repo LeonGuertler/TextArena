@@ -2,6 +2,7 @@ import re, random
 from typing import Any, Dict, List, Tuple, Optional, Union
 
 import textarena as ta
+from textarena.envs.FifteenPuzzle.renderer import create_board_str
 
 class FifteenPuzzleEnv(ta.Env):
     """ Fifteen Puzzle environment """
@@ -10,9 +11,8 @@ class FifteenPuzzleEnv(ta.Env):
         super().__init__()
         self.max_turns = max_turns
 
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
     
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment to its initial state """

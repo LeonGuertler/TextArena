@@ -2,6 +2,7 @@ import re, random
 from typing import Any, Dict, Optional, Tuple, List, Set
 
 import textarena as ta
+from textarena.envs.SecretMafia.renderer import create_board_str
 
 """
 TODO:
@@ -44,10 +45,9 @@ class SecretMafiaEnv(ta.Env):
             }
         }
 
-    @property
-    def terminal_render_keys(self):
-        return ["phase", "alive_players", "player_roles", "votes", "night_actions"]
-
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
+        
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment """
         self.state = ta.State(num_players=num_players, min_players=5, max_players=15)
@@ -371,6 +371,7 @@ class SecretMafiaEnv(ta.Env):
     def _evaluate_votes(self):
         """ returns pid with most votes or None & resets the votes"""
         # Count votes for each player
+        print(f"votes: ", self.state.game_state["votes"])
         vote_counts = {}
         for voter, target in self.state.game_state["votes"].items():
             vote_counts[target] = vote_counts.get(target, 0) + 1

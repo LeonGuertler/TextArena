@@ -1,12 +1,12 @@
+import re, random
 from typing import Optional, Tuple, List, Dict, Any
+
 import textarena as ta
-import random
-import re
+from textarena.envs.Mastermind.renderer import create_board_str
+
 
 class MastermindEnv(ta.Env):
-    """
-    Environment for Mastermind game.
-    """
+    """ Environment for Mastermind game """
     def __init__(
         self,
         code_length: Optional[int] = 4,
@@ -28,9 +28,8 @@ class MastermindEnv(ta.Env):
         self.num_numbers = num_numbers
         self.duplicate_numbers = duplicate_numbers
     
-    @property
-    def terminal_render_keys(self):
-        return ["secret_code", "guess"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Resets the environment to its initial state. """
@@ -39,20 +38,16 @@ class MastermindEnv(ta.Env):
 
         # generate secret code 
         available_numbers = list(range(1, self.num_numbers + 1))
-        if self.duplicate_numbers:
-            code = random.choices(available_numbers, k=self.code_length)
-        else:
-            code = random.sample(available_numbers, k=self.code_length)
+        sample_fn = random.choices if self.duplicate_numbers else random.sample
+        code = sample_fn(available_numbers, k=self.code_length)
+        # if self.duplicate_numbers:
+        #     code = random.choices(available_numbers, k=self.code_length)
+        # else:
+        #     code = random.sample(available_numbers, k=self.code_length)
 
         ## return the initial observations
-        self.state.reset(
-            seed=seed,
-            game_state={
-                "secret_code": code,
-                "guess": [],
-            },
-            player_prompt_function=self._generate_player_prompt
-        )
+        game_state={"secret_code": code, "guess": []}
+        self.state.reset(seed=seed, game_state=game_state, player_prompt_function=self._generate_player_prompt)
     
     def _generate_player_prompt(self, player_id: int, game_state: Dict[int, Any]) -> str:
         """ Generates the initial prompt for a player """
@@ -70,25 +65,11 @@ class MastermindEnv(ta.Env):
     
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
-        """
-        Process the player's action and update the game state.
-
-        Args:
-            action (str): The player's action (guess).
-
-        Returns:
-            done (bool): whether the game has concluded
-            Info (ta.Info): additional information
-        """
+        """ Process the player's action and update the game state """
         player_id = self.state.current_player_id
 
         ## update the observations
-        self.state.add_observation(
-            from_id=player_id,
-            to_id=-1, # broadcast to all 
-            message=action,
-            for_logging=True
-        )
+        self.state.add_observation(from_id=player_id, to_id=-1, message=action, for_logging=True)
 
         ## search for the action pattern
         action_search_pattern = re.compile(r"\[(\d+(?:\s+\d+)*)\]") ## e.g., [1 2 3 4]
@@ -127,6 +108,16 @@ class MastermindEnv(ta.Env):
 
         # Evaluate the guess
         black_pegs, white_pegs = self._evaluate_guess(player_id, player_guess)
+
+        if "history" not in self.state.game_state:
+            self.state.game_state["history"] = []
+
+        self.state.game_state["history"].append({
+            "guess": player_guess,
+            "black": black_pegs,
+            "white": white_pegs
+        })
+
 
         # Check for win condition
         if black_pegs == self.code_length:

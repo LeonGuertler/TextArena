@@ -2,6 +2,7 @@ import re
 from typing import Any, Dict, Optional, Tuple, List
 
 import textarena as ta
+from textarena.envs.Checkers.renderer import create_board_str
 
 class CheckersEnv(ta.Env):
     """
@@ -33,10 +34,8 @@ class CheckersEnv(ta.Env):
         #   0 -> Red 
         #   1 -> Black
 
-    @property
-    def terminal_render_keys(self):
-        """Keys to render in the game state panel (optional)."""
-        return ["rendered_board"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """

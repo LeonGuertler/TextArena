@@ -112,9 +112,7 @@ class State:
                 executable()
 
     def _reset_game_parameters(self):
-        """
-        Reset the game parameters at the start of the game or after each step.
-        """
+        """ Reset the game parameters at the start of the game or after each step """
         self.done = False 
         self.info = {}
         self.rewards = None
@@ -156,10 +154,7 @@ class State:
             rotate_player  (bool): Whether to rotate the current player after the step.
 
         Returns:
-            Tuple[
-                bool,                               # done
-                Dict[str, Any],                     # info
-            ]: The updated game state after the step.
+            Tuple[bool, Dict[str, Any]] # done, info 
         """
         if self.done:  # if game happens to be terminated on last turn...
             return (True, self.info)
@@ -243,12 +238,7 @@ class State:
         self.done = True
 
     def set_draw(self, reason: Optional[str]):
-        """
-        Declare the game as a draw.
-
-        Args:
-            reason (Optional[str]): Reason for the draw.
-        """
+        """ Declare the game as a draw """
         # set the rewards
         self.rewards = {pid: 0 for pid in range(self.num_players)}
 
@@ -264,13 +254,7 @@ class State:
         self.done = True
 
     def set_invalid_move(self, player_id: int, reason: Optional[str]):
-        """
-        Handle an invalid move made by a player.
-
-        Args:
-            player_ids (int): Invalid move player id.
-            reason (str): Reason for the invalid move.
-        """
+        """ Handle an invalid move made by a player """
         if self.error_allowance > self.error_count:
             # increment error count
             self.error_count += 1
@@ -320,6 +304,7 @@ class State:
         self.info["reason"] = reason
         self.done = True
 
+
 class Env(ABC):
     """
     Abstract base class for text-based game environments.
@@ -355,18 +340,6 @@ class Env(ABC):
                 - info (Dict[str, Any]): Additional information about the environment.
         """
         raise NotImplementedError
-    
-    @property
-    def offline_renderer(self):
-        raise NotImplementedError
-    
-    @property
-    def terminal_render_keys(self):
-        # If this instance is wrapping another environment, delegate to it
-        if hasattr(self, 'env') and self.env is not None:
-            return self.env.terminal_render_keys
-        # Default for non-wrapped (base) environments that don't override
-        return []
 
     def get_observation(self):
         return self.state.current_player_id, self.state.get_current_player_observation()
@@ -378,7 +351,6 @@ class Env(ABC):
 
 class Wrapper(Env):
     """ Base class for environment wrappers. """
-
     def __init__(self, env):
         self.env = env
 
@@ -387,7 +359,6 @@ class Wrapper(Env):
 
     def reset(self, num_players: int , seed: Optional[int] = None):
         return self.env.reset(num_players=num_players, seed=seed)
-
 
     def step(self, action: str) -> Tuple[bool, Info]:
         return self.env.step(action=action)
@@ -400,7 +371,6 @@ class Wrapper(Env):
 
 
 class ObservationWrapper(Wrapper):
-
     def get_observation(self):
         player_id, observation = self.env.get_observation()
         return player_id, self.observation(player_id, observation)
@@ -412,37 +382,25 @@ class ObservationWrapper(Wrapper):
 class RenderWrapper(Wrapper):
     def step(self, action: str) -> Tuple[bool, Optional[Info]]:
         return self.env.step(action=action)
-
     
     def reset(self, num_players: int , seed: Optional[int] = None):
         self.reset_render()
         return self.env.reset(num_players=num_players, seed=seed)
 
-
     def reset_render(self):
         raise NotImplementedError
+
 
 class ActionWrapper(Wrapper):
     def step(self, action: str) -> Tuple[bool, Optional[Info]]:
         return self.env.step(action=self.action(action))
 
     def action(self, action: str) -> str:
-        """
-        Transforms the action.
-
-        Args:
-            action (str): The original action.
-
-        Returns:
-            str: The transformed action.
-        """
         raise NotImplementedError
 
 
 class Agent(ABC):
-    """
-    Generic agent class that defines the basic structure of an agent.
-    """
+    """ Generic agent class that defines the basic structure of an agent """
     @abstractmethod
     def __call__(self, observation: str) -> str:
         """

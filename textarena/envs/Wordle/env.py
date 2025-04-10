@@ -1,9 +1,10 @@
 import re, nltk, random 
 from nltk import pos_tag
 from nltk.corpus import words
-
 from typing import Optional, Tuple, List, Dict, Any
+
 import textarena as ta
+from textarena.envs.Wordle.renderer import create_board_str
 from textarena.utils.word_lists import EnglishDictionary
 
 
@@ -17,11 +18,9 @@ class WordleEnv(ta.Env):
         self._load_word_list(hardcore=hardcore)
         self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
 
-
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board"]
-    
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
+        
     def _check_word(self, word: str) -> bool:
         return self.dictionary.is_english_word(word)
     

@@ -3,6 +3,7 @@ import importlib.resources
 from typing import Optional, Dict, Any, Tuple
 
 import textarena as ta
+from textarena.envs.Debate.renderer import create_board_str
 
 class DebateEnv(ta.Env):
     """
@@ -43,9 +44,8 @@ class DebateEnv(ta.Env):
         # Initialize jury
         self.jury = jury_class(jury_size=jury_size, options=["Affirmative", "Negative"])
 
-    @property
-    def terminal_render_keys(self):
-        return ["topic", "sides", "votes"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def _load_topics(self, topics_path: Optional[str]):
         """

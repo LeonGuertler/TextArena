@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import textarena as ta
 from textarena import utils
+from textarena.envs.ScenarioPlanning.renderer import create_board_str
 
 
 class ScenarioPlanningEnv(ta.Env):
@@ -30,14 +31,10 @@ class ScenarioPlanningEnv(ta.Env):
         self._load_scenarios(scenarios_path)
 
         # Initialize judges
-        self.judge = jury_class(
-            jury_size=jury_size,
-            options=["Player 0", "Player 1"]
-        )
+        self.judge = jury_class(jury_size=jury_size, options=["Player 0", "Player 1"])
 
-    @property
-    def terminal_render_keys(self):
-        return ["scenario", "votes"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def _load_scenarios(self, scenarios_path: Optional[str]):
         """

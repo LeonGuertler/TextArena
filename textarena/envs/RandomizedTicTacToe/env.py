@@ -2,6 +2,7 @@ import re, random
 from typing import Optional, Dict, Tuple, Any
 
 import textarena as ta
+from textarena.envs.RandomizedTicTacToe.renderer import create_board_str
 
 class RandomizedTicTacToeEnv(ta.Env):
     """ Tic Tac Toe with random effects each turn. """
@@ -9,6 +10,9 @@ class RandomizedTicTacToeEnv(ta.Env):
         super().__init__()
         self.cell_mapping = {i * 3 + j: (i, j) for i in range(3) for j in range(3)}
         self.effects = ["swap", "block", "double", "wild"]
+
+    def get_board_str(self):
+        return create_board_str(board=self.state.game_state["board"])
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         self.state = ta.State(num_players=2, min_players=2, max_players=2)

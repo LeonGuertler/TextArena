@@ -3,6 +3,7 @@ from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 import textarena as ta
+from textarena.envs.Poker.renderer import create_board_str
 
 
 class PokerEnv(ta.Env):
@@ -41,19 +42,16 @@ class PokerEnv(ta.Env):
         self.rank_values = {rank: idx+2 for idx, rank in enumerate(self.ranks)}
         #  (Mapping e.g. "2" -> 2, ..., "10"->10, "J"->11, "Q"->12, "K"->13, "A"->14)
 
-    @property
-    def terminal_render_keys(self):
-        """
-        Keys that your environment's renderer (or logs) might use to display state in a summary.
-        Include anything you want to show in a terminal or offline environment.
-        """
-        return [
-            "player_chips",
-            "visible_community_cards",
-            "player_bets",
-            "button",
-            "pot"
-        ]
+
+    def get_board_str(self):
+        return create_board_str(
+            community_cards=self.state.game_state["visible_community_cards"],
+            pot=self.state.game_state["pot"],
+            player_chips=self.state.game_state["player_chips"],
+            player_hands=self.state.game_state["player_hands"],
+            bets=self.state.game_state["player_bets"]
+        )
+
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the full game to its initial state """

@@ -2,6 +2,7 @@ import re, random, copy
 from typing import Any, Dict, Optional, Tuple, Union
 
 import textarena as ta
+from textarena.envs.TowerOfHanoi.renderer import create_board_str
 
 class TowerOfHanoiEnv(ta.Env):
     """ Tower of Hanoi game environment """
@@ -17,9 +18,9 @@ class TowerOfHanoiEnv(ta.Env):
         self.num_disks = num_disks
         self.max_turns = max_turns
 
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board"]
+
+    def get_board_str(self):
+        return create_board_str(towers=self.towers)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment """

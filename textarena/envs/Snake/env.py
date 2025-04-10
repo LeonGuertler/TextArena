@@ -3,6 +3,7 @@ from collections import deque
 from typing import Any, Dict, List, Optional, Tuple
 
 import textarena as ta
+from textarena.envs.Snake.renderer import create_board_str
 
 class Snake:
     """Represents a snake in the game with position and alive status."""
@@ -39,10 +40,13 @@ class SnakeEnv(ta.Env):
         # Store each player's pending move (None if no move yet this round)
         self.pending_actions = {}
 
-    @property
-    def terminal_render_keys(self):
-        """Which keys to show in a terminal rendering if used outside."""
-        return ["board_state", "scores"]
+    def get_board_str(self):
+        return create_board_str(
+            width=self.width,
+            height=self.height,
+            snakes=self.state.game_state["snakes"],
+            apples=self.state.game_state["apples"],
+        )
 
     def _random_free_cell(
         self,

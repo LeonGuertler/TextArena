@@ -1,6 +1,6 @@
 import textarena as ta
  
-model_name = "Standard GPT-4o LLM"
+model_name = "Standard GPT-4o LLM test"
 model_description = "Standard OpenAI GPT-4o model."
 email = "guertlerlo@cfar.a-star.edu.sg"
 

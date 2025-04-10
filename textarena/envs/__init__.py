@@ -70,7 +70,8 @@ register(id="WordSearch-v0-hardcore", entry_point="textarena.envs.WordSearch.env
 
 
 # Battleship (two-player)
-register(id="Battleship-v0", entry_point="textarena.envs.Battleship.env:BattleshipEnv", grid_size=10)
+register(id="Battleship-v0", entry_point="textarena.envs.Battleship.env:BattleshipEnv", grid_size=5)
+register(id="Battleship-v0-standard", entry_point="textarena.envs.Battleship.env:BattleshipEnv", grid_size=10)
 register(id="Battleship-v0-large", entry_point="textarena.envs.Battleship.env:BattleshipEnv", grid_size=14)
 register(id="Battleship-v0-extreme", entry_point="textarena.envs.Battleship.env:BattleshipEnv", grid_size=20)
 

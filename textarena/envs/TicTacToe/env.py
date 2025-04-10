@@ -2,6 +2,7 @@ import re, random
 from typing import Optional, Dict, Tuple, List, Any
 
 import textarena as ta
+from textarena.envs.TicTacToe.renderer import create_board_str
 
 class TicTacToeEnv(ta.Env):
     """ Environment for a two-player game of Tic Tac Toe """
@@ -17,6 +18,9 @@ class TicTacToeEnv(ta.Env):
             player_prompt_function=self._generate_player_prompt
         )
         self._observer_current_state()
+
+    def get_board_str(self):
+        return create_board_str(board=self.state.game_state["board"])
 
     def _render_board(self):
         board = self.state.game_state["board"]

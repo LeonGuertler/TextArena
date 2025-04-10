@@ -2,6 +2,7 @@ import re, random
 from typing import Optional, Tuple, List, Dict, Any
 
 import textarena as ta
+from textarena.envs.Battleship.renderer import create_board_str
 
 class BattleshipEnv(ta.Env):
     """
@@ -16,10 +17,8 @@ class BattleshipEnv(ta.Env):
         """
         self.grid_size = grid_size
 
-
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board"]
+    def get_board_str(self):
+        return create_board_str(game_state=self.state.game_state)
 
     def reset(self, num_players: int, seed: Optional[int]=None):
         """ Reset the environment to start a new game """

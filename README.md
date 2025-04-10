@@ -224,3 +224,32 @@ rewards = env.close()
 § Games from [Negotiating with Humans by LLMs via Strategic Reasoning](https://arxiv.org/pdf/2401.04536)
 
 ¶ These games were added because they are part of [Language Models Make Better Players than Solvers in Cooperative Games](https://arxiv.org/pdf/2402.12348)
+
+
+
+
+
+
+# How to contribute
+Generally speaking the easiest ways of contributing are to either add new environments or complete any of the tasks below:
+
+## Open Tasks
+
+### Adding `create_board_str` functions to 
+    - Bullshit
+    - Codenames
+    - Diplomacy
+    - QuantumTicTacToe
+    - Stratego
+    - Taboo
+
+    - Negotiation
+    - LetterAuction
+    - Tak
+    - SpiteAndMalice
+
+
+
+### Other todos
+    - complete code for bullshit game
+    

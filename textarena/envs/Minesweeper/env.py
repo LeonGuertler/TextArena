@@ -3,6 +3,7 @@ from collections import deque
 from typing import Optional, Tuple, List, Dict, Any
 
 import textarena as ta
+from textarena.envs.Minesweeper.renderer import create_board_str
 
 class MinesweeperEnv(ta.Env):
     """ Minesweeper environment """
@@ -21,9 +22,8 @@ class MinesweeperEnv(ta.Env):
         self.num_mines = num_mines
         self.max_turns = max_turns
 
-    @property
-    def terminal_render_keys(self):
-        return ["rendered_board"]
+    def get_board_str(self):
+        return create_board_str(self.grid, self.revealed, self.flags)
     
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment to its initial state """
