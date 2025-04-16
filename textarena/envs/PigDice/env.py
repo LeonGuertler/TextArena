@@ -10,7 +10,7 @@ class PigDiceEnv(ta.Env):
 
     Rules:
       - Two players alternate turns.
-      - On each turn, the player can either 'roll' or 'hold'.
+      - On each turn, the player can either 'roll' or 'hold' ('r' and 'h' are also acceptable moves).
       - If they 'roll' and get a 2..6, that amount is added to the turn total.
       - If they 'roll' and get a 1, the player loses the turn total, and the turn ends.
       - If they 'hold', the turn total is added to their overall score, and the turn ends.
@@ -30,7 +30,7 @@ class PigDiceEnv(ta.Env):
         self.max_turns = max_turns
 
         # Action pattern for parsing player input
-        self.action_pattern = re.compile(r"\[(roll|hold)\]", re.IGNORECASE)
+        self.action_pattern = re.compile(r"\[(roll|hold|r|h)\]", re.IGNORECASE)
 
         self.roll_value = None
 
@@ -86,16 +86,16 @@ class PigDiceEnv(ta.Env):
         # Parse the action using regex
         match = self.action_pattern.search(action.strip())
         if not match:
-            self.state.set_invalid_move(player_id, f"Invalid action format. Use '[roll]' or '[hold]'.")
+            self.state.set_invalid_move(player_id, f"Invalid action format. Use '[roll]' or '[hold]' or one letter shorthands.")
             return self.state.step(rotate_player=False) 
             
         # Extract the actual action
         action = match.group(1).lower()
         
         # Execute the action
-        if action == "roll":
+        if action in ["roll", "r"]:
             self._perform_roll(player_id)
-        elif action == "hold":
+        elif action in ["hold", "h"]:
             self._perform_hold(player_id)
 
         # add available actions
