@@ -17,7 +17,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
     # Message patterns for player actions and card reveals (improved with more specific patterns)
     target_pattern = re.compile(r'.*\[(?:player\s*)?(\d+)\].*', re.IGNORECASE)
-    reveal_pattern = re.compile(r'.*\breveal\b.*(?:\bcard\b|\brole\b).*', re.IGNORECASE)
+    reveal_pattern = re.compile(r'^\s*I\s+reveal\s+my\s+(?:card|role)\s+to\s+\[(?:player\s*)?(\d+)\]\s*$', re.IGNORECASE)
 
     # Maximum number of role reveals per player per game
     MAX_REVEALS_PER_PLAYER = 5
@@ -1089,8 +1089,11 @@ class TwoRoomsAndABoomEnv(ta.Env):
             return self.state.step(rotate_player=False)
 
         # Handle card/role reveal during Discussion phase
-        if self.reveal_pattern.search(action) and current_phase == "Discussion":
-            self._handle_role_reveal(current_pid, action)
+        reveal_match = self.reveal_pattern.match(action)
+        if reveal_match and current_phase == "Discussion":
+            # The reveal_pattern now directly captures the target player ID
+            target_pid = int(reveal_match.group(1))
+            self._handle_role_reveal_direct(current_pid, target_pid)
         # Normal phase handling
         elif current_phase == "Discussion":
             self._handle_discussion(current_pid=current_pid, action=action)
@@ -1104,84 +1107,151 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
         return self.state.step(rotate_player=False)
 
-    def _handle_role_reveal(self, current_pid, action):
+    def _handle_role_reveal_direct(self, current_pid, target_pid):
         """
-        Handle a player revealing their role to another player
-        with improved validation and restrictions
+        Handle a player revealing their role to another player with direct target ID
 
         Args:
             current_pid (int): ID of the player revealing their role
-            action (str): The reveal action message
+            target_pid (int): ID of the player to reveal to
         """
-        # Extract target from revealing action
-        reveal_target_match = self.target_pattern.search(action)
-
-        if reveal_target_match:
-            try:
-                target_pid = int(reveal_target_match.group(1))
-
-                # Check if player has reveals left
-                current_reveals = self.state.game_state["reveal_counts"].get(current_pid, 0)
-                if current_reveals >= self.MAX_REVEALS_PER_PLAYER:
-                    error_msg = f"You have already used all {self.MAX_REVEALS_PER_PLAYER} of your allowed role reveals."
-                    self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-                    self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
-                    return
-
-                # Check if target is in the same room
-                player_room = 0 if current_pid in self.state.game_state["rooms"][0] else 1
-
-                if target_pid in self.state.game_state["rooms"][player_room]:
-                    # Process the role reveal
-                    true_role = self.state.game_state["player_roles"][current_pid]
-
-                    # Add this player to the target's revealed_roles list
-                    if target_pid not in self.state.game_state["revealed_roles"]:
-                        self.state.game_state["revealed_roles"][target_pid] = []
-
-                    # Update reveal count
-                    self.state.game_state["reveal_counts"][current_pid] = current_reveals + 1
-
-                    # Add to revealed roles if not already revealed
-                    if current_pid not in self.state.game_state["revealed_roles"][target_pid]:
-                        self.state.game_state["revealed_roles"][target_pid].append(current_pid)
-
-                    # Send private message to the target
-                    reveal_msg = (
-                        f"[PRIVATE] Player {current_pid} has revealed their card to you. "
-                        f"Their true role is: {true_role}"
-                    )
-                    self.state.add_observation(from_id=current_pid, to_id=target_pid, message=reveal_msg)
-
-                    # Send confirmation to the revealing player
-                    reveals_left = self.MAX_REVEALS_PER_PLAYER - (current_reveals + 1)
-                    confirm_msg = (
-                        f"You revealed your role ({true_role}) to Player {target_pid}. "
-                        f"You have {reveals_left} reveals remaining."
-                    )
-                    self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=confirm_msg)
-
-                    # Create public version of the message without revealing the role
-                    public_msg = f"I am revealing my card to Player {target_pid}."
-
-                    # Process as normal discussion after handling the reveal
-                    self._handle_discussion(current_pid=current_pid, action=public_msg)
-
-                else:
-                    error_msg = f"You can only reveal your card to players in the same room."
-                    self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-                    self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
-
-            except ValueError:
-                # Handle case where match isn't a valid integer
-                error_msg = "Could not determine who to reveal your card to. Please use format 'reveal my card to [Player X]'"
+        try:
+            # Check if player has reveals left
+            current_reveals = self.state.game_state["reveal_counts"].get(current_pid, 0)
+            if current_reveals >= self.MAX_REVEALS_PER_PLAYER:
+                error_msg = f"You have already used all {self.MAX_REVEALS_PER_PLAYER} of your allowed role reveals."
                 self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
                 self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
-        else:
-            # Generic reveal without target
-            error_msg = "Please specify which player to reveal your card to using [Player X] format."
+                return
+
+            # Check if target is in the same room
+            player_room = 0 if current_pid in self.state.game_state["rooms"][0] else 1
+
+            if target_pid in self.state.game_state["rooms"][player_room]:
+                # Process the role reveal
+                true_role = self.state.game_state["player_roles"][current_pid]
+
+                # Add this player to the target's revealed_roles list
+                if target_pid not in self.state.game_state["revealed_roles"]:
+                    self.state.game_state["revealed_roles"][target_pid] = []
+
+                # Update reveal count
+                self.state.game_state["reveal_counts"][current_pid] = current_reveals + 1
+
+                # Add to revealed roles if not already revealed
+                if current_pid not in self.state.game_state["revealed_roles"][target_pid]:
+                    self.state.game_state["revealed_roles"][target_pid].append(current_pid)
+
+                # Send private message to the target
+                reveal_msg = (
+                    f"[PRIVATE] Player {current_pid} has revealed their card to you. "
+                    f"Their true role is: {true_role}"
+                )
+                self.state.add_observation(from_id=current_pid, to_id=target_pid, message=reveal_msg)
+
+                # Send confirmation to the revealing player
+                reveals_left = self.MAX_REVEALS_PER_PLAYER - (current_reveals + 1)
+                confirm_msg = (
+                    f"You revealed your role ({true_role}) to Player {target_pid}. "
+                    f"You have {reveals_left} reveals remaining."
+                )
+                self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=confirm_msg)
+
+                # Create public version of the message without revealing the role
+                public_msg = f"I am revealing my card to Player {target_pid}."
+
+                # Process as normal discussion after handling the reveal
+                self._handle_discussion(current_pid=current_pid, action=public_msg)
+
+            else:
+                error_msg = f"You can only reveal your card to players in the same room."
+                self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+                self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+
+        except ValueError as e:
+            # Handle unexpected errors
+            error_msg = f"Error processing role reveal: {str(e)}"
             self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-            self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+            self.state.set_invalid_move(player_id=current_pid, reason="Error processing role reveal.")
+
+    # def _handle_role_reveal(self, current_pid, action):
+    #     """
+    #     Handle a player revealing their role to another player
+    #     with improved validation and restrictions
+
+    #     Args:
+    #         current_pid (int): ID of the player revealing their role
+    #         action (str): The reveal action message
+    #     """
+    #     # Extract target from revealing action
+    #     reveal_target_match = self.target_pattern.search(action)
+
+    #     if reveal_target_match:
+    #         try:
+    #             target_pid = int(reveal_target_match.group(1))
+
+    #             # Check if player has reveals left
+    #             current_reveals = self.state.game_state["reveal_counts"].get(current_pid, 0)
+    #             if current_reveals >= self.MAX_REVEALS_PER_PLAYER:
+    #                 error_msg = f"You have already used all {self.MAX_REVEALS_PER_PLAYER} of your allowed role reveals."
+    #                 self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+    #                 self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+    #                 return
+
+    #             # Check if target is in the same room
+    #             player_room = 0 if current_pid in self.state.game_state["rooms"][0] else 1
+
+    #             if target_pid in self.state.game_state["rooms"][player_room]:
+    #                 # Process the role reveal
+    #                 true_role = self.state.game_state["player_roles"][current_pid]
+
+    #                 # Add this player to the target's revealed_roles list
+    #                 if target_pid not in self.state.game_state["revealed_roles"]:
+    #                     self.state.game_state["revealed_roles"][target_pid] = []
+
+    #                 # Update reveal count
+    #                 self.state.game_state["reveal_counts"][current_pid] = current_reveals + 1
+
+    #                 # Add to revealed roles if not already revealed
+    #                 if current_pid not in self.state.game_state["revealed_roles"][target_pid]:
+    #                     self.state.game_state["revealed_roles"][target_pid].append(current_pid)
+
+    #                 # Send private message to the target
+    #                 reveal_msg = (
+    #                     f"[PRIVATE] Player {current_pid} has revealed their card to you. "
+    #                     f"Their true role is: {true_role}"
+    #                 )
+    #                 self.state.add_observation(from_id=current_pid, to_id=target_pid, message=reveal_msg)
+
+    #                 # Send confirmation to the revealing player
+    #                 reveals_left = self.MAX_REVEALS_PER_PLAYER - (current_reveals + 1)
+    #                 confirm_msg = (
+    #                     f"You revealed your role ({true_role}) to Player {target_pid}. "
+    #                     f"You have {reveals_left} reveals remaining."
+    #                 )
+    #                 self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=confirm_msg)
+
+    #                 # Create public version of the message without revealing the role
+    #                 public_msg = f"I am revealing my card to Player {target_pid}."
+
+    #                 # Process as normal discussion after handling the reveal
+    #                 self._handle_discussion(current_pid=current_pid, action=public_msg)
+
+    #             else:
+    #                 error_msg = f"You can only reveal your card to players in the same room."
+    #                 self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+    #                 self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+
+    #         except ValueError:
+    #             # Handle case where match isn't a valid integer
+    #             error_msg = "Could not determine who to reveal your card to. Please use format 'reveal my card to [Player X]'"
+    #             self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+    #             self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+    #     else:
+    #         # Generic reveal without target
+    #         error_msg = "Please specify which player to reveal your card to using [Player X] format."
+    #         self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+    #         self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
 
     def _handle_discussion(self, current_pid, action):
         """
