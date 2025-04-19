@@ -17,8 +17,8 @@
 - **Examples:**
   - Discussion: `I am on the Blue team, and I'm not the President.`
   - Role reveal initiation: `I want to reveal my card` (triggers system prompt)
-  - Role reveal target selection: `3` or `[Player 3]` (selects Player 3 to receive your true role)
-  - Leader selection: `[Player 3]` or `3` to select Player 3 as a hostage
+  - Role reveal target selection: `[Player 3]` or `[3]` (selects Player 3 to receive your true role)
+  - Leader selection: `[Player 3]` or `[3]` to select Player 3 as a hostage
 
 - **Notes:** The game automatically handles hostage exchanges and room transitions. Leaders cannot select themselves as hostages.
 

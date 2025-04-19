@@ -652,7 +652,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
                 f"You've chosen to reveal your role.\n"
                 f"Players in your room: {player_list}\n\n"
                 f"To whom would you like to reveal your role?\n"
-                f"Simply type the player's number (e.g., '3') or use the format '[Player X]'\n"
+                f"Simply reply in the following format: '[Player X]' or '[X]'\n"
                 f"Valid options: {selection_options}\n\n"
                 f"Note: This will be your reveal #{current_reveals + 1} out of {self.MAX_REVEALS_PER_PLAYER} allowed reveals."
             )
