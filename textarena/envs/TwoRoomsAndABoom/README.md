@@ -73,7 +73,7 @@ Player 4: Red
 [GAME] You've chosen to reveal your role.
 Players in your room: Player 0, Player 4, Player 6
 To whom would you like to reveal your role?
-Simply type the player's number (e.g., '3') or use the format '[Player X]'
+Simply reply in the following format: '[Player X]' or '[X]'
 Valid options: [0], [4], [6]
 
 Note: This will be your reveal #1 out of 5 allowed reveals.
@@ -92,7 +92,7 @@ Known player roles:
 Player 0: Blue
 Player 4: Red
 
-Simply type the player's number (e.g., '3') or use the format '[Player X]'
+Simply reply in the following format: '[Player X]' or '[X]'
 Valid options: [0], [4], [6]
 
 Strategic reminder: Blue Team wants the President and Bomber in different rooms at the end.
@@ -187,7 +187,7 @@ Player 5 moved from Room 1 to Room 0.
 - The environment includes robust error recovery mechanisms
 - Message history is capped at 200 messages per room to manage memory usage
 - Winning is determined by the final positions of the President and Bomber
-- Player selection supports both direct number input (e.g., "3") and bracketed format (e.g., "[Player 3]" or "[3]")
+- Player selection requires using the bracketed format (e.g., "[Player 3]" or "[3]")
 
 ## Example Game Flow
 

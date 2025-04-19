@@ -726,7 +726,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
                         f"you must select one player to trade with the other room.\n"
                         f"Your team: {leader_team} Team\n\n"
                         f"Known player roles:\n{intel_info}\n\n"
-                        f"Simply type the player's number (e.g., '3') or use the format '[Player X]'\n"
+                        f"Simply reply in the following format: '[Player X]' or '[X]'\n"
                         f"Valid options: {player_options}\n\n"
                     )
 
