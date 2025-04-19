@@ -83,7 +83,6 @@ class OpenRouterAgent(Agent):
             model=self.model_name,
             messages=messages,
             n=1,
-            stop=None,
             **self.kwargs
         )
         return response.choices[0].message.content.strip()
@@ -251,6 +250,8 @@ class OpenAIAgent(Agent):
         model_name: str, 
         system_prompt: Optional[str] = STANDARD_GAME_PROMPT,
         verbose: bool = False,
+        api_key: str | None = None,
+        base_url: str | None = None,
         **kwargs
     ):
         """
@@ -260,6 +261,8 @@ class OpenAIAgent(Agent):
             model_name (str): The name of the model.
             system_prompt (Optional[str]): The system prompt to use (default: STANDARD_GAME_PROMPT).
             verbose (bool): If True, additional debug info will be printed.
+            api_key (str | None): The API key for the OpenAI API.
+            base_url (str | None): The base URL for the OpenAI API.
             **kwargs: Additional keyword arguments to pass to the OpenAI API call.
         """
         super().__init__()
@@ -276,11 +279,12 @@ class OpenAIAgent(Agent):
                 "Install it with: pip install openai"
             )
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
+        if api_key is None:
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
         
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
         
     
     def _make_request(self, observation: str) -> str:
@@ -303,7 +307,6 @@ class OpenAIAgent(Agent):
             model=self.model_name,
             messages=messages,
             n=1,
-            stop=None,
             **self.kwargs
         )
         
