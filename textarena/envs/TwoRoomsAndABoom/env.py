@@ -20,9 +20,6 @@ class TwoRoomsAndABoomEnv(ta.Env):
     target_pattern = re.compile(r'.*\[(?:player\s*)?(\d+)\].*', re.IGNORECASE)
     reveal_keyword_pattern = re.compile(r'.*\b(?:reveal|show)\b.*(?:\bcard\b|\brole\b).*', re.IGNORECASE)
 
-    # Pattern for direct player selection during system-prompted reveals
-    direct_selection_pattern = re.compile(r'^\s*(?:player\s*)?(\d+)\s*$', re.IGNORECASE)
-
     # Maximum number of role reveals per player per game
     MAX_REVEALS_PER_PLAYER = 5
 
@@ -1241,15 +1238,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
         # Extract target player ID - check both formats
         target_pid = None
 
-        # Check if it's a direct player number (e.g., "3")
-        direct_match = self.direct_selection_pattern.match(action)
-        if direct_match:
-            try:
-                target_pid = int(direct_match.group(1))
-            except ValueError:
-                pass
-
-        # If not direct, check for [Player X] format
+        # Check for [Player X] format
         if target_pid is None:
             match = self.target_pattern.search(action)
             if match:
@@ -1436,15 +1425,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
         # Try to extract player ID using different formats
         selected_pid = None
 
-        # First try direct number input
-        direct_match = self.direct_selection_pattern.match(action)
-        if direct_match:
-            try:
-                selected_pid = int(direct_match.group(1))
-            except ValueError:
-                pass
-
-        # If not direct, try [Player X] format
+        # Try [Player X] format
         if selected_pid is None:
             match = self.target_pattern.search(action)
             if match:

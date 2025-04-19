@@ -10,9 +10,9 @@
     - Free-form text communication with other players in the same room
     - Role revealing: Say `reveal card` or `show role` to initiate revealing your role
   - **Role Reveal Phase (Revealing Player Only):**
-    - **Select Target:** `3` or `[Player 3]` or `[3]` to select which player to reveal to
+    - **Select Target:** `[Player 3]` or `[3]` to select which player to reveal to
   - **Leader Selection Phase (Room Leaders Only):**
-    - **Select Hostage:** `3` or `[Player 3]` or `[3]` to select a player ID in the leader's room
+    - **Select Hostage:**  `[Player 3]` or `[3]` to select a player ID in the leader's room
 
 - **Examples:**
   - Discussion: `I am on the Blue team, and I'm not the President.`
