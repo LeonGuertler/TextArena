@@ -1249,7 +1249,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
         # If we couldn't extract a player ID
         if target_pid is None:
-            error_msg = "Could not determine which player you want to reveal your role to. Please type a player number (e.g., '3') or use [Player X] format."
+            error_msg = "Could not determine which player you want to reveal your role to. Please reply in the following format: '[Player X]' or '[X]'."
             self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
             self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
             return
@@ -1438,7 +1438,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
         if selected_pid is None:
             self.state.set_invalid_move(
                 player_id=current_pid,
-                reason="Could not determine which player you selected. Please type a player number (e.g., '3') or use [Player X] format."
+                reason="Could not determine which player you selected. Please reply in the following format: '[Player X]' or '[X]'."
             )
             return
 
