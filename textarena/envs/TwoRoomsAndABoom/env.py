@@ -16,8 +16,12 @@ class TwoRoomsAndABoomEnv(ta.Env):
     """
 
     # Message patterns for player actions and card reveals (improved with more specific patterns)
+    # Support both [Player X] and [X] formats consistently
     target_pattern = re.compile(r'.*\[(?:player\s*)?(\d+)\].*', re.IGNORECASE)
-    reveal_pattern = re.compile(r'^\s*I\s+reveal\s+my\s+(?:card|role)\s+to\s+\[(?:player\s*)?(\d+)\]\s*$', re.IGNORECASE)
+    reveal_keyword_pattern = re.compile(r'.*\b(?:reveal|show)\b.*(?:\bcard\b|\brole\b).*', re.IGNORECASE)
+
+    # Pattern for direct player selection during system-prompted reveals
+    direct_selection_pattern = re.compile(r'^\s*(?:player\s*)?(\d+)\s*$', re.IGNORECASE)
 
     # Maximum number of role reveals per player per game
     MAX_REVEALS_PER_PLAYER = 5
@@ -131,6 +135,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
             "reveal_counts": self.reveal_counts,
             "original_room_assignments": self.original_room_assignments,
             "team_discussions": {},  # Private team discussions
+            "revealing_player": None,  # To track who initiated a role reveal
         }
 
         # Reset state with game setup
@@ -484,8 +489,8 @@ class TwoRoomsAndABoomEnv(ta.Env):
         # Add information about revealing roles
         prompt += (
             "Role Revealing:\n"
-            "• During discussions, you can say 'I reveal my card to [Player X]' to show your role to another player\n"
-            "• The other player will receive a private message with your true role\n"
+            "• During discussions, you can say 'reveal card' or 'show role' to initiate revealing your role\n"
+            "• The game will then prompt you to select which player to reveal to\n"
             f"• You can reveal your role up to {self.MAX_REVEALS_PER_PLAYER} times per game\n"
             "• This is a way to build trust, but be careful who you reveal to!\n\n"
         )
@@ -512,6 +517,9 @@ class TwoRoomsAndABoomEnv(ta.Env):
         self._validate_game_state()
 
         if new_phase == "Discussion":
+            # Reset any role reveal state
+            self.state.game_state["revealing_player"] = None
+
             # All players in each room can discuss with each other
             for room_idx, room_players in enumerate(self.state.game_state["rooms"]):
                 # Skip empty rooms
@@ -546,6 +554,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
                         f"Round {self.state.game_state['round']}: Discussion phase has started.\n"
                         f"You are in Room {room_idx} with: {player_list}.\n"
                         f"You can talk freely with the other players in your room.\n"
+                        f"To reveal your role to someone, say 'reveal card' or 'show role' during your turn.\n"
                     )
 
                     # Add revealed roles if any
@@ -592,7 +601,74 @@ class TwoRoomsAndABoomEnv(ta.Env):
                     random.shuffle(shuffled_players)
                     self.next_player_ids.extend(shuffled_players)
 
+        elif new_phase == "Role_Reveal":
+            # Only proceed if we have a valid player who wants to reveal
+            revealing_player = self.state.game_state.get("revealing_player")
+            if revealing_player is None:
+                # This shouldn't happen, but just in case
+                self.state.game_state["current_phase"] = "Discussion"
+                self._phase_transition_player_prompts(new_phase="Discussion")
+                return
+
+            # Determine which room the revealing player is in
+            player_room = None
+            if revealing_player in self.state.game_state["rooms"][0]:
+                player_room = 0
+            elif revealing_player in self.state.game_state["rooms"][1]:
+                player_room = 1
+            else:
+                # Error - player not in any room
+                self.state.game_state["current_phase"] = "Discussion"
+                self._phase_transition_player_prompts(new_phase="Discussion")
+                return
+
+            # Check if player has reveals left
+            current_reveals = self.state.game_state["reveal_counts"].get(revealing_player, 0)
+            if current_reveals >= self.MAX_REVEALS_PER_PLAYER:
+                error_msg = f"You have already used all {self.MAX_REVEALS_PER_PLAYER} of your allowed role reveals."
+                self.state.add_observation(from_id=ta.GAME_ID, to_id=revealing_player, message=error_msg)
+                # Return to Discussion
+                self.state.game_state["current_phase"] = "Discussion"
+                self._transition_current_pid()
+                return
+
+            # Get list of players in the same room
+            room_players = [
+                pid for pid in self.state.game_state["rooms"][player_room]
+                if pid != revealing_player
+            ]
+
+            # Create selection prompt
+            if not room_players:
+                # No one to reveal to
+                error_msg = "There are no other players in your room to reveal your role to."
+                self.state.add_observation(from_id=ta.GAME_ID, to_id=revealing_player, message=error_msg)
+                # Return to Discussion
+                self.state.game_state["current_phase"] = "Discussion"
+                self._transition_current_pid()
+                return
+
+            player_list = ", ".join([f"Player {pid}" for pid in room_players])
+            selection_options = ", ".join([f"[{pid}]" for pid in room_players])
+
+            reveal_prompt = (
+                f"You've chosen to reveal your role.\n"
+                f"Players in your room: {player_list}\n\n"
+                f"To whom would you like to reveal your role?\n"
+                f"Simply type the player's number (e.g., '3') or use the format '[Player X]'\n"
+                f"Valid options: {selection_options}\n\n"
+                f"Note: This will be your reveal #{current_reveals + 1} out of {self.MAX_REVEALS_PER_PLAYER} allowed reveals."
+            )
+
+            self.state.add_observation(from_id=ta.GAME_ID, to_id=revealing_player, message=reveal_prompt)
+
+            # Only the revealing player should act in this phase
+            self.next_player_ids = [revealing_player]
+
         elif new_phase == "Leader_Selection":
+            # Reset any role reveal state
+            self.state.game_state["revealing_player"] = None
+
             # Check each room for leader status
             for room_idx in range(2):
                 # Skip empty rooms
@@ -632,7 +708,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
                 # Only proceed if there are players to select
                 if room_players:
-                    player_options = ", ".join([f"'[{pid}]'" for pid in room_players])
+                    player_options = ", ".join([f"[{pid}]" for pid in room_players])
 
                     # Get team information to provide strategic context
                     leader_role = self.state.game_state["player_roles"][leader_id]
@@ -653,7 +729,7 @@ class TwoRoomsAndABoomEnv(ta.Env):
                         f"you must select one player to trade with the other room.\n"
                         f"Your team: {leader_team} Team\n\n"
                         f"Known player roles:\n{intel_info}\n\n"
-                        f"Simply reply in the following format: '[Player X]' or '[X]'\n"
+                        f"Simply type the player's number (e.g., '3') or use the format '[Player X]'\n"
                         f"Valid options: {player_options}\n\n"
                     )
 
@@ -699,6 +775,9 @@ class TwoRoomsAndABoomEnv(ta.Env):
                 self._phase_transition_player_prompts(new_phase="Trade_Execution")
 
         elif new_phase == "Trade_Execution":
+            # Reset any role reveal state
+            self.state.game_state["revealing_player"] = None
+
             # Ensure both rooms have selected hostages (crucial game mechanic)
             for room_idx in range(2):
                 # Skip empty rooms
@@ -765,20 +844,24 @@ class TwoRoomsAndABoomEnv(ta.Env):
                     if (room0_hostage not in self.state.game_state["rooms"][0] and
                         len(self.state.game_state["rooms"][0]) > 1):
                         # Find a new hostage from room 0
-                        new_room0_hostage = random.choice([
+                        eligible_players = [
                             p for p in self.state.game_state["rooms"][0]
                             if p != self.state.game_state["leaders"][0]
-                        ])
-                        self.state.game_state["hostages_to_trade"][0] = new_room0_hostage
+                        ]
+                        if eligible_players:
+                            new_room0_hostage = random.choice(eligible_players)
+                            self.state.game_state["hostages_to_trade"][0] = new_room0_hostage
 
                     if (room1_hostage not in self.state.game_state["rooms"][1] and
                         len(self.state.game_state["rooms"][1]) > 1):
                         # Find a new hostage from room 1
-                        new_room1_hostage = random.choice([
+                        eligible_players = [
                             p for p in self.state.game_state["rooms"][1]
                             if p != self.state.game_state["leaders"][1]
-                        ])
-                        self.state.game_state["hostages_to_trade"][1] = new_room1_hostage
+                        ]
+                        if eligible_players:
+                            new_room1_hostage = random.choice(eligible_players)
+                            self.state.game_state["hostages_to_trade"][1] = new_room1_hostage
 
                     # Try trade again with new hostages
                     room0_hostage = self.state.game_state["hostages_to_trade"].get(0)
@@ -904,6 +987,9 @@ class TwoRoomsAndABoomEnv(ta.Env):
             elif current_phase == "Leader_Selection":
                 self.state.game_state["current_phase"] = "Trade_Execution"
                 self._phase_transition_player_prompts(new_phase="Trade_Execution")
+            elif current_phase == "Role_Reveal":
+                self.state.game_state["current_phase"] = "Discussion"
+                self._phase_transition_player_prompts(new_phase="Discussion")
 
             # Reset recursion counter
             self.transition_recursion_depth = 0
@@ -920,6 +1006,11 @@ class TwoRoomsAndABoomEnv(ta.Env):
                 self._phase_transition_player_prompts(new_phase=new_phase)
             elif current_phase == "Leader_Selection":
                 new_phase = "Trade_Execution"
+                self.state.game_state["current_phase"] = new_phase
+                self._phase_transition_player_prompts(new_phase=new_phase)
+            elif current_phase == "Role_Reveal":
+                # If role reveal completes or fails, go back to discussion
+                new_phase = "Discussion"
                 self.state.game_state["current_phase"] = new_phase
                 self._phase_transition_player_prompts(new_phase=new_phase)
             elif current_phase == "Trade_Execution":
@@ -953,6 +1044,9 @@ class TwoRoomsAndABoomEnv(ta.Env):
             elif current_phase == "Leader_Selection":
                 self.state.game_state["current_phase"] = "Trade_Execution"
                 self._phase_transition_player_prompts(new_phase="Trade_Execution")
+            elif current_phase == "Role_Reveal":
+                self.state.game_state["current_phase"] = "Discussion"
+                self._phase_transition_player_prompts(new_phase="Discussion")
 
             self.transition_recursion_depth = 0
             return
@@ -1088,17 +1182,26 @@ class TwoRoomsAndABoomEnv(ta.Env):
             self.state.prevent_player_change = True
             return self.state.step(rotate_player=False)
 
-        # Handle card/role reveal during Discussion phase
-        reveal_match = self.reveal_pattern.match(action)
-        if reveal_match and current_phase == "Discussion":
-            # The reveal_pattern now directly captures the target player ID
-            target_pid = int(reveal_match.group(1))
-            self._handle_role_reveal_direct(current_pid, target_pid)
-        # Normal phase handling
-        elif current_phase == "Discussion":
-            self._handle_discussion(current_pid=current_pid, action=action)
+        # Handle different phases
+        if current_phase == "Discussion":
+            # Check if the player wants to reveal their role
+            if self.reveal_keyword_pattern.search(action):
+                # Player wants to reveal their role - start the role reveal phase
+                self.state.game_state["revealing_player"] = current_pid
+                self.state.game_state["current_phase"] = "Role_Reveal"
+                self._phase_transition_player_prompts(new_phase="Role_Reveal")
+            else:
+                # Normal discussion
+                self._handle_discussion(current_pid=current_pid, action=action)
+
+        elif current_phase == "Role_Reveal":
+            # Handle role reveal target selection
+            self._handle_role_reveal_selection(current_pid=current_pid, action=action)
+
         elif current_phase == "Leader_Selection":
+            # Handle leader selection of hostages
             self._handle_leader_selection(current_pid=current_pid, action=action)
+
         # Trade_Execution phase doesn't require player actions
 
         # Only transition if the move wasn't invalid
@@ -1107,151 +1210,114 @@ class TwoRoomsAndABoomEnv(ta.Env):
 
         return self.state.step(rotate_player=False)
 
-    def _handle_role_reveal_direct(self, current_pid, target_pid):
+    def _handle_role_reveal_selection(self, current_pid, action):
         """
-        Handle a player revealing their role to another player with direct target ID
+        Handle the selection of a player to reveal role to during the Role_Reveal phase
 
         Args:
-            current_pid (int): ID of the player revealing their role
-            target_pid (int): ID of the player to reveal to
+            current_pid (int): ID of the player making the selection
+            action (str): The selection action
         """
-        try:
-            # Check if player has reveals left
-            current_reveals = self.state.game_state["reveal_counts"].get(current_pid, 0)
-            if current_reveals >= self.MAX_REVEALS_PER_PLAYER:
-                error_msg = f"You have already used all {self.MAX_REVEALS_PER_PLAYER} of your allowed role reveals."
-                self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-                self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
-                return
-
-            # Check if target is in the same room
-            player_room = 0 if current_pid in self.state.game_state["rooms"][0] else 1
-
-            if target_pid in self.state.game_state["rooms"][player_room]:
-                # Process the role reveal
-                true_role = self.state.game_state["player_roles"][current_pid]
-
-                # Add this player to the target's revealed_roles list
-                if target_pid not in self.state.game_state["revealed_roles"]:
-                    self.state.game_state["revealed_roles"][target_pid] = []
-
-                # Update reveal count
-                self.state.game_state["reveal_counts"][current_pid] = current_reveals + 1
-
-                # Add to revealed roles if not already revealed
-                if current_pid not in self.state.game_state["revealed_roles"][target_pid]:
-                    self.state.game_state["revealed_roles"][target_pid].append(current_pid)
-
-                # Send private message to the target
-                reveal_msg = (
-                    f"[PRIVATE] Player {current_pid} has revealed their card to you. "
-                    f"Their true role is: {true_role}"
-                )
-                self.state.add_observation(from_id=current_pid, to_id=target_pid, message=reveal_msg)
-
-                # Send confirmation to the revealing player
-                reveals_left = self.MAX_REVEALS_PER_PLAYER - (current_reveals + 1)
-                confirm_msg = (
-                    f"You revealed your role ({true_role}) to Player {target_pid}. "
-                    f"You have {reveals_left} reveals remaining."
-                )
-                self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=confirm_msg)
-
-                # Create public version of the message without revealing the role
-                public_msg = f"I am revealing my card to Player {target_pid}."
-
-                # Process as normal discussion after handling the reveal
-                self._handle_discussion(current_pid=current_pid, action=public_msg)
-
-            else:
-                error_msg = f"You can only reveal your card to players in the same room."
-                self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-                self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
-
-        except ValueError as e:
-            # Handle unexpected errors
-            error_msg = f"Error processing role reveal: {str(e)}"
+        # Verify this is the player who initiated the reveal
+        if current_pid != self.state.game_state["revealing_player"]:
+            error_msg = "Only the player who initiated the role reveal can select a target."
             self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-            self.state.set_invalid_move(player_id=current_pid, reason="Error processing role reveal.")
+            self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+            return
 
-    # def _handle_role_reveal(self, current_pid, action):
-    #     """
-    #     Handle a player revealing their role to another player
-    #     with improved validation and restrictions
+        # Determine which room the player is in
+        player_room = None
+        if current_pid in self.state.game_state["rooms"][0]:
+            player_room = 0
+        elif current_pid in self.state.game_state["rooms"][1]:
+            player_room = 1
+        else:
+            # This shouldn't happen due to earlier validation
+            error_msg = "You are not in any room. Cannot process role reveal."
+            self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+            self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+            return
 
-    #     Args:
-    #         current_pid (int): ID of the player revealing their role
-    #         action (str): The reveal action message
-    #     """
-    #     # Extract target from revealing action
-    #     reveal_target_match = self.target_pattern.search(action)
+        # Extract target player ID - check both formats
+        target_pid = None
 
-    #     if reveal_target_match:
-    #         try:
-    #             target_pid = int(reveal_target_match.group(1))
+        # Check if it's a direct player number (e.g., "3")
+        direct_match = self.direct_selection_pattern.match(action)
+        if direct_match:
+            try:
+                target_pid = int(direct_match.group(1))
+            except ValueError:
+                pass
 
-    #             # Check if player has reveals left
-    #             current_reveals = self.state.game_state["reveal_counts"].get(current_pid, 0)
-    #             if current_reveals >= self.MAX_REVEALS_PER_PLAYER:
-    #                 error_msg = f"You have already used all {self.MAX_REVEALS_PER_PLAYER} of your allowed role reveals."
-    #                 self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-    #                 self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
-    #                 return
+        # If not direct, check for [Player X] format
+        if target_pid is None:
+            match = self.target_pattern.search(action)
+            if match:
+                try:
+                    target_pid = int(match.group(1))
+                except ValueError:
+                    pass
 
-    #             # Check if target is in the same room
-    #             player_room = 0 if current_pid in self.state.game_state["rooms"][0] else 1
+        # If we couldn't extract a player ID
+        if target_pid is None:
+            error_msg = "Could not determine which player you want to reveal your role to. Please type a player number (e.g., '3') or use [Player X] format."
+            self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+            self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+            return
 
-    #             if target_pid in self.state.game_state["rooms"][player_room]:
-    #                 # Process the role reveal
-    #                 true_role = self.state.game_state["player_roles"][current_pid]
+        # Check if player has reveals left (double-check)
+        current_reveals = self.state.game_state["reveal_counts"].get(current_pid, 0)
+        if current_reveals >= self.MAX_REVEALS_PER_PLAYER:
+            error_msg = f"You have already used all {self.MAX_REVEALS_PER_PLAYER} of your allowed role reveals."
+            self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+            self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+            return
 
-    #                 # Add this player to the target's revealed_roles list
-    #                 if target_pid not in self.state.game_state["revealed_roles"]:
-    #                     self.state.game_state["revealed_roles"][target_pid] = []
+        # Check if target is in the same room
+        if target_pid not in self.state.game_state["rooms"][player_room]:
+            error_msg = f"Player {target_pid} is not in your room. You can only reveal your role to players in the same room."
+            self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
+            self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+            return
 
-    #                 # Update reveal count
-    #                 self.state.game_state["reveal_counts"][current_pid] = current_reveals + 1
+        # Process the role reveal
+        true_role = self.state.game_state["player_roles"][current_pid]
 
-    #                 # Add to revealed roles if not already revealed
-    #                 if current_pid not in self.state.game_state["revealed_roles"][target_pid]:
-    #                     self.state.game_state["revealed_roles"][target_pid].append(current_pid)
+        # Add this player to the target's revealed_roles list
+        if target_pid not in self.state.game_state["revealed_roles"]:
+            self.state.game_state["revealed_roles"][target_pid] = []
 
-    #                 # Send private message to the target
-    #                 reveal_msg = (
-    #                     f"[PRIVATE] Player {current_pid} has revealed their card to you. "
-    #                     f"Their true role is: {true_role}"
-    #                 )
-    #                 self.state.add_observation(from_id=current_pid, to_id=target_pid, message=reveal_msg)
+        # Update reveal count
+        self.state.game_state["reveal_counts"][current_pid] = current_reveals + 1
 
-    #                 # Send confirmation to the revealing player
-    #                 reveals_left = self.MAX_REVEALS_PER_PLAYER - (current_reveals + 1)
-    #                 confirm_msg = (
-    #                     f"You revealed your role ({true_role}) to Player {target_pid}. "
-    #                     f"You have {reveals_left} reveals remaining."
-    #                 )
-    #                 self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=confirm_msg)
+        # Add to revealed roles if not already revealed
+        if current_pid not in self.state.game_state["revealed_roles"][target_pid]:
+            self.state.game_state["revealed_roles"][target_pid].append(current_pid)
 
-    #                 # Create public version of the message without revealing the role
-    #                 public_msg = f"I am revealing my card to Player {target_pid}."
+        # Send private message to the target
+        reveal_msg = (
+            f"[PRIVATE] Player {current_pid} has revealed their card to you. "
+            f"Their true role is: {true_role}"
+        )
+        self.state.add_observation(from_id=current_pid, to_id=target_pid, message=reveal_msg)
 
-    #                 # Process as normal discussion after handling the reveal
-    #                 self._handle_discussion(current_pid=current_pid, action=public_msg)
+        # Send confirmation to the revealing player
+        reveals_left = self.MAX_REVEALS_PER_PLAYER - (current_reveals + 1)
+        confirm_msg = (
+            f"You revealed your role ({true_role}) to Player {target_pid}. "
+            f"You have {reveals_left} reveals remaining."
+        )
+        self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=confirm_msg)
 
-    #             else:
-    #                 error_msg = f"You can only reveal your card to players in the same room."
-    #                 self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-    #                 self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+        # Create public version of the message without revealing the role
+        public_msg = f"I am revealing my card to Player {target_pid}."
 
-    #         except ValueError:
-    #             # Handle case where match isn't a valid integer
-    #             error_msg = "Could not determine who to reveal your card to. Please use format 'reveal my card to [Player X]'"
-    #             self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-    #             self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
-    #     else:
-    #         # Generic reveal without target
-    #         error_msg = "Please specify which player to reveal your card to using [Player X] format."
-    #         self.state.add_observation(from_id=ta.GAME_ID, to_id=current_pid, message=error_msg)
-    #         self.state.set_invalid_move(player_id=current_pid, reason=error_msg)
+        # Process as normal discussion after handling the reveal
+        self._handle_discussion(current_pid=current_pid, action=public_msg)
+
+        # Return to discussion phase
+        self.state.game_state["current_phase"] = "Discussion"
+        self._phase_transition_player_prompts(new_phase="Discussion")
 
     def _handle_discussion(self, current_pid, action):
         """
@@ -1367,23 +1433,31 @@ class TwoRoomsAndABoomEnv(ta.Env):
             )
             return
 
-        # Extract and validate selection
-        match = self.target_pattern.search(action)
-        if not match:
-            # Invalid selection format
-            self.state.set_invalid_move(
-                player_id=current_pid,
-                reason="The selection was not submitted in the correct format. Use '[Player X]'"
-            )
-            return
+        # Try to extract player ID using different formats
+        selected_pid = None
 
-        try:
-            selected_pid = int(match.group(1))
-        except ValueError:
-            # Handle case where match isn't a valid integer
+        # First try direct number input
+        direct_match = self.direct_selection_pattern.match(action)
+        if direct_match:
+            try:
+                selected_pid = int(direct_match.group(1))
+            except ValueError:
+                pass
+
+        # If not direct, try [Player X] format
+        if selected_pid is None:
+            match = self.target_pattern.search(action)
+            if match:
+                try:
+                    selected_pid = int(match.group(1))
+                except ValueError:
+                    pass
+
+        # If we couldn't extract a player ID
+        if selected_pid is None:
             self.state.set_invalid_move(
                 player_id=current_pid,
-                reason="Selected player ID must be a number."
+                reason="Could not determine which player you selected. Please type a player number (e.g., '3') or use [Player X] format."
             )
             return
 

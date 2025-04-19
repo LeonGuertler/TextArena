@@ -8,14 +8,17 @@
 - **Format:** Actions are strings that depend on the current game phase and player role:
   - **Discussion Phase (All Players):**
     - Free-form text communication with other players in the same room
-    - Role revealing: `I reveal my card to [Player X]` to privately show your role to another player
+    - Role revealing: Say `reveal card` or `show role` to initiate revealing your role
+  - **Role Reveal Phase (Revealing Player Only):**
+    - **Select Target:** `3` or `[Player 3]` or `[3]` to select which player to reveal to
   - **Leader Selection Phase (Room Leaders Only):**
-    - **Select Hostage:** `[Player X]` or `[X]` where X is a player ID in the leader's room
+    - **Select Hostage:** `3` or `[Player 3]` or `[3]` to select a player ID in the leader's room
 
 - **Examples:**
   - Discussion: `I am on the Blue team, and I'm not the President.`
-  - Role reveal: `I reveal my card to [Player 3]` (shows your true role only to Player 3)
-  - Leader selection: `[Player 3]` or `[3]` to select Player 3 as a hostage
+  - Role reveal initiation: `I want to reveal my card` (triggers system prompt)
+  - Role reveal target selection: `3` or `[Player 3]` (selects Player 3 to receive your true role)
+  - Leader selection: `[Player 3]` or `3` to select Player 3 as a hostage
 
 - **Notes:** The game automatically handles hostage exchanges and room transitions. Leaders cannot select themselves as hostages.
 
@@ -43,8 +46,8 @@ The Red Team wins if the President and Bomber are in the same room at the end.
 The Blue Team wins if the President and Bomber are in different rooms at the end.
 
 Role Revealing:
-• During discussions, you can say 'I reveal my card to [Player X]' to show your role to another player
-• The other player will receive a private message with your true role
+• During discussions, you can say 'reveal card' or 'show role' to initiate revealing your role
+• The game will then prompt you to select which player to reveal to
 • You can reveal your role up to 5 times per game
 • This is a way to build trust, but be careful who you reveal to!
 ```
@@ -57,6 +60,7 @@ During gameplay, players receive observations based on the current phase and act
 [GAME] Round 1: Discussion phase has started.
 You are in Room 0 with: Player 0, Player 2, Player 4, Player 6.
 You can talk freely with the other players in your room.
+To reveal your role to someone, say 'reveal card' or 'show role' during your turn.
 
 Players who have revealed their roles to you:
 Player 0: Blue
@@ -65,9 +69,20 @@ Player 4: Red
 [Player 0] I'm on the Blue team, but I'm not the President.
 [Player 4] I'm on the Red team, just a regular member.
 
-# Role Reveal
+# Role Reveal Initiation
+[GAME] You've chosen to reveal your role.
+Players in your room: Player 0, Player 4, Player 6
+To whom would you like to reveal your role?
+Simply type the player's number (e.g., '3') or use the format '[Player X]'
+Valid options: [0], [4], [6]
+
+Note: This will be your reveal #1 out of 5 allowed reveals.
+
+# Role Reveal Confirmation
+[GAME] You revealed your role (Bomber) to Player 2. You have 4 reveals remaining.
+
+# Role Reveal Notification (to target player)
 [PRIVATE] Player 6 has revealed their card to you. Their true role is: President
-You revealed your role (Bomber) to Player 2. You have 4 reveals remaining.
 
 # Leader Selection Phase
 [GAME] Round 1: As the Leader of Room 0, you must select one player to trade with the other room.
@@ -77,8 +92,8 @@ Known player roles:
 Player 0: Blue
 Player 4: Red
 
-Simply reply in the following format: '[Player X]' or '[X]'
-Valid options: '[0]', '[4]', '[6]'
+Simply type the player's number (e.g., '3') or use the format '[Player X]'
+Valid options: [0], [4], [6]
 
 Strategic reminder: Blue Team wants the President and Bomber in different rooms at the end.
 If you know who the Bomber is, consider your strategy carefully.
@@ -154,9 +169,10 @@ Player 5 moved from Room 1 to Room 0.
 
 ## Game Phases
 
-1. **Discussion:** Players in each room discuss freely to gather information and can reveal roles
-2. **Leader Selection:** Room leaders select a hostage to trade
-3. **Trade Execution:** Selected hostages swap rooms and the game either advances to the next round or ends
+1. **Discussion:** Players in each room discuss freely to gather information and can initiate role reveals
+2. **Role Reveal:** When a player chooses to reveal their role, they enter this phase to select a target player
+3. **Leader Selection:** Room leaders select a hostage to trade
+4. **Trade Execution:** Selected hostages swap rooms and the game either advances to the next round or ends
 
 ## Implementation Notes
 
@@ -165,21 +181,25 @@ Player 5 moved from Room 1 to Room 0.
 - One leader is designated for each room, preferring regular team members over special roles
 - The game automatically handles hostage exchanges and tracking which players are in which room
 - Communication is strictly limited to players in the same room
+- Role reveals use a system-guided two-step process (initiate, then select target)
 - Role reveals are limited to 5 per player and only work within the same room
 - Room balance is automatically maintained to prevent completely empty rooms
 - The environment includes robust error recovery mechanisms
 - Message history is capped at 200 messages per room to manage memory usage
 - Winning is determined by the final positions of the President and Bomber
+- Player selection supports both direct number input (e.g., "3") and bracketed format (e.g., "[Player 3]" or "[3]")
 
 ## Example Game Flow
 
 1. Game starts with players randomly assigned to roles and rooms
 2. Leaders are randomly assigned in each room
-3. Players discuss within their rooms and may reveal roles to build trust
-4. Leaders select hostages to trade
-5. Hostages swap rooms
-6. Steps 3-5 repeat for the specified number of rounds
-7. Game ends and winner is determined based on President and Bomber locations
+3. Players discuss within their rooms
+4. A player may say "reveal card" to initiate the role reveal process
+5. The system prompts that player to select a target, who then receives the true role information
+6. Leaders select hostages to trade
+7. Hostages swap rooms
+8. Steps 3-7 repeat for the specified number of rounds
+9. Game ends and winner is determined based on President and Bomber locations
 
 ## Variants
 
