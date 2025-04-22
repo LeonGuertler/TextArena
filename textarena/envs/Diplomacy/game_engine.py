@@ -2,6 +2,7 @@
 import random
 from enum import Enum
 from typing import List, Optional, Dict, Set, Tuple, Any
+from collections import defaultdict, deque
 
 from textarena.envs.Diplomacy.map_fstring import DIPLOMACY_MAP_TEMPLATE
 
@@ -225,7 +226,7 @@ class Order:
         elif parts[2] == 'D':
             return cls(power, unit_type, location, OrderType.DISBAND)
             
-        raise ValueError(f"Unknown order type: {order_str}")
+        raise ValueError(f"Unknown order type")
 
 
 
@@ -239,6 +240,24 @@ class Power:
         self.controlled_centers: List[str] = [] # List of currently controlled supply centers
         self.is_waiting: bool = True
         self.is_defeated: bool = False
+        self.experience: List[str] = []
+        self.phase_summary: str = ""
+        self.plans: List[str] = []
+
+    def __str__(self) -> str:
+        return self.name
+    
+    def add_experience(self, experience: str) -> None:
+        """ Add experience to this power """
+        self.experience.append(experience)
+
+    def add_phase_summary(self, phase_summary: str) -> None:
+        """ Add phase summary to this power """
+        self.phase_summary = phase_summary
+    
+    def add_plan(self, plan: str) -> None:
+        """ Add a plan to this power """
+        self.plans.append(plan)
 
     def add_unit(self, unit: Unit) -> None:
         """ Add a unit to this power """
@@ -681,7 +700,8 @@ class DiplomacyGameEngine:
         self.winners: List[str] = []
         self.game_over: bool = False
         self.ascii_map_version: int = 5
-        
+        self.order_history: List[Dict[str, Any]] = [] # Track order history
+        self.game_state_history: List[Dict[str, Any]] = []  # Store game state history
 
         # Initialize powers
         self._initialize_powers()
@@ -742,7 +762,7 @@ class DiplomacyGameEngine:
                 region: Optional[Region] = self.map.get_region(location)
                 if region and unit.place_in_region(region):
                     power.add_unit(unit)
-
+                
             # Set initial controlled centers
             for center in power.home_centers:
                 power.add_center(center)
@@ -750,7 +770,7 @@ class DiplomacyGameEngine:
                 if region:
                     region.set_owner(power_name)
 
-    def setup_game(self, num_players):
+    def setup_game(self, num_players) -> Dict[int, str]:
         """ Set up the game with the specified number of players """
         # assert correct player number once more
         if num_players < 3 or num_players > 7:
@@ -822,38 +842,151 @@ class DiplomacyGameEngine:
         
         return orderable_locations
 
+    def get_possible_orders(self, power_name: str) -> Dict[str, List[str]]:
+        """ Get all possible orders for a power in the current phase """
+        if power_name not in self.powers:
+            return {}
+            
+        power = self.powers[power_name]
+        possible_orders = {}
+        
+        # Get orderable locations for this power
+        orderable_locations = self.get_orderable_locations(power_name)
+        
+        if self.phase == PhaseType.MOVEMENT:
+            # For each unit, determine possible orders
+            for unit in power.units:
+                if unit.dislodged:
+                    continue
+                    
+                location = unit.region.name
+                if location not in orderable_locations:
+                    continue
+                    
+                orders = []
+                
+                # Hold order is always possible
+                orders.append(f"{unit.type.value} {location} H")
+                
+                # Move orders - check all adjacent regions
+                for adj_region_name in unit.region.adjacent_regions[unit.type.value]:
+                    orders.append(f"{unit.type.value} {location} - {adj_region_name}")
+                
+                # Support orders
+                for adj_region_name in unit.region.adjacent_regions[unit.type.value]:
+                    adj_region = self.map.get_region(adj_region_name)
+                    if adj_region and adj_region.unit:
+                        # Support hold
+                        orders.append(f"{unit.type.value} {location} S {adj_region.unit.type.value} {adj_region_name}")
+                        
+                        # Support move - check where the adjacent unit can move
+                        for adj_unit_dest in adj_region.adjacent_regions[adj_region.unit.type.value]:
+                            # Only if the destination is also adjacent to the supporting unit
+                            if adj_unit_dest in unit.region.adjacent_regions[unit.type.value]:
+                                orders.append(f"{unit.type.value} {location} S {adj_region.unit.type.value} {adj_region_name} - {adj_unit_dest}")
+                
+                # Convoy orders (only for fleets in sea regions)
+                if unit.type == UnitType.FLEET and unit.region.terrain_type == TerrainType.SEA:
+                    for adj_region_name in unit.region.adjacent_regions[unit.type.value]:
+                        adj_region = self.map.get_region(adj_region_name)
+                        if adj_region and adj_region.unit and adj_region.unit.type == UnitType.ARMY:
+                            # Find possible convoy destinations
+                            for dest_region_name in self.map.regions:
+                                dest_region = self.map.get_region(dest_region_name)
+                                if (dest_region and 
+                                    dest_region.terrain_type == TerrainType.COAST and
+                                    dest_region_name != adj_region_name and
+                                    self._has_possible_convoy_path(adj_region_name, dest_region_name)):
+                                    orders.append(f"{unit.type.value} {location} C {adj_region.unit.type.value} {adj_region_name} - {dest_region_name}")
+                
+                possible_orders[location] = orders
+                
+        elif self.phase == PhaseType.RETREATS:
+            # For each dislodged unit, determine retreat options
+            for unit in power.units:
+                if not unit.dislodged:
+                    continue
+                    
+                location = unit.region.name
+                orders = []
+                
+                # Disband is always an option
+                orders.append(f"{unit.type.value} {location} D")
+                
+                # Retreat to valid locations
+                for retreat_loc in unit.retreat_options:
+                    orders.append(f"{unit.type.value} {location} R {retreat_loc}")
+                
+                possible_orders[location] = orders
+                
+        elif self.phase == PhaseType.ADJUSTMENTS:
+            build_count = power.count_needed_builds()
+            
+            if build_count > 0:
+                # Can build in unoccupied home centers
+                buildable_locations = power.get_buildable_locations(self.map)
+                
+                for location in buildable_locations:
+                    orders = []
+                    region = self.map.get_region(location)
+                    
+                    # Can build army in any buildable location
+                    orders.append(f"A {location} B")
+                    
+                    # Can build fleet only in coastal regions
+                    if region.terrain_type == TerrainType.COAST:
+                        orders.append(f"F {location} B")
+                    
+                    # Can also waive a build
+                    orders.append("WAIVE")
+                    
+                    possible_orders[location] = orders
+                    
+            elif build_count < 0:
+                # Must disband units
+                for unit in power.units:
+                    if not unit.dislodged:
+                        location = unit.region.name
+                        possible_orders[location] = [f"{unit.type.value} {location} D"]
+        
+        return possible_orders
 
-    def validate_order(self, order: Order) -> bool:
-        """ Validate if an order is legal """
+    def validate_order(self, order: Order) -> Tuple[bool, Optional[str]]:
+        """ Validate if an order is legal and return reason if invalid """
         if order.order_type == OrderType.WAIVE:
             # WAIVE is only valid in adjustment phase when building 
-            return (self.phase == PhaseType.ADJUSTMENTS and self.powers[order.power].count_needed_builds() > 0)
+            if self.phase != PhaseType.ADJUSTMENTS:
+                return False, "WAIVE orders only valid in adjustment phase"
+            if order.power not in self.powers or self.powers[order.power].count_needed_builds() <= 0:
+                return False, "WAIVE orders only valid when builds are available"
+            return True, None
 
         # Get the unit that would execute this order
         unit: Optional[Unit] = self._find_unit(order.power, order.unit_type, order.location)
         if not unit:
-            return False 
+            print(f"No {order.unit_type.value} unit found at {order.location} for {order.power}")
+            return False, f"No {order.unit_type.value} unit found at {order.location} for {order.power}"
 
         # Validate based on order type 
-        elif order.order_type == OrderType.HOLD:
+        if order.order_type == OrderType.HOLD:
             # Hold is always valid for a unit
-            return True 
+            return True, None
 
         elif order.order_type == OrderType.MOVE:
             # Check if destination exists
             dest_region = self.map.get_region(order.target)
             if not dest_region:
-                return False 
+                return False, f"Destination region {order.target} does not exist"
 
-            # Check if the move id adjacent (or can be conveyed for armies)
+            # Check if the move is adjacent (or can be convoyed for armies)
             if unit.region.is_adjacent(unit.type, order.target):
-                return True 
+                return True, None
 
             # Check if army can be convoyed
             if unit.type == UnitType.ARMY and self._has_possible_convoy_path(unit.region.name, order.target):
-                return True 
+                return True, None
 
-            return False 
+            return False, f"Unit at {order.location} cannot move to {order.target} (not adjacent or no convoy path)"
 
         elif order.order_type == OrderType.SUPPORT:
             # Check if the supported unit exists
@@ -862,101 +995,110 @@ class DiplomacyGameEngine:
             supported_unit = self._find_unit(None, supported_type, supported_loc)
 
             if not supported_unit:
-                return False 
+                return False, f"No {supported_type.value} unit found at {supported_loc} to support"
 
             # Check if the supported location is adjacent
             if not unit.region.is_adjacent(unit.type, supported_loc):
-                return False 
+                return False, f"Cannot support unit at {supported_loc} (not adjacent)"
 
             if order.secondary_target:
-                # Support move - check if the destination is adjacent to the support unit
+                # Support move - check if the destination is adjacent to the supported unit
                 if not supported_unit.region.is_adjacent(supported_unit.type, order.secondary_target):
                     # Check if it could be a convoyed move
-                    if (supported_unit.type == UnitType.ARMY and self._has_possible_convoy_path(supported_loc, order.secondary_target)):
-                        return True
-                    return False 
+                    if (supported_unit.type == UnitType.ARMY and 
+                        self._has_possible_convoy_path(supported_loc, order.secondary_target)):
+                        return True, None
+                    return False, f"Unit at {supported_loc} cannot move to {order.secondary_target}"
 
                 # Check if the destination is adjacent to the supporting unit
                 if not unit.region.is_adjacent(unit.type, order.secondary_target):
-                    return False 
+                    return False, f"Cannot support move to {order.secondary_target} (not adjacent to supporting unit)"
 
-            return True
+            return True, None
 
         elif order.order_type == OrderType.CONVOY:
             # Only fleets in water regions can convoy
-            if unit.type != UnitType.FLEET or unit.region.terrain_type != TerrainType.SEA:
-                return False 
+            if unit.type != UnitType.FLEET:
+                return False, "Only fleets can convoy"
+            if unit.region.terrain_type != TerrainType.SEA:
+                return False, "Convoying fleet must be in a sea region"
 
             # Check if the convoyed unit exists and is an army
             convoyed_type = UnitType.ARMY if order.target.startswith("A ") else UnitType.FLEET
             convoyed_loc = order.target.split()[1]
             convoyed_unit = self._find_unit(None, convoyed_type, convoyed_loc)
 
-            if not convoyed_unit or convoyed_unit.type != UnitType.ARMY:
-                return False 
+            if not convoyed_unit:
+                return False, f"No {convoyed_type.value} unit found at {convoyed_loc} to convoy"
+            if convoyed_unit.type != UnitType.ARMY:
+                return False, "Only armies can be convoyed"
 
-            # Check if the convoyed unit is adacent to this fleet
+            # Check if the convoyed unit is adjacent to this fleet
             if not unit.region.is_adjacent(unit.type, convoyed_loc):
-                return False 
+                return False, f"Convoying fleet not adjacent to unit at {convoyed_loc}"
 
             # Check if the destination is a coastal region
             dest_region = self.map.get_region(order.secondary_target)
-            if not dest_region or dest_region.terrain_type != TerrainType.COAST:
-                return False 
+            if not dest_region:
+                return False, f"Destination region {order.secondary_target} does not exist"
+            if dest_region.terrain_type != TerrainType.COAST:
+                return False, f"Convoy destination {order.secondary_target} must be a coastal region"
             
-            return True 
+            return True, None
 
         elif order.order_type == OrderType.RETREAT:
             # Unit must be dislodged
             if not unit.dislodged:
-                return False 
+                return False, f"Unit at {order.location} is not dislodged and cannot retreat"
 
             # Check if retreat location is valid
             if order.target not in unit.retreat_options:
-                return False 
+                return False, f"Cannot retreat to {order.target} (not a valid retreat option)"
             
-            return True 
+            return True, None
 
         elif order.order_type == OrderType.BUILD:
             # Must be adjustment phase 
             if self.phase != PhaseType.ADJUSTMENTS:
-                return False 
+                return False, "Build orders only valid in adjustment phase"
 
             power = self.powers[order.power]
 
             # Must have builds available
             if power.count_needed_builds() <= 0:
-                return False 
+                return False, f"{order.power} has no builds available"
 
             # Location must be buildable home center
             buildable_locs = power.get_buildable_locations(self.map)
             if order.location not in buildable_locs:
-                return False 
+                return False, f"Cannot build at {order.location} (not a vacant home supply center)"
 
             # Unit type must be valid for the terrain
             region = self.map.get_region(order.location)
             if order.unit_type == UnitType.FLEET and region.terrain_type != TerrainType.COAST:
-                return False 
+                return False, f"Cannot build fleet at {order.location} (not a coastal region)"
+
+            return True, None
 
         elif order.order_type == OrderType.DISBAND:
             # Must be adjustment phase OR retreat phase 
             if self.phase not in [PhaseType.ADJUSTMENTS, PhaseType.RETREATS]:
-                return False 
+                return False, "Disband orders only valid in adjustment or retreat phase"
 
             power = self.powers[order.power]
 
             if self.phase == PhaseType.ADJUSTMENTS:
                 # Must need to remove units
                 if power.count_needed_builds() >= 0:
-                    return False 
+                    return False, f"{order.power} does not need to remove units"
             else: # RETREATS phase
                 # Unit must be dislodged
                 if not unit.dislodged:
-                    return False 
+                    return False, f"Unit at {order.location} is not dislodged and cannot be disbanded in retreat phase"
             
-            return True 
+            return True, None
 
-        return False 
+        return False, f"Unknown or unsupported order type: {order.order_type}"
 
     def _find_unit(self, power_name: Optional[str], unit_type: UnitType, location: str) -> Optional[Unit]:
         """ Find a unit by type and location, optionally filtering by power """
@@ -970,12 +1112,15 @@ class DiplomacyGameEngine:
             unit = region.dislodged_unit
 
         if not unit:
+            print(f"Unit {unit_type} at {location} not found")
             return None 
         
         if unit.type != unit_type:
+            print(f"Unit {unit_type} at {location} is not a {unit.type}")
             return None
 
         if power_name and unit.power != power_name:
+            print(f"Unit {unit_type} at {location} is not {power_name}")
             return None 
         
         return unit
@@ -1030,28 +1175,34 @@ class DiplomacyGameEngine:
 
             for order_str in orders_list:
                 try:
+                    if order_str == "```":
+                        continue
                     order = Order.parse(order_str, power_name)
-                    if self.validate_order(order):
+                    is_valid, reason = self.validate_order(order)
+                    if is_valid:
                         parsed_orders.append(order)
                     else:
-                        invalid_orders[power_name].append({"reason": "Invalid order", "orders": [order_str]})
-                except ValueError:
-                    invalid_orders[power_name].append({"reason": "Invalid order format", "orders": [order_str]})
+                        invalid_orders[power_name].append({"reason": reason, "orders": [order_str]})
+                except ValueError as e:
+                    # Skip unknown order types, likely model's reasoning process
+                    if "Unknown order type" in str(e):
+                        continue
+                    invalid_orders[power_name].append({"reason": str(e), "orders": [order_str]})
 
             power.set_orders(parsed_orders)
             valid_orders[power_name] = parsed_orders 
+        
+        # Save order history
+        order_record = {
+            "turn": self.turn_number,
+            "year": self.year,
+            "season": self.season.value,
+            "phase": self.phase.value,
+            "valid_orders": {power: [str(order) for order in orders] for power, orders in valid_orders.items()},
+            "invalid_orders": invalid_orders
+        }
+        self.order_history.append(order_record)
 
-        print(f"Valid orders: {valid_orders}")
-        print(f"Invalid orders: {invalid_orders}")
-        # Check if all powers have submitted orders
-        # all_submitted = True
-        # for power in self.powers.values():
-        #     if not power.is_defeated and power.is_waiting:
-        #         all_submitted = False
-        #         break
-        # TODO - not necessary 
-
-        # if all_submitted:
         if self.phase == PhaseType.MOVEMENT:
             self._resolve_movement(valid_orders)
         elif self.phase == PhaseType.RETREATS:
@@ -1067,6 +1218,25 @@ class DiplomacyGameEngine:
 
         return True, self.get_state()
 
+    def _record_game_state(self):
+        """Record the current game state to history"""
+        state = {
+            "turn": self.turn_number,
+            "season": self.season.value,
+            "year": self.year,
+            "phase": self.phase.value,
+            "sc_counts": {power.name: len(power.controlled_centers) for power in self.powers.values()},
+            "unit_counts": {power.name: len(power.units) for power in self.powers.values()},
+            "territories": {
+                region.name: {
+                    "owner": region.unit.power if region.unit else None,
+                    "unit_type": region.unit.type.value if region.unit else None,
+                    "is_supply_center": region.is_supply_center,
+                }
+                for region in self.map.regions.values()
+            }
+        }
+        self.game_state_history.append(state)
 
     def _resolve_movement(self, valid_orders: Dict[str, List[Order]]):
         """ Resolve the movement orders """
@@ -1474,6 +1644,9 @@ class DiplomacyGameEngine:
             power.is_waiting = True
             power.clear_orders()
 
+        # After advancing phase, record the new game state
+        self._record_game_state()
+
     def _check_victory(self):
         """ Check if any power has achieved victory """
         # Count supply centers for each power
@@ -1499,6 +1672,636 @@ class DiplomacyGameEngine:
                 self.winners = [active_powers[0].name]
             self.game_over = True
 
+    def get_strategic_overview(self, power_code):
+        """
+        Returns a dictionary keyed by territory, containing the old functionality (status, adjacency,
+        occupant, valid moves for each unit) plus BFS expansions for:
+        - nearest_friendly_unit
+        - nearest_unowned_sc
+        - combined BFS if shorter for armies
+        Also includes an 'adjustments' dict if it's the adjustment phase, listing possible builds/disbands.
+        
+        Newly added:
+        - For each adjacent territory, a `can_support` list of all units (including other powers) that
+        can issue a support ("S") order to that territory.
+        - A `nearest` entry for each territory, with:
+        - `units_not_ours`: up to 3 nearest non-friendly units (distance and path).
+        - `held_scs_not_ours`: up to 3 nearest supply centers owned by other powers (distance and path).
+        """
+
+        current_phase = self.game.get_current_phase()  # e.g. "S1901M"
+        phase_type = current_phase[-1] if current_phase else "?"
+
+        engine_power = self.game.powers[power_code]
+        our_centers = set(engine_power.centers)
+        our_units_set = {u.split(' ')[1].split('/')[0].upper() for u in engine_power.units}
+        all_scs = set(self.game.map.scs)
+
+        # territory -> engine-owner
+        territory_owner = {}
+        for pwr_name, pwr_obj in self.game.powers.items():
+            for c in pwr_obj.centers:
+                territory_owner[c.upper()] = pwr_name
+
+        unowned_scs = {sc.upper() for sc in all_scs if sc.upper() not in territory_owner}
+
+        # --- Gather dislodged or build sets if relevant ---
+        dislodged_terr_set = set()
+        if phase_type == 'R':
+            retreats_for_power = self.game.get_state().get('retreats', {}).get(power_code, [])
+            for d_unit in retreats_for_power:
+                d_terr = d_unit.split(' ',1)[1].split('/')[0].upper()
+                dislodged_terr_set.add(d_terr)
+
+        build_terr_set = set()
+        if phase_type == 'A':
+            adjustments_for_pwr = self.game.get_state().get('adjustments', {}).get(power_code, None)
+            if adjustments_for_pwr:
+                if isinstance(adjustments_for_pwr, dict):
+                    adjustments_for_pwr = [adjustments_for_pwr]
+                for adj_task in adjustments_for_pwr:
+                    build_locs = adj_task.get('locations', [])
+                    disband_units = adj_task.get('disband', [])
+                    for bl in build_locs:
+                        build_terr_set.add(bl.upper())
+                    for du in disband_units:
+                        terr_part = du.split(' ',1)[1].split('/')[0].upper()
+                        build_terr_set.add(terr_part)
+
+        # Combine all territories we want to show
+        territories_to_analyze = (
+            set(t.upper() for t in our_centers)
+            .union(our_units_set)
+            .union(dislodged_terr_set)
+            .union(build_terr_set)
+        )
+
+        
+
+        overview = {}
+
+        # ========== 1) Build territory-level info (status, occupant, adjacency) + BFS expansions ==========
+        for terr in territories_to_analyze:
+            base_terr = terr.upper()
+
+            # territory type
+            terr_type = None
+            if base_terr in self.game.map.loc_type:
+                terr_type = self.game.map.loc_type[base_terr]
+            elif base_terr.lower() in self.game.map.loc_type:
+                terr_type = self.game.map.loc_type[base_terr.lower()]
+
+            # occupant units (any power)
+            occupying_units = []
+            for p_obj in self.game.powers.values():
+                for unit_str in p_obj.units:
+                    u_loc_base = unit_str.split(' ', 1)[1].split('/')[0].upper()
+                    if u_loc_base == base_terr:
+                        occupying_units.append(unit_str)
+
+            # controlling power if SC
+            controlling_power_code = None
+            if base_terr in territory_owner:
+                controlling_power_code = territory_owner[base_terr]
+
+            # adjacency
+            raw_adjs_up = self.game.map.abut_list(base_terr, incl_no_coast=False)
+            raw_adjs_lo = self.game.map.abut_list(base_terr.lower(), incl_no_coast=False)
+            raw_adjs = set(raw_adjs_up + raw_adjs_lo)
+
+            adj_list = []
+            for adj_loc in raw_adjs:
+                adj_base = adj_loc.split('/')[0].upper()
+                adj_type = None
+                if adj_base in self.game.map.loc_type:
+                    adj_type = self.game.map.loc_type[adj_base]
+                elif adj_base.lower() in self.game.map.loc_type:
+                    adj_type = self.game.map.loc_type[adj_base.lower()]
+
+                adj_occ_units = []
+                for pwr in self.game.powers.values():
+                    for u_str in pwr.units:
+                        uu_loc = u_str.split(' ',1)[1].split('/')[0].upper()
+                        if uu_loc == adj_base:
+                            adj_occ_units.append(u_str)
+
+                adj_cp = None
+                if adj_base in territory_owner:
+                    adj_cp = territory_owner[adj_base]
+
+                adj_list.append({
+                    "name": adj_base,
+                    "type": adj_type,
+                    "is_supply_center": (adj_base in all_scs),
+                    "controlling_power": adj_cp,
+                    "occupying_units": adj_occ_units
+                })
+
+            # status: contested if occupant differs from controlling power
+            status = None
+            if base_terr in all_scs and controlling_power_code:
+                occupant_codes = set()
+                for u_str in occupying_units:
+                    for p_name, pwr_obj in self.game.powers.items():
+                        if u_str in pwr_obj.units:
+                            occupant_codes.add(p_name)
+                if occupant_codes and occupant_codes != {controlling_power_code}:
+                    status = (
+                        f"CONTESTED - Supply center controlled by {controlling_power_code}, "
+                        f"occupied by {', '.join(occupant_codes)}"
+                    )
+
+            overview[base_terr] = {
+                "type": terr_type,
+                "is_supply_center": (base_terr in all_scs),
+                "controlling_power": controlling_power_code,
+                "status": status,
+                "occupying_units": occupying_units,
+                "adjacent_territories": sorted(adj_list, key=lambda x: x["name"]),
+                "units": {}
+            }
+
+        # ========== 2) BFS expansions for each of our units (nearest_friendly_center, etc.) ==========
+        all_friendly_occupant_map = {}
+        for u_str in engine_power.units:
+            u_loc = u_str.split(' ',1)[1].split('/')[0].upper()
+            all_friendly_occupant_map[u_loc] = u_str
+
+        for unit_str in engine_power.units:
+            unit_type, loc_part = unit_str.split(' ',1)
+            base_loc = loc_part.split('/')[0].upper()
+
+            if base_loc not in overview:
+                overview[base_loc] = {
+                    "type": None,
+                    "is_supply_center": (base_loc in all_scs),
+                    "controlling_power": None,
+                    "status": None,
+                    "occupying_units": [unit_str],
+                    "adjacent_territories": [],
+                    "units": {}
+                }
+
+            def match_friendly_sc(t):
+                return t if t in (x.upper() for x in our_centers) else None
+
+            def match_unowned_sc(t):
+                return t if t in unowned_scs else None
+
+            occupant_map = {k:v for (k,v) in all_friendly_occupant_map.items() if v != unit_str}
+            normal_types = {'F'} if unit_type == 'F' else {'A'}
+
+            # BFS to nearest friendly SC
+            path_fc, match_fc = self.bfs_shortest_path(base_loc, match_friendly_sc, normal_types)
+            # BFS to unowned SC
+            path_usc, match_usc = self.bfs_shortest_path(base_loc, match_unowned_sc, normal_types)
+            # BFS to adjacency of friendly occupant
+            path_fu, (fu_terr, fu_unit) = self.bfs_nearest_adjacent(base_loc, occupant_map, normal_types)
+
+            on_unowned = (base_loc in unowned_scs)
+            # Combined BFS if Army
+            combined_types = {'A','F'} if unit_type == 'A' else normal_types
+
+            cb_path_fc, cb_match_fc = self.bfs_shortest_path(base_loc, match_friendly_sc, combined_types)
+            fc_combined = None
+            if cb_path_fc and (not path_fc or len(cb_path_fc)<len(path_fc)):
+                fc_combined = {"distance": len(cb_path_fc)-1, "path": cb_path_fc}
+
+            cb_path_usc, cb_match_usc = self.bfs_shortest_path(base_loc, match_unowned_sc, combined_types)
+            usc_combined = None
+            if cb_path_usc and (not path_usc or len(cb_path_usc)<len(path_usc)):
+                usc_combined = {"distance": len(cb_path_usc)-1, "path": cb_path_usc}
+
+            cb_path_fu, (cb_fu_terr, cb_fu_unit) = self.bfs_nearest_adjacent(base_loc, occupant_map, combined_types)
+            fu_combined = None
+            if cb_path_fu and (not path_fu or len(cb_path_fu)<len(path_fu)):
+                fu_combined = {
+                    "distance": len(cb_path_fu)-1,
+                    "path": cb_path_fu,
+                    "matched_territory": cb_fu_terr,
+                    "matched_unit": cb_fu_unit
+                }
+
+            overview[base_loc]["units"][unit_str] = {
+                "nearest_friendly_center": {
+                    "distance": (len(path_fc)-1 if path_fc else None),
+                    "path": path_fc,
+                    "matched_territory": match_fc,
+                    "by_convoy": fc_combined
+                },
+                "nearest_friendly_unit": {
+                    "distance": (len(path_fu)-1 if path_fu else None),
+                    "path": path_fu,
+                    "matched_territory": fu_terr,
+                    "matched_unit": fu_unit,
+                    "by_convoy": fu_combined
+                },
+                "nearest_unowned_sc": {
+                    "distance": (len(path_usc)-1 if path_usc else None),
+                    "path": path_usc,
+                    "matched_territory": match_usc,
+                    "by_convoy": usc_combined
+                },
+                "on_unowned_sc": on_unowned,
+                # We'll add valid_moves below
+            }
+
+        # ========== 3) Attach "valid_moves" (movement/retreat) to each of our units ==========
+        valid_moves_dict = self.get_valid_moves(power_code, include_holds=False)
+        for terr_key in overview:
+            for unit_key in overview[terr_key]["units"]:
+                if unit_key in valid_moves_dict:
+                    overview[terr_key]["units"][unit_key]["valid_moves"] = valid_moves_dict[unit_key]
+                else:
+                    overview[terr_key]["units"][unit_key]["valid_moves"] = []
+
+       
+        # ========== [NEW] BFS for up to 3 nearest occupant units not ours, and up to 3 nearest SC not ours ==========
+        def _find_up_to_three_nearest_occupants_not_ours(start, unit_type=None):
+            """
+            Find up to 3 nearest units not belonging to us.
+            
+            Args:
+                start: Starting territory
+                unit_type: If provided, use only paths valid for this unit type ('A' or 'F')
+            """
+            results = []
+            visited = set([start])
+            queue = deque([(start, [start], 0)])  # (territory, path, distance)
+            
+            # Determine allowed unit types for movement
+            if unit_type == 'A':
+                allowed_unit_types = {'A'}
+            elif unit_type == 'F':
+                allowed_unit_types = {'F'}
+            else:
+                allowed_unit_types = {'A', 'F'}
+            
+            while queue and len(results) < 3:
+                current, path, dist = queue.popleft()
+                
+                # Check occupant units here
+                for pwr_name, pwr_obj in self.game.powers.items():
+                    if pwr_name == power_code:
+                        continue  # skip our own
+                    for occupant_unit in pwr_obj.units:
+                        unit_loc = occupant_unit.split(' ', 1)[1].split('/')[0].upper()
+                        if unit_loc == current:
+                            results.append({
+                                "distance": dist,
+                                "path": path,
+                                "unit": f"{occupant_unit} ({pwr_name})"
+                            })
+                            if len(results) >= 3:
+                                break
+                    if len(results) >= 3:
+                        break
+                
+                if len(results) >= 3:
+                    break
+                    
+                # expand BFS - only using valid edges for our unit type
+                if current in self.connectivity.graph:
+                    for neighbor in self.connectivity.graph[current]:
+                        edge_unit_types = self.connectivity.get_allowed_units(current, neighbor)
+                        if edge_unit_types.intersection(allowed_unit_types) and neighbor not in visited:
+                            visited.add(neighbor)
+                            queue.append((neighbor, path + [neighbor], dist + 1))
+            
+            return results
+
+        def _find_up_to_three_nearest_sc_held_by_others(start, unit_type=None):
+            """
+            Find up to 3 nearest supply centers not controlled by us (includes unowned SCs).
+            
+            Args:
+                start: Starting territory
+                unit_type: If provided, use only paths valid for this unit type ('A' or 'F')
+            """
+            results = []
+            visited = set([start])
+            queue = deque([(start, [start], 0)])  # (territory, path, distance)
+            
+            # Determine allowed unit types for movement
+            if unit_type == 'A':
+                allowed_unit_types = {'A'}
+            elif unit_type == 'F':
+                allowed_unit_types = {'F'}
+            else:
+                allowed_unit_types = {'A', 'F'}
+            
+            while queue and len(results) < 3:
+                current, path, dist = queue.popleft()
+                
+                # Check if it's a supply center that we don't control
+                if current in all_scs:
+                    controlling_power = None
+                    if current in territory_owner:
+                        controlling_power = ENGINE_TO_CODE[territory_owner[current]]
+                    
+                    # Include if either unowned or owned by someone else
+                    if controlling_power != power_code:
+                        results.append({
+                            "distance": dist,
+                            "path": path,
+                            "territory": current,
+                            "controlled_by": controlling_power or "Unowned"
+                        })
+                        if len(results) >= 3:
+                            break
+                            
+                # expand BFS - only using valid edges for our unit type
+                if current in self.connectivity.graph:
+                    for neighbor in self.connectivity.graph[current]:
+                        edge_unit_types = self.connectivity.get_allowed_units(current, neighbor)
+                        if edge_unit_types.intersection(allowed_unit_types) and neighbor not in visited:
+                            visited.add(neighbor)
+                            queue.append((neighbor, path + [neighbor], dist + 1))
+            
+            return results
+
+        # Attach "nearest" summary to each territory
+        for base_terr in overview.keys():
+            if base_terr == "adjustments":
+                continue
+                
+            # Determine unit type if one of our units is here
+            unit_type = None
+            for unit in overview[base_terr].get('occupying_units', []):
+                if unit in engine_power.units:
+                    unit_type = unit.split()[0]  # 'A' or 'F'
+                    break
+                    
+            # Call BFS with appropriate unit type
+            nearest_units_not_ours = _find_up_to_three_nearest_occupants_not_ours(base_terr, unit_type)
+            nearest_scs_not_ours = _find_up_to_three_nearest_sc_held_by_others(base_terr, unit_type)
+            
+            overview[base_terr]["nearest"] = {
+                "units_not_ours": nearest_units_not_ours,
+                "held_scs_not_ours": nearest_scs_not_ours
+            }
+
+        # ========== [NEW] Add 'can_support' info to each adjacent territory ==========
+        for territory in overview:
+            adj_list = overview[territory]["adjacent_territories"]
+            for adjacency_info in adj_list:
+                adj_base = adjacency_info["name"]
+                can_support_units = []
+                # Check all units on the board that can "S" the territory 'adj_base'
+                for pwr_name, pwr_obj in self.game.powers.items():
+                    for occupant_unit in pwr_obj.units:
+                        occupant_type, occupant_loc = occupant_unit.split(' ',1)
+                        occupant_loc = occupant_loc.split('/')[0].upper()
+                        if self.game.map.abuts(occupant_type, occupant_loc, 'S', adj_base):
+                            can_support_units.append(f"{occupant_unit} ({ENGINE_TO_CODE[pwr_name]})")
+                adjacency_info["can_support"] = can_support_units
+
+         # ========== 4) If adjustment phase, store "BUILDS" or "DISBANDS" in overview["adjustments"] ==========
+        overview["adjustments"] = {}
+        if phase_type == 'A':
+            if "BUILDS" in valid_moves_dict:
+                overview["adjustments"]["BUILDS"] = valid_moves_dict["BUILDS"]
+            if "DISBANDS" in valid_moves_dict:
+                overview["adjustments"]["DISBANDS"] = valid_moves_dict["DISBANDS"]
+            if "NO_ADJUSTMENT" in valid_moves_dict:
+                overview["adjustments"]["NO_ADJUSTMENT"] = valid_moves_dict["NO_ADJUSTMENT"]
+
+
+        return overview
+
+
+    def get_strategic_overview_text(self, power_code):
+        # 1) Gather all territory info + BFS expansions from get_strategic_overview
+        overview = self.get_strategic_overview(power_code)
+        engine_power = self.powers[power_code]
+
+        header = f"Strategic Overview for {power_code}"
+        current_phase = self.get_current_phase()
+        if current_phase and current_phase[0] == 'W':
+            # Possibly show build/remove info in the header
+            num_centers = len(engine_power.centers)
+            num_units = len(engine_power.units)
+            diff = num_centers - num_units
+            if diff > 0:
+                header += f"\n{power_code} can build {diff} unit{'s' if diff>1 else ''}"
+            elif diff < 0:
+                header += f"\n{power_code} must remove {abs(diff)} unit{'s' if abs(diff)>1 else ''}"
+
+        header += """
+
+
+            Territories where you have units or supply centers, plus shortest-path expansions and valid moves.
+            """
+        lines = [header]
+
+        # 2) Sort territories: supply centers first, then alphabetical
+        sorted_territories = sorted(
+            [t for t in overview.keys() if t != "adjustments" and '/' not in t],
+            key=lambda x: (not overview[x]['is_supply_center'], x)
+        )
+
+        # 3) For each territory, print core info (status, occupant, adjacency) + BFS expansions + valid moves
+        for territory in sorted_territories:
+            data = overview[territory]
+            lines.append(f"\n# Strategic territory held by {power_code}: {territory} ({data['type'] or 'Unknown'})")
+
+            if data['status']:
+                lines.append(f"Status: {data['status']}")
+
+            # If it's your home center in Movement phase and you occupy it, warn
+            if data['is_supply_center'] and territory in engine_power.homes:
+                if current_phase and current_phase[-1] == 'M':
+                    occupant_codes = []
+                    for occ_unit in data['occupying_units']:
+                        for p_name, p_obj in self.game.powers.items():
+                            if occ_unit in p_obj.units:
+                                occupant_codes.append(p_name)
+                    occupant_codes = set(occupant_codes)
+                    if power_code in occupant_codes:
+                        lines.append("Status: WARNING: Your unit in this home SC will block building here in Winter.")
+
+            if data['is_supply_center']:
+                ctrl = data['controlling_power'] or 'None'
+                lines.append(f"Supply Center - Controlled by: {ctrl}")
+
+            if data['occupying_units']:
+                occupant_strs = []
+                for u_str in data['occupying_units']:
+                    occupant_power_code = None
+                    for p_name, p_obj in self.powers.items():
+                        if u_str in p_obj.units:
+                            occupant_power_code = p_name
+                            break
+                    occupant_strs.append(f"{u_str} ({occupant_power_code})")
+                lines.append("Units present: " + ", ".join(occupant_strs))
+
+            if 'units' in data and data['units']:
+                for unit_name, bfs_info in data['units'].items():
+                    if unit_name in engine_power.units:
+                        lines.append(f"  Shortest path for {unit_name}:")
+                        if bfs_info.get('on_unowned_sc'):
+                            lines.append("    => Currently on an unowned supply center!")
+
+                        # nearest_friendly_unit
+                        fu = bfs_info['nearest_friendly_unit']
+                        if fu['distance'] is not None:
+                            min_distance = fu['distance']
+                            matched_territory = fu['matched_territory']
+                            primary_unit = fu['matched_unit'] 
+                            
+                            # Display primary unit and any other units at the same location
+                            friendly_units_at_location = []
+                            if primary_unit:
+                                friendly_units_at_location.append(primary_unit)
+                            
+                            # Check for other units at this location
+                            for other_unit in engine_power.units:
+                                if other_unit == unit_name or other_unit == primary_unit:
+                                    continue
+                                    
+                                unit_loc = other_unit.split(' ', 1)[1].split('/')[0].upper()
+                                if unit_loc == matched_territory:
+                                    friendly_units_at_location.append(other_unit)
+                            
+                            # Display all units at this location
+                            if friendly_units_at_location:
+                                path_display = fu['path'][:] if fu['path'] else []
+                                if matched_territory not in path_display:
+                                    path_display.append(matched_territory)
+                                    
+                                lines.append("    => Nearest friendly unit:")
+                                for friendly_unit in friendly_units_at_location:
+                                    lines.append(f"       {friendly_unit} ({power_code}) path={path_display}")
+
+                        # Show "valid_moves"
+                        if 'valid_moves' in bfs_info and bfs_info['valid_moves']:
+                            lines.append("    => Possible moves:")
+                            for mv in bfs_info['valid_moves']:
+                                # Check if this is a movement order and extract destination
+                                parts = mv.split()
+                                occupancy_info = ""
+                                
+                                if '-' in mv and len(parts) >= 3:
+                                    # For movement orders: extract destination
+                                    dest_index = parts.index('-') + 1 if '-' in parts else -1
+                                    if dest_index > 0 and dest_index < len(parts):
+                                        dest = parts[dest_index].split('/')[0].upper()
+                                        # Check if destination is occupied
+                                        for pwr_name, pwr_obj in self.game.powers.items():
+                                            for occ_unit in pwr_obj.units:
+                                                occ_loc = occ_unit.split(' ')[1].split('/')[0].upper()
+                                                if occ_loc == dest:
+                                                    occ_power = pwr_name
+                                                    occupancy_info = f" (Occupied by {occ_power})"
+                                                    break
+                                            if occupancy_info:
+                                                break
+                                
+                                lines.append(f"       {mv}{occupancy_info}")
+
+            # Check if this territory has one of our units on it
+            our_unit_here = None
+            for unit in data.get('occupying_units', []):
+                if unit in engine_power.units:
+                    our_unit_here = unit
+                    break
+
+            # Only show nearest units if we have a unit here or it's our SC without units
+            show_nearest_units = our_unit_here or (data['is_supply_center'] and data['controlling_power'] == power_code)
+            
+            if show_nearest_units and "nearest" in data:
+                nr_info = data["nearest"]
+                units_not_ours = nr_info.get("units_not_ours", [])
+                
+                if units_not_ours:
+                    lines.append("  Nearest units (not ours):")
+                    for item in units_not_ours:
+                        # Format: * F SEV (RUS), dist=2, path=[SMY→ARM→SEV]
+                        unit = item["unit"]
+                        dist = item["distance"]
+                        path = item["path"]
+                        
+                        # Make path display more compact with arrows
+                        path_display = "→".join(path)
+                        lines.append(f"    {unit}, path=[{path_display}]")
+                
+                # Only show nearest SCs if we have a unit here (skip if it's just our SC)
+                if our_unit_here and "held_scs_not_ours" in nr_info:
+                    scs_not_ours = nr_info.get("held_scs_not_ours", [])
+                    if scs_not_ours:
+                        lines.append("  Nearest supply centers (not controlled by us):")
+                        for item in scs_not_ours:
+                            # Format: * SEV (RUS), dist=2, path=[SMY→ARM→SEV]
+                            terr = item["territory"]
+                            owner = item["controlled_by"]
+                            dist = item["distance"]
+                            path = item["path"]
+                            
+                            # Make path display more compact with arrows
+                            path_display = "→".join(path)
+                            lines.append(f"    {terr} ({owner}), dist={dist}, path=[{path_display}]")
+
+            lines.append("Adjacent territories (including units that can support/move to the adjacent territory):")
+            for adjt in data['adjacent_territories']:
+                adj_line = [adjt["name"], f"({adjt['type'] or 'UNKNOWN'})"]
+                if adjt['is_supply_center']:
+                    adj_line.append(f"SC Control: {adjt['controlling_power'] or 'None'}")
+                if adjt['occupying_units']:
+                    occ_strs = []
+                    for ou in adjt['occupying_units']:
+                        oc = None
+                        for pn, p_obj in self.game.powers.items():
+                            if ou in p_obj.units:
+                                oc = pn
+                                break
+                        occ_strs.append(f"{ou} ({oc})")
+                    adj_line.append("Units: " + ", ".join(occ_strs))
+
+                lines.append("  " + " ".join(adj_line))
+                # Filter out units from current territory in can_support list
+                if "can_support" in adjt and adjt["can_support"]:
+                    # Get base territory name (remove /SC, /NC, etc.)
+                    base_territory = territory.split('/')[0].upper()
+                    
+                    filtered_support = []
+                    for supporter in adjt["can_support"]:
+                        # Get unit territory and strip coastal indicators
+                        unit_parts = supporter.split(' ')
+                        if len(unit_parts) >= 2:
+                            unit_location = unit_parts[1].split('/')[0].upper()
+                            # Only include if not from current territory
+                            if unit_location != base_territory:
+                                filtered_support.append(supporter)
+                        else:
+                            # If we can't parse it, include it
+                            filtered_support.append(supporter)
+                            
+                    if filtered_support:
+                        lines.append(f"    => Can support/move to: {', '.join(filtered_support)}")
+
+            # 4) If it's the adjustment phase, show "BUILDS" or "DISBANDS" from overview["adjustments"]
+            if current_phase and len(current_phase) > 1 and current_phase[-1] == 'A':
+                if "adjustments" in overview:
+                    adj_block = overview["adjustments"]
+                    if adj_block:
+                        lines.append("\nAdjustment Phase Orders:")
+                        if "BUILDS" in adj_block and adj_block["BUILDS"]:
+                            lines.append("  Possible Builds:")
+                            for build_order in adj_block["BUILDS"]:
+                                lines.append(f"    {build_order}")
+                        if "DISBANDS" in adj_block and adj_block["DISBANDS"]:
+                            lines.append("  Possible Disbands:")
+                            for d_order in adj_block["DISBANDS"]:
+                                lines.append(f"    {d_order}")
+                        if "NO_ADJUSTMENT" in adj_block and adj_block["NO_ADJUSTMENT"]:
+                            lines.append("  No adjustment needed. Moves:")
+                            for nmv in adj_block["NO_ADJUSTMENT"]:
+                                lines.append(f"    {nmv}")
+
+        overview_text = "\n".join(lines)
+        #print(overview_text)
+        return overview_text
+    
     def get_ascii_map(self) -> str:
         versions = {
             1: self.get_ascii_map_v1,
@@ -2356,3 +3159,105 @@ class DiplomacyGameEngine:
         
         # Apply the values to the template
         return DIPLOMACY_MAP_TEMPLATE.format(**values)
+
+    def bfs_shortest_path(self, start, match_func, allowed_unit_types=None):
+        """
+        Find shortest path from start to a territory matching match_func.
+        
+        Args:
+            start: Starting territory
+            match_func: Function that returns the territory if it matches, None otherwise
+            allowed_unit_types: Set of unit types ('A', 'F') allowed for movement
+        
+        Returns:
+            (path, matched_territory) or (None, None) if no path found
+        """
+        if match_func(start):
+            return [start], start
+            
+        visited = set([start])
+        queue = deque([(start, [start])])
+        
+        while queue:
+            current, path = queue.popleft()
+            
+            # Check adjacent territories
+            if current in self.map.regions:
+                for adj_name in self.map.regions[current].adjacencies:
+                    # Skip if already visited
+                    if adj_name in visited:
+                        continue
+                        
+                    # Check if unit type can move along this edge
+                    if allowed_unit_types:
+                        can_move = False
+                        for unit_type in allowed_unit_types:
+                            if unit_type in self.map.regions[current].adjacencies[adj_name]:
+                                can_move = True
+                                break
+                        if not can_move:
+                            continue
+                    
+                    # Check if this territory matches
+                    matched = match_func(adj_name)
+                    if matched:
+                        return path + [adj_name], matched
+                    
+                    # Add to queue for further exploration
+                    visited.add(adj_name)
+                    queue.append((adj_name, path + [adj_name]))
+                    
+        return None, None
+        
+    def bfs_nearest_adjacent(self, start, occupant_map, allowed_unit_types=None):
+        """
+        Find shortest path from start to a territory adjacent to one in occupant_map.
+        
+        Args:
+            start: Starting territory
+            occupant_map: Dict mapping territory -> unit
+            allowed_unit_types: Set of unit types ('A', 'F') allowed for movement
+        
+        Returns:
+            (path, (matched_territory, matched_unit)) or (None, (None, None)) if no path found
+        """
+        # Check if start is already adjacent to an occupied territory
+        if start in self.map.regions:
+            for adj_name in self.map.regions[start].adjacencies:
+                if adj_name in occupant_map:
+                    return [start], (adj_name, occupant_map[adj_name])
+        
+        visited = set([start])
+        queue = deque([(start, [start])])
+        
+        while queue:
+            current, path = queue.popleft()
+            
+            # Check adjacent territories
+            if current in self.map.regions:
+                for adj_name in self.map.regions[current].adjacencies:
+                    # Skip if already visited
+                    if adj_name in visited:
+                        continue
+                        
+                    # Check if unit type can move along this edge
+                    if allowed_unit_types:
+                        can_move = False
+                        for unit_type in allowed_unit_types:
+                            if unit_type in self.map.regions[current].adjacencies[adj_name]:
+                                can_move = True
+                                break
+                        if not can_move:
+                            continue
+                    
+                    # Check if this territory is adjacent to an occupied territory
+                    if adj_name in self.map.regions:
+                        for adj_adj_name in self.map.regions[adj_name].adjacencies:
+                            if adj_adj_name in occupant_map:
+                                return path + [adj_name], (adj_adj_name, occupant_map[adj_adj_name])
+                    
+                    # Add to queue for further exploration
+                    visited.add(adj_name)
+                    queue.append((adj_name, path + [adj_name]))
+                    
+        return None, (None, None)

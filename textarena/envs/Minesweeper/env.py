@@ -28,7 +28,7 @@ class MinesweeperEnv(ta.Env):
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment to its initial state """
         ## initliaze the game state
-        self.state = ta.State(num_players=1, min_players=1, max_players=1, max_turns=self.max_turns)
+        self.state = ta.State(num_players=num_players, min_players=1, max_players=1, max_turns=self.max_turns)
 
         ## initialize the game state
         self.grid = [[0 for _ in range(self.cols)] for _ in range(self.rows)]

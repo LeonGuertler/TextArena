@@ -390,14 +390,14 @@ class SnakeEnv(ta.Env):
                 self.state.set_winners([winner], f"Player {winner} survived; all other snakes died.")
             else:
                 # check if death turn is the same for all to determine draw
-                print(len(set(self.state.game_state["death_turn"].values())) != 1)
-                print(self.state.game_state["death_turn"].values())
+                # print(len(set(self.state.game_state["death_turn"].values())) != 1)
+                # print(self.state.game_state["death_turn"].values())
                 if self.state.num_players > 2 and len(set(self.state.game_state["death_turn"].values())) != 1:
                     max_turn = max(self.state.game_state["death_turn"].values(), default=self.state.turn)
                     winners = [pid for pid, turn in self.state.game_state["death_turn"].items() if turn == max_turn]
                     self.state.set_winners(player_ids=winners, reason="Player(s) outlived all other snakes.")
                 else:
-                    print(f"setting draw")
+                    # print(f"setting draw")
                     self.state.set_draw("All snakes died simultaneously.")
 
                 return self.state.step()

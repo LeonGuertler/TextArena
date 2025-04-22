@@ -2,7 +2,7 @@ import textarena as ta
 from textarena.core import ObservationWrapper, Env, Observations, Info
 from typing import Dict, Optional, Tuple, List
 
-__all__ = ["LLMObservationWrapper"]
+__all__ = ["LLMObservationWrapper", "DiplomacyObservationWrapper"]
 
 
 class LLMObservationWrapper(ObservationWrapper):
@@ -54,11 +54,32 @@ class LLMObservationWrapper(ObservationWrapper):
 
         return self._convert_obs_to_str(player_id=player_id)
 
-    async def async_get_observation(self) -> Tuple[Optional[int], str]:
+
+    
+class DiplomacyObservationWrapper(LLMObservationWrapper):
+    def __init__(self, env: ta.Env):
+        super().__init__(env)
+
+    def _get_history_conversation(self, player_id: int) -> str:
         """
-        Overrides the async_get_observation method so that the raw observation
-        is converted to a formatted string before being returned.
+        Get the history conversation for the given player.
         """
-        player_id, raw_obs = await self.env.async_get_observation()
-        obs_str = self.observation(player_id, raw_obs)
-        return player_id, obs_str
+        history = []
+        for sender_id, message in self.full_observations[player_id][1:]:
+            if sender_id == ta.GAME_ID:
+                sender_name = "GAME"
+            else:
+                sender_name = self.env.state.role_mapping.get(sender_id, f"Player {sender_id}")
+            history.append(f"[{sender_name}] {message}")
+        return "\n".join(history)
+
+    def observation(self, player_id: int, observation: Optional[ta.Observations]):
+        if observation is None:
+            return self.env.get_prompt(player_id, self._get_history_conversation(player_id))
+
+        if player_id not in self.full_observations:
+            self.full_observations[player_id] = []
+
+        self.full_observations[player_id].extend(observation)
+
+        return self.env.get_prompt(player_id, self._get_history_conversation(player_id))

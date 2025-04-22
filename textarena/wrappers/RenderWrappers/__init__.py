@@ -1,3 +1,5 @@
-from textarena.wrappers.RenderWrappers.simple_render_wrapper import SimpleRenderWrapper
+# from textarena.wrappers.RenderWrappers.terminal_render_wrapper import TerminalRenderWrapper
+from textarena.wrappers.RenderWrappers.CursesRenderWrapper.render import CursesRenderWrapper
+from textarena.wrappers.RenderWrappers.SimpleRenderWrapper.render import SimpleRenderWrapper
 
-__all__ = ["SimpleRenderWrapper"]
+__all__ = ["SimpleRenderWrapper", "CursesRenderWrapper"]

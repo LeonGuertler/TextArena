@@ -163,6 +163,11 @@ register(id="Stratego-v0", entry_point="textarena.envs.Stratego.env:StrategoEnv"
 # SpiteAndMalice (two-player)
 register(id="SpiteAndMalice-v0", entry_point="textarena.envs.SpiteAndMalice.env:SpiteAndMaliceEnv")
 
+# Tak (two-player)
+register(id="Tak-v0", entry_point="textarena.envs.Tak.env:TakEnv", board_size=4, stones=15, capstones=1)
+register(id="Tak-v0-medium", entry_point="textarena.envs.Tak.env:TakEnv", board_size=5, stones=21, capstones=1)
+register(id="Tak-v0-hard", entry_point="textarena.envs.Tak.env:TakEnv", board_size=6, stones=30, capstones=1)
+
 # TruthAndDeception (two-player) [TODO can extend to more players]
 register(id="TruthAndDeception-v0", entry_point="textarena.envs.TruthAndDeception.env:TruthAndDeceptionEnv", max_turns=6)
 register(id="TruthAndDeception-v0-long", entry_point="textarena.envs.TruthAndDeception.env:TruthAndDeceptionEnv", max_turns=12)
@@ -231,3 +236,79 @@ register(id="Diplomacy-v0", entry_point="textarena.envs.Diplomacy.env:DiplomacyE
 # Codenames (4 players)
 register(id="Codenames-v0", entry_point="textarena.envs.Codenames.env:CodenamesEnv", max_turns=25)
 register(id="Codenames-v0-hardcore", entry_point="textarena.envs.Codenames.env:CodenamesEnv", max_turns=35)
+
+
+
+
+
+
+# classical evals as single-player envs 
+
+# GSM8K - Grade School Math Word Problems
+register(id="GSM8K-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="gsm8k/test.jsonl", n_samples=None)
+register(id="GSM8K-v0-subsampled", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="gsm8k/test.jsonl", n_samples=100)
+register(id="GSM8K-v0-pass@16", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="gsm8k/test.jsonl", n_samples=None, eval_method="x@k", k=16)
+
+# AIME - American Invitational Mathematics Examination
+register(id="AIME-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="aime24/test.jsonl", n_samples=None)
+register(id="AIME-v0-pass@16", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="aime24/test.jsonl", n_samples=None, eval_method="x@k", k=16)
+register(id="AIME23-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="aime23/test.jsonl", n_samples=None)
+
+# AQUA - Algebra Question Answering
+register(id="AQUA-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="aqua/test.jsonl", n_samples=None)
+register(id="AQUA-v0-pass@16", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="aqua/test.jsonl", n_samples=None, eval_method="x@k", k=16)
+
+# ASDIV - Arithmetic with diverse operations
+register(id="ASDIV-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="asdiv/test.jsonl", n_samples=None)
+
+# CARP - Complex Arithmetic Problems
+register(id="CARP_EN-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="carp_en/test.jsonl", n_samples=None)
+
+# CMATH - College Mathematics
+register(id="CMATH-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="cmath/test.jsonl", n_samples=None)
+register(id="CMATH-v0-pass@16", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="cmath/test.jsonl", n_samples=None, eval_method="x@k", k=16)
+
+# Chinese Middle School Math
+register(id="CN_MIDDLE_SCHOOL-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="cn_middle_school/test.jsonl", n_samples=None)
+
+# College Math
+register(id="COLLEGE_MATH-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="college_math/test.jsonl", n_samples=None)
+register(id="COLLEGE_MATH-v0-pass@16", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="college_math/test.jsonl", n_samples=None, eval_method="x@k", k=16)
+
+# GAOKAO Math
+register(id="GAOKAO_MATH-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="gaokao_math/test.jsonl", n_samples=None)
+register(id="GAOKAO_MATH_QA-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="gaokao_math_qa/test.jsonl", n_samples=None)
+register(id="GAOKAO2023EN-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="gaokao2023en/test.jsonl", n_samples=None)
+register(id="GAOKAO2024_I-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="gaokao2024_I/test.jsonl", n_samples=None)
+register(id="GAOKAO2024_II-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="gaokao2024_II/test.jsonl", n_samples=None)
+register(id="GAOKAO2024_MCQ-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="gaokao2024_mcq/test.jsonl", n_samples=None)
+
+# MATH
+register(id="MATH-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="math/test.jsonl", n_samples=None)
+register(id="MATH-v0-pass@16", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="math/test.jsonl", n_samples=None, eval_method="x@k", k=16)
+register(id="MATH-v0-subsampled", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="math/test.jsonl", n_samples=100)
+
+# MATH500
+register(id="MATH500-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="math500/test.jsonl", n_samples=None)
+
+# MAWPS - Math Word Problems
+register(id="MAWPS-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="mawps/test.jsonl", n_samples=None)
+
+# Minerva Math
+register(id="MINERVA_MATH-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="minerva_math/test.jsonl", n_samples=None)
+
+# MMLU STEM
+register(id="MMLU_STEM-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="mmlu_stem/test.jsonl", n_samples=None)
+
+# Math Olympiad Benchmark
+register(id="OLYMPIADBENCH-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="olympiadbench/test.jsonl", n_samples=None)
+register(id="OLYMPIADBENCH-v0-pass@16", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="olympiadbench/test.jsonl", n_samples=None, eval_method="x@k", k=16)
+
+# SAT Math
+register(id="SAT_MATH-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="sat_math/test.jsonl", n_samples=None)
+
+# SVAMP
+register(id="SVAMP-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="svamp/test.jsonl", n_samples=None)
+
+# TabMWP - Tabular Math Word Problems
+register(id="TABMWP-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="tabmwp/test.jsonl", n_samples=None)

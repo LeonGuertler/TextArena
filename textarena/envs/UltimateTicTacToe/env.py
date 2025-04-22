@@ -66,7 +66,7 @@ class UltimateTicTacToeEnv(ta.Env):
                 board_str.append(row_render)
             # Separator row between macro rows
             if macro_row < 2:
-                board_str.append('-' * 23)
+                board_str.append('-' * 21)
         return '\n'.join(board_str)
     
     def _generate_player_prompt(self, player_id: int, game_state: Dict[str, Any]) -> str:
@@ -217,17 +217,17 @@ class UltimateTicTacToeEnv(ta.Env):
             reason = f"Player {self.state.current_player_id} made an invalid move. The micro_board, row, or col is out of range."
         
         ## check if the cell is empty
-        if self.board[micro_board][row][col] != ' ':
+        elif self.board[micro_board][row][col] != ' ':
             is_invalid = True
             reason = f"Player {self.state.current_player_id} made an invalid move. The cell is already occupied."
         
         ## check if the next micro board is not won but the player is playing in a different micro board
-        if self.next_micro_board is not None and micro_board != self.next_micro_board:
+        elif self.next_micro_board is not None and micro_board != self.next_micro_board:
             is_invalid = True
             reason = f"Player {self.state.current_player_id} made an invalid move. The player must play in the next micro board."
         
         ## check if the micro board is won and the player is still playing in it.
-        if self.macro_board[micro_board // 3][micro_board % 3] != ' ':
+        elif self.macro_board[micro_board // 3][micro_board % 3] != ' ':
             is_invalid = True
             reason = f"Player {self.state.current_player_id} made an invalid move. The micro board is already won."
 

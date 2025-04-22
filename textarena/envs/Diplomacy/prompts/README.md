@@ -1,0 +1,1 @@
+This folder contains the prompts for the Diplomacy environment, which are mainly adapted from the [AI_Diplomacy](https://github.com/Alx-AI/AI_Diplomacy) GitHub repository. We appreciate their work and the community that has built up around it.

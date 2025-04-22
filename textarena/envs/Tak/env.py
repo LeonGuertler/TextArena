@@ -7,42 +7,20 @@ class TakEnv(ta.Env):
     """
     Tak environment.
     """
-    def __init__(self, difficulty: Optional[str]="easy"):
+    def __init__(self, board_size, stones, capstones):
         """
         Initialize the Tak game environment
         
         Args:
             difficulty: Difficulty of the game. Can be "easy", "medium", "hard".
         """
-        self.difficulty = difficulty
 
-        # Initialize the gamm setting the board size
-        if self.difficulty == "easy":
-            self.board_size = 4
-            self.stones = 15
-            self.capstones = 1
-        elif self.difficulty == "medium":
-            self.board_size = 5
-            self.stones = 21
-            self.capstones = 1
-        elif self.difficulty == "hard":
-            self.board_size = 6
-            self.stones = 30
-            self.capstones = 1
-        else:
-            raise ValueError("Invalid difficulty level. Choose between 'easy', 'medium', 'hard'.")
+        self.board_size = board_size
+        self.stones = stones
+        self.capstones = capstones
         
-        self.state = ta.State(
-            num_players=2,
-            max_turns=None,
-        )
         self.players = None
         self.board = None
-        
-    @property
-    def offline_renderer(self):
-        from textarena.envs.two_player.Tak.render.renderer import TakRenderer
-        return TakRenderer
 
     @property 
     def terminal_render_keys(self):
@@ -55,9 +33,8 @@ class TakEnv(ta.Env):
         Args:
             seed: Seed for the random number generator.
         """
-        if seed is not None:
-            random.seed(seed)
-        assert num_players==2, f"The number of players has to be 2 for Tak. You provided {num_players}"
+        ## initialize the game state
+        self.state = ta.State(num_players=num_players, min_players=2, max_players=2)
 
         ## initialize the board
         self.board = self._generate_board()
@@ -72,13 +49,8 @@ class TakEnv(ta.Env):
             }
         }
 
-        self.state.reset(
-            game_state = {
-                "board": self.board,
-                "rendered_board": self._render_board(),
-            },
-            player_prompt_function=self._generate_player_prompt
-        )
+        ## reset the game state
+        self.state.reset(seed=seed,  game_state = {"board": self.board, "rendered_board": self._render_board()}, player_prompt_function=self._generate_player_prompt)
     
     def _generate_board(self):
         """
