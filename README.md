@@ -217,13 +217,13 @@ rewards = env.close()
 | Werewolf              | 5+       | ❌           | ❌          | —                                                                    |
 | EmojiCharade          | 2-14     | ❌           | ❌          | —                                                                    |
 
-† Games from [LLM Arena: Studying the Impact of Domain Expertise and Problem Complexity in LLM Competitions](https://arxiv.org/pdf/2406.06613)
+† Games from [GameBench: Evaluating Strategic Reasoning Abilities of LLM Agents](https://arxiv.org/pdf/2406.06613)
 
-‡ Games from [Language Model Negotiations: Theory-of-Mind vs. Complexity of the Game](https://arxiv.org/pdf/2411.05990)
+‡ Games from [Game-theoretic LLM: Agent Workflow for Negotiation Games](https://arxiv.org/pdf/2411.05990)
 
-§ Games from [Negotiating with Humans by LLMs via Strategic Reasoning](https://arxiv.org/pdf/2401.04536)
+§ Games from [Evaluating Language Model Agency Through Negotiations](https://arxiv.org/pdf/2401.04536)
 
-¶ These games were added because they are part of [Language Models Make Better Players than Solvers in Cooperative Games](https://arxiv.org/pdf/2402.12348)
+¶ These games were added because they are part of [GTBench: Uncovering the Strategic Reasoning Limitations of LLMs via Game-Theoretic Evaluations](https://arxiv.org/pdf/2402.12348)
 
 
 
