@@ -37,8 +37,8 @@ class HangmanEnv(ta.Env):
         self.state = ta.State(num_players=num_players, min_players=1, max_players=1)
 
         ## initialize the game state
-        self.game_board = self._generate_board() 
-        self.game_board_hidden = self._hide_letters(self.game_board) 
+        self.game_board = self._generate_board(seed=seed)
+        self.game_board_hidden = self._hide_letters(self.game_board)
         self.guessed_letters = set()
 
         ## reset the game state
@@ -70,15 +70,21 @@ class HangmanEnv(ta.Env):
         prompt += grid_str
         return prompt
     
-    def _generate_board(self) -> List[str]:
+    def _generate_board(self, seed: Optional[int] = None) -> List[str]:
         """
         Generate a new game board.
+
+        Args:
+            seed (Optional[int]): The seed to use for random number generation.
 
         Returns:
             List[str]: The game board.
         """
         ## sample 1 word
-        self.chosen_word = random.choice(self.word_list).upper()
+        if seed is not None:
+            self.chosen_word = random.Random(seed).choice(self.word_list).upper()
+        else:
+            self.chosen_word = random.choice(self.word_list).upper()
         return list(self.chosen_word) ## e.g. ['H', 'A', 'N', 'G', 'M', 'A', 'N']
     
     def _hide_letters(self, board: List[str]) -> List[str]:
