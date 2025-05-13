@@ -343,3 +343,6 @@ register(id="SVAMP-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:
 
 # TabMWP - Tabular Math Word Problems
 register(id="TABMWP-v0", entry_point="textarena.envs.ClassicalReasoningEvals.env:ClassicalReasoningEvalsEnv", file_name="tabmwp/test.jsonl", n_samples=None)
+
+# BabyAiText (single-player)
+register(id="BabyAiText-v0", entry_point="textarena.envs.BabyAiText.env:BabyAiTextEnv")
