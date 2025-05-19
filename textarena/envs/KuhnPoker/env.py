@@ -103,7 +103,7 @@ class KuhnPokerEnv(ta.Env):
         # set starting player
         starting_player = 1 - self.state.game_state["starting_player"]
         self.state.game_state["starting_player"] = starting_player
-        self.state.manually_update_current_player(starting_player)
+        self.state.manually_update_current_player(new_player_id=starting_player)
 
         for player_id in range(2):
             message = (
