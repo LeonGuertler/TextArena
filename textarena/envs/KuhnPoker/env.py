@@ -50,7 +50,7 @@ class KuhnPokerEnv(ta.Env):
 
     def get_board_str(self):
         return create_board_str(self.state.game_state)
-        
+
 
     def get_observation(self):
         # Check if a round just ended and we need to start a new one
@@ -160,7 +160,10 @@ class KuhnPokerEnv(ta.Env):
 
 
     def step(self, action: str) -> Tuple[bool, Dict[str, Any]]:
-        """ Process the player's move """
+        """Process the player's move"""
+        if hasattr(self.state, "done") and self.state.done:
+            return True, self.state.info
+
         player_id = self.state.current_player_id
 
         # Log the raw action to both players
@@ -207,9 +210,15 @@ class KuhnPokerEnv(ta.Env):
         # announce round result
         self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=reason)
 
-        # Start next round immediately instead of deferring
-        self._init_round()
-
+        if self.state.game_state["current_round"] >= self.state.max_turns:
+            # If this is the last round, directly set the winner to end the game
+            self.state.set_winners(
+                player_ids=[player_id],
+                reason=f"Player {player_id} won by having more chips at the end of all {self.state.max_turns} rounds.",
+            )
+        else:
+            # For non-final rounds, just mark the round as ended
+            self.state.game_state["round_ended"] = True
 
     def _rank_to_str(self, rank: int) -> str:
         """Convert the numeric rank to a string 'J', 'Q', or 'K'."""
@@ -221,7 +230,7 @@ class KuhnPokerEnv(ta.Env):
 
         # Show the cards
         cards_msg = f"Cards: Player 0 had {self._rank_to_str(card_p0)}, Player 1 had {self._rank_to_str(card_p1)}"
-        self.state.add_observation(from_id=-1, to_id=-1, message=cards_msg)
+        self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=cards_msg)
 
         # Determine and announce the winner
         winner = 0 if card_p0 > card_p1 else 1
