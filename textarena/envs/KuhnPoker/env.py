@@ -191,7 +191,6 @@ class KuhnPokerEnv(ta.Env):
             # show valid next actions
             legal_actions = ', '.join([f"[{k}]" for k in self.state.game_state["current_legal_action_tree"].keys()])
             self.state.add_observation(from_id=ta.GAME_ID, to_id=1-player_id, message=f"Your available actions are: {legal_actions}")
-
         return self.state.step()
 
     def _set_round_winner(self, player_id: int, reason: str):
