@@ -104,7 +104,6 @@ class KuhnPokerEnv(ta.Env):
         starting_player = 1 - self.state.game_state["starting_player"]
         self.state.game_state["starting_player"] = starting_player
 
-        # Use manually_update_current_player instead of direct assignment
         self.state.manually_update_current_player(starting_player)
 
         for player_id in range(2):
@@ -140,6 +139,13 @@ class KuhnPokerEnv(ta.Env):
             f"- '[bet]': Add 1 chip to the pot (only if no bet is on the table)\n"
             f"- '[call]': Match an opponent's bet by adding 1 chip to the pot\n"
             f"- '[fold]': Surrender your hand and let your opponent win the pot\n\n"
+            # f"Game Flow:\n"
+            # f"- Player 0 can '[check]' or '[bet]'\n"
+            # f"- If Player 0 Checks, Player 1 can '[check]' or '[bet]'\n"
+            # f"  - If Player 1 Checks, showdown occurs (higher card wins)\n"
+            # f"  - If Player 1 Bets, Player 0 must '[call]' or '[fold]'\n"
+            # f"- If Player 0 Bets, Player 1 must '[call]' or '[fold]'\n"
+            # f"- Showdown occurs if both players Check or if a bet is Called\n\n"
         )
         return prompt
 
