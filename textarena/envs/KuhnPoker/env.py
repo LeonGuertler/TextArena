@@ -51,16 +51,6 @@ class KuhnPokerEnv(ta.Env):
     def get_board_str(self):
         return create_board_str(self.state.game_state)
 
-
-    def get_observation(self):
-        # Check if a round just ended and we need to start a new one
-        if self.state.game_state.get("round_ended", False):
-            self.state.game_state["round_ended"] = False
-            self._init_round()
-
-        return self.state.current_player_id, self.state.get_current_player_observation()
-
-
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment """
         self.state = ta.State(
@@ -76,6 +66,18 @@ class KuhnPokerEnv(ta.Env):
 
         # Initialize the first round
         self._init_round()
+
+        # Make sure round_ended flag is cleared after initialization
+        self.state.game_state["round_ended"] = False
+
+    def _check_and_start_new_round(self):
+        """
+        Separate method to check if a round has ended and start a new one if needed.
+        This is called from step() instead of relying on get_observation().
+        """
+        if self.state.game_state.get("round_ended", False):
+            self.state.game_state["round_ended"] = False
+            self._init_round()
 
     def _init_round(self):
         # check if game is complete
@@ -113,7 +115,9 @@ class KuhnPokerEnv(ta.Env):
         # set starting player
         starting_player = 1 - self.state.game_state["starting_player"]
         self.state.game_state["starting_player"] = starting_player
-        self.state.current_player_id = starting_player
+
+        # Use manually_update_current_player instead of direct assignment
+        self.state.manually_update_current_player(starting_player)
 
         for player_id in range(2):
             message = (
@@ -161,7 +165,11 @@ class KuhnPokerEnv(ta.Env):
 
     def step(self, action: str) -> Tuple[bool, Dict[str, Any]]:
         """Process the player's move"""
-        if hasattr(self.state, "done") and self.state.done:
+        # Check for round completion BEFORE processing action
+        self._check_and_start_new_round()
+
+        # Check for game end
+        if self.state.done:
             return True, self.state.info
 
         player_id = self.state.current_player_id
