@@ -67,17 +67,6 @@ class KuhnPokerEnv(ta.Env):
         # Initialize the first round
         self._init_round()
 
-        # Make sure round_ended flag is cleared after initialization
-        self.state.game_state["round_ended"] = False
-
-    def _check_and_start_new_round(self):
-        """
-        Separate method to check if a round has ended and start a new one if needed.
-        """
-        if self.state.game_state.get("round_ended", False):
-            self.state.game_state["round_ended"] = False
-            self._init_round()
-
     def _init_round(self):
         # check if game is complete
         if self.state.game_state["current_round"] >= self.state.max_turns:
@@ -151,22 +140,12 @@ class KuhnPokerEnv(ta.Env):
             f"- '[bet]': Add 1 chip to the pot (only if no bet is on the table)\n"
             f"- '[call]': Match an opponent's bet by adding 1 chip to the pot\n"
             f"- '[fold]': Surrender your hand and let your opponent win the pot\n\n"
-            # f"Game Flow:\n"
-            # f"- Player 0 can '[check]' or '[bet]'\n"
-            # f"- If Player 0 Checks, Player 1 can '[check]' or '[bet]'\n"
-            # f"  - If Player 1 Checks, showdown occurs (higher card wins)\n"
-            # f"  - If Player 1 Bets, Player 0 must '[call]' or '[fold]'\n"
-            # f"- If Player 0 Bets, Player 1 must '[call]' or '[fold]'\n"
-            # f"- Showdown occurs if both players Check or if a bet is Called\n\n"
         )
         return prompt
 
 
     def step(self, action: str) -> Tuple[bool, Dict[str, Any]]:
         """Process the player's move"""
-        # Check for round completion BEFORE processing action
-        self._check_and_start_new_round()
-
         # Check for game end
         if self.state.done:
             return True, self.state.info
@@ -207,9 +186,8 @@ class KuhnPokerEnv(ta.Env):
             # show valid next actions
             legal_actions = ', '.join([f"[{k}]" for k in self.state.game_state["current_legal_action_tree"].keys()])
             self.state.add_observation(from_id=ta.GAME_ID, to_id=1-player_id, message=f"Your available actions are: {legal_actions}")
+
         return self.state.step()
-
-
 
     def _set_round_winner(self, player_id: int, reason: str):
         self.state.game_state["player_chips"][player_id] += self.state.game_state["pot"]
@@ -224,8 +202,9 @@ class KuhnPokerEnv(ta.Env):
                 reason=f"Player {player_id} won by having more chips at the end of all {self.state.max_turns} rounds.",
             )
         else:
-            # For non-final rounds, just mark the round as ended
-            self.state.game_state["round_ended"] = True
+            # For non-final rounds, start a new round immediately instead of just setting a flag
+            # This ensures we don't wait for another action before starting the new round
+            self._init_round()
 
     def _rank_to_str(self, rank: int) -> str:
         """Convert the numeric rank to a string 'J', 'Q', or 'K'."""
