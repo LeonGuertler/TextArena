@@ -73,7 +73,6 @@ class KuhnPokerEnv(ta.Env):
     def _check_and_start_new_round(self):
         """
         Separate method to check if a round has ended and start a new one if needed.
-        This is called from step() instead of relying on get_observation().
         """
         if self.state.game_state.get("round_ended", False):
             self.state.game_state["round_ended"] = False
