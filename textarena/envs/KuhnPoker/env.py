@@ -16,7 +16,7 @@ class KuhnPokerEnv(ta.Env):
     Deck: 3 cards - J, Q, K.
     Each player antes 1 chip => starting pot = 2 chips.
     Betting actions: [Check], [Bet], [Call], [Fold]
-    Single betting round: 
+    Single betting round:
         - Player0 acts first (check or bet).
         - If check => Player1 can check or bet.
         - If bet => next player can fold or call.
@@ -51,7 +51,6 @@ class KuhnPokerEnv(ta.Env):
     def get_board_str(self):
         return create_board_str(self.state.game_state)
 
-
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment """
         self.state = ta.State(
@@ -62,7 +61,7 @@ class KuhnPokerEnv(ta.Env):
             check_truncated=False
         )
 
-        game_state = {"pot": None, "player_chips": {0: 0, 1: 0}, "current_round": 1, "starting_player": 0}
+        game_state = {"pot": None, "player_chips": {0: 0, 1: 0}, "current_round": 0, "starting_player": 0}
         self.state.reset(game_state=game_state, player_prompt_function=self._generate_player_prompt, seed=seed)
 
         # Initialize the first round
@@ -70,20 +69,22 @@ class KuhnPokerEnv(ta.Env):
 
     def _init_round(self):
         # check if game is complete
-        if self.state.game_state["current_round"]+1 >= self.state.max_turns:
-            # determine winner 
-            if self.state.game_state["player_chips"][0] > self.state.game_state["player_chips"][0]:
+        if self.state.game_state["current_round"] >= self.state.max_turns:
+            # determine winner
+            if self.state.game_state["player_chips"][0] > self.state.game_state["player_chips"][1]:
                 winner_id = 0
-            elif self.state.game_state["player_chips"][0] > self.state.game_state["player_chips"][0]:
-                winner_id = 0
+            elif self.state.game_state["player_chips"][1] > self.state.game_state["player_chips"][0]:
+                winner_id = 1
             else:
                 winner_id = None
                 self.state.set_draw(reason=f"At the end of {self.state.max_turns} rounds, both players had the same number of chips.")
-                
+                return
+
             if winner_id is not None:
                 self.state.set_winners(player_ids=[winner_id], reason=f"Player {winner_id} won by having more chips at the end of all {self.state.max_turns} rounds.")
+                return
 
-        # shuffle the deck 
+        # shuffle the deck
         random.shuffle(self.deck)
 
         # assign player cards
@@ -101,7 +102,7 @@ class KuhnPokerEnv(ta.Env):
 
         # set starting player
         starting_player = 1 - self.state.game_state["starting_player"]
-        self.state.game_state["starting_player"] = starting_player 
+        self.state.game_state["starting_player"] = starting_player
         self.state.manually_update_current_player(new_player_id=starting_player)
 
         for player_id in range(2):
@@ -109,7 +110,7 @@ class KuhnPokerEnv(ta.Env):
                 f"Starting round {self.state.game_state['current_round']} out of {self.state.max_turns} rounds.\n"
                 f"Your card is: {self._rank_to_str(self.state.game_state['player_cards'][player_id])}\n"
             )
-            
+
             if player_id == starting_player:
                 legal_actions = ', '.join(f"[{k}]" for k in self.state.game_state["current_legal_action_tree"].keys())
                 message += f"Your available actions are: {legal_actions}"
@@ -149,7 +150,11 @@ class KuhnPokerEnv(ta.Env):
 
 
     def step(self, action: str) -> Tuple[bool, Dict[str, Any]]:
-        """ Process the player's move """
+        """Process the player's move"""
+        # Check for game end
+        if self.state.done:
+            return True, self.state.info
+
         player_id = self.state.current_player_id
 
         # Log the raw action to both players
@@ -176,25 +181,34 @@ class KuhnPokerEnv(ta.Env):
         if self.state.game_state["current_legal_action_tree"] == "loser":
             reason=f"Player {self.state.current_player_id} has folded."
             self._set_round_winner(player_id=1-self.state.current_player_id, reason=reason)
+            # Don't call self.state.step() after round end to avoid player switching issues
+            return self.state.done, self.state.info
         elif self.state.game_state["current_legal_action_tree"] == "showdown":
             self._handle_showdown()
+            # Don't call self.state.step() after round end to avoid player switching issues
+            return self.state.done, self.state.info
         else:
             # show valid next actions
             legal_actions = ', '.join([f"[{k}]" for k in self.state.game_state["current_legal_action_tree"].keys()])
             self.state.add_observation(from_id=ta.GAME_ID, to_id=1-player_id, message=f"Your available actions are: {legal_actions}")
         return self.state.step()
 
-
-
     def _set_round_winner(self, player_id: int, reason: str):
         self.state.game_state["player_chips"][player_id] += self.state.game_state["pot"]
 
-        # initialize the next cound
+        # announce round result
         self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=reason)
 
-        # start next round
-        self._init_round()
-
+        if self.state.game_state["current_round"] >= self.state.max_turns:
+            # If this is the last round, directly set the winner to end the game
+            self.state.set_winners(
+                player_ids=[player_id],
+                reason=f"Player {player_id} won by having more chips at the end of all {self.state.max_turns} rounds.",
+            )
+        else:
+            # For non-final rounds, start a new round immediately instead of just setting a flag
+            # This ensures we don't wait for another action before starting the new round
+            self._init_round()
 
     def _rank_to_str(self, rank: int) -> str:
         """Convert the numeric rank to a string 'J', 'Q', or 'K'."""
@@ -206,7 +220,7 @@ class KuhnPokerEnv(ta.Env):
 
         # Show the cards
         cards_msg = f"Cards: Player 0 had {self._rank_to_str(card_p0)}, Player 1 had {self._rank_to_str(card_p1)}"
-        self.state.add_observation(from_id=-1, to_id=-1, message=cards_msg)
+        self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=cards_msg)
 
         # Determine and announce the winner
         winner = 0 if card_p0 > card_p1 else 1
@@ -217,5 +231,3 @@ class KuhnPokerEnv(ta.Env):
             f"Player {winner} wins pot of {self.state.game_state['pot']} chips."
         )
         self._set_round_winner(player_id=winner, reason=reason)
-
-
