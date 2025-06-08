@@ -66,6 +66,10 @@ register(id="Wordle-v0-long-hardcore", entry_point="textarena.envs.Wordle.env:Wo
 register(id="WordSearch-v0", entry_point="textarena.envs.WordSearch.env:WordSearchEnv", hardcore=False)
 register(id="WordSearch-v0-hardcore", entry_point="textarena.envs.WordSearch.env:WordSearchEnv", hardcore=True)
 
+# LightsOut (single-player)
+register(id="LightsOut-v0", entry_point="textarena.envs.LightsOut.env:LightsOutEnv", grid_size=5, max_turns=100)
+register(id="LightsOut-v0-small", entry_point="textarena.envs.LightsOut.env:LightsOutEnv", grid_size=3, max_turns=100)
+register(id="LightsOut-v0-large", entry_point="textarena.envs.LightsOut.env:LightsOutEnv", grid_size=7, max_turns=100)
 
 
 
