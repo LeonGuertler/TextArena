@@ -75,6 +75,9 @@ register(id="Battleship-v0-standard", entry_point="textarena.envs.Battleship.env
 register(id="Battleship-v0-large", entry_point="textarena.envs.Battleship.env:BattleshipEnv", grid_size=14)
 register(id="Battleship-v0-extreme", entry_point="textarena.envs.Battleship.env:BattleshipEnv", grid_size=20)
 
+# Coup (2-6 player)
+register(id="Coup-v0", entry_point="textarena.envs.Coup.env:CoupEnv")
+
 # Breakthrough (two-player)
 register(id="Breakthrough-v0", entry_point="textarena.envs.Breakthrough.env:BreakthroughEnv", board_size=8, max_turns=100, is_open=True)
 register(id="Breakthrough-v0-small", entry_point="textarena.envs.Breakthrough.env:BreakthroughEnv", board_size=6, max_turns=80, is_open=True)
