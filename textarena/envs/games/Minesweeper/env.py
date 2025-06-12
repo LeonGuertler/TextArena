@@ -17,6 +17,7 @@ class MinesweeperEnv(ta.Env):
         self.cols = cols
         self.num_mines = num_mines
         self.max_turns = max_turns
+        self.action_space = {i: re.compile(r"\[(\d+)\s(\d+)\]") for i in range(2)}
 
     def get_board_str(self):
         return create_board_str(self.grid, self.revealed, self.flags)
@@ -83,7 +84,7 @@ class MinesweeperEnv(ta.Env):
         
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         self.state.add_observation(from_id=self.state.current_player_id, message=action, observation_type=ta.ObservationType.PLAYER_ACTION) ## Update the observation
-        match = re.compile(r"\[(\d+)\s(\d+)\]").search(action) # e.g. [3 2]
+        match = self.action_space[self.state.current_player_id].search(action) # e.g. [3 2]
         if match is None:
             self.state.set_invalid_move(reward=self._get_percentage_completion(), reason="You did not respond with valid coordinates in square brackets.")
         else:

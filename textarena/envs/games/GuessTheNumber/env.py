@@ -20,6 +20,7 @@ class GuessTheNumberEnv(ta.Env):
         self.min_number = min_number
         self.max_number = max_number 
         self.max_turns = max_turns
+        self.action_space = {0: re.compile(r"\[(\d+)\]")}
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -50,8 +51,7 @@ class GuessTheNumberEnv(ta.Env):
         """ Take a step in the environment """
         player_id = self.state.current_player_id
         self.state.add_observation(from_id=player_id, to_id=-1, message=action) ## update the observation
-        action_search_pattern = re.compile(r"\[(\d+)\]") # e.g. [5]
-        match = action_search_pattern.search(action)
+        match = self.action_space[player_id].search(action)
 
         if not match:
             reason=f"Invalid move format. Player {player_id} did not respond with valid '[number]'."

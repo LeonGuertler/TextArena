@@ -12,6 +12,7 @@ class KuhnPokerEnv(ta.Env):
         self.max_rounds = max_rounds
         self.deck = [0, 1, 2]  # 0=J, 1=Q, 2=K
         self.legal_action_tree = {"check": {"check": "showdown", "bet": {"fold": "loser", "call": "showdown"}}, "bet": {"fold": "loser", "call": "showdown"}}
+        self.action_space = {i: re.compile(r"\[(Check|Bet|Fold|Call)\]", re.IGNORECASE) for i in range(2)}
 
     def get_board_str(self):
         return create_board_str(self.state.game_state)
@@ -69,7 +70,7 @@ class KuhnPokerEnv(ta.Env):
     def step(self, action: str) -> Tuple[bool, Dict[str, Any]]:
         rotate_player = True
         self.state.add_observation(from_id=self.state.current_player_id, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        match = re.compile(r"\[(Check|Bet|Fold|Call)\]", re.IGNORECASE).search(action.strip()) # Regular expression to capture valid actions: e.g. [Check], [Bet], [Fold], [Call]
+        match = self.action_space[self.state.current_player_id].search(action.strip()) # Regular expression to capture valid actions: e.g. [Check], [Bet], [Fold], [Call]
         if not match: # Invalid action
             self.state.set_invalid_move(reason="Action must be [Check], [Bet], [Call], or [Fold].")
             return self.state.step()

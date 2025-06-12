@@ -12,6 +12,7 @@ class LiarsDiceEnv(ta.Env):
             num_dice (int): Initial number of dice each player starts with.
         """
         self.num_dice = num_dice
+        self.action_space = {i: re.compile(r"\[call\]|\[bid\s*:?\s*(\d+)[,\s]+(\d+)\]", re.IGNORECASE) for i in range(15)}
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)

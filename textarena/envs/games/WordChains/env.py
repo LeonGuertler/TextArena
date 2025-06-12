@@ -19,6 +19,7 @@ class WordChainsEnv(ta.Env):
         self.word_list = list((set(word.lower() for word in words.words()))) # Ensure NLTK words are loaded
         self.word_list = [word for word in self.word_list if len(word) <= 5] # only conserd words shorter then 6 characters
         self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True) # Initialize dictionaries for US and UK English
+        self.action_space = {i: re.compile(r"\[(\w+)\]") for i in range(2)}
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -42,7 +43,7 @@ class WordChainsEnv(ta.Env):
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         self.state.add_observation(from_id=self.state.current_player_id, to_id=-1, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        word_match = re.search(r"\[(\w+)\]", action) # Extract the word from the action
+        word_match = self.action_space[self.state.current_player_id].search(action) # Extract the word from the action
         reason = None
         if not word_match: 
             reason=f"Player {self.state.current_player_id} did not provide a word in the valid format."

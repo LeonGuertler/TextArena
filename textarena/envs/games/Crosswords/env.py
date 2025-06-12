@@ -23,6 +23,8 @@ class CrosswordsEnv(ta.Env):
         # self.word_data = [json.loads(x) for x in word_data if json.loads(x)["hardcore"]==hardcore]
         self._load_words(hardcore=hardcore)
 
+        self.action_space = {0: re.compile(r"\[(\d+)\s(\d+)\s([a-zA-Z])\]")}
+
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
 
@@ -233,7 +235,7 @@ class CrosswordsEnv(ta.Env):
         self.state.add_observation(from_id=self.state.current_player_id, message=action) 
 
         ## validate the actions; note that the response can have multiple guesses at one go.
-        matches = set(re.compile(r"\[(\d+)\s(\d+)\s([a-zA-Z])\]").findall(action)) # [row column letter]
+        matches = set(self.action_space[self.state.current_player_id].findall(action)) # [row column letter]
 
         if not matches:
             self.state.set_invalid_move(reason="The Player did not respond with valid 'row column letter'.")

@@ -18,6 +18,7 @@ class HangmanEnv(ta.Env):
         super().__init__()
         self.hardcore = hardcore
         self.word_list = words.words("en") if hardcore else words.words("en-basic") ## load the word list (to be sampled from)
+        self.action_space = {0: re.compile(r"\[([a-zA-Z]+)\]", re.IGNORECASE)}
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -56,7 +57,7 @@ class HangmanEnv(ta.Env):
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         """ Process the player's action and update the game state accordingly """
         self.state.add_observation(from_id=self.state.current_player_id, message=action) # Update the observations
-        match = re.compile(r"\[([a-zA-Z]+)\]", re.IGNORECASE).search(action)
+        match = self.action_space[self.state.current_player_id].search(action)
 
         if not match:
             self.state.set_invalid_move(reason=f"Invalid move format. You did not respond with a valid 'letter' or 'word'.")

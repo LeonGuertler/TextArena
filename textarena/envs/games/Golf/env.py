@@ -12,6 +12,7 @@ class GolfEnv(ta.Env):
         self.num_columns = num_columns
         self.num_rows = num_cards // num_columns
         self.deck = self._create_deck()
+        self.action_space = {i: re.compile(r"\[draw\]|\[take\]|\[swap (\d+) (\d+)\]|\[discard\]|\[knock\]|\[peek (\d+) (\d+)\]", re.IGNORECASE) for i in range(4)}
         
     def _create_deck(self) -> List[Dict[str, Any]]:
         """ Creates a standard 52-card deck """

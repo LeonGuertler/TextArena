@@ -8,6 +8,7 @@ from textarena.envs.games.IteratedRockPaperScissors.renderer import create_board
 class IteratedRockPaperScissorsEnv(ta.Env):
     def __init__(self, num_rounds: int = 5):
         self.num_rounds = num_rounds
+        self.action_space = {i: re.compile(r"\[(rock|r|paper|p|scissors|s)\]") for i in range(2)}
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -57,7 +58,7 @@ class IteratedRockPaperScissorsEnv(ta.Env):
         return self.state.step()
 
     def _parse_action(self, action: str) -> str:
-        match = re.search(r"\[(rock|r|paper|p|scissors|s)\]", action.strip().lower())
+        match = self.action_space[self.state.current_player_id].search(action.strip().lower())
         if not match: return ""
         return {"r": "rock", "p": "paper", "s": "scissors"}.get(match.group(1), match.group(1))
 

@@ -8,6 +8,7 @@ class TicTacToeEnv(ta.Env):
     def __init__(self):
         super().__init__()
         self.cell_mapping = {i * 3 + j: (i, j) for i in range(3) for j in range(3)}
+        self.action_space = {i: re.compile(r"\[\s*(\d+)\s*\]") for i in range(2)}
 
     def get_board_str(self):
         return create_board_str(board=self.state.game_state["board"])
@@ -38,7 +39,7 @@ class TicTacToeEnv(ta.Env):
     def step(self,action:str)->Tuple[bool,ta.Info]:
         self.current_player = 'X' if self.state.current_player_id == 1 else 'O'
         self.state.add_observation(from_id=self.state.current_player_id, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        match = re.compile(r"\[\s*(\d+)\s*\]").search(action)
+        match = self.action_space[self.state.current_player_id].search(action)
         if match is None: # Invalid format
             self.state.set_invalid_move(reason="The submitted move does not follow the correct format.")
         else:

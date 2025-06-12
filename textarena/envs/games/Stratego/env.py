@@ -23,6 +23,7 @@ class StrategoEnv(ta.Env):
         self.lakes = [(4, 2), (4, 3), (5, 2), (5, 3), (4, 6), (4, 7), (5, 6), (5, 7)]
         self.player_pieces = {0: [], 1: []}
         self.board = [[None for _ in range(10)] for _ in range(10)]
+        self.action_space = {i: re.compile(r"\[([A-J])([0-9]) ([A-J])([0-9])\]") for i in range(2)}
 
     @property
     def terminal_render_keys(self):
@@ -210,8 +211,7 @@ class StrategoEnv(ta.Env):
         self.state.add_observation(from_id=player_id, to_id=player_id, message=action)
 
         ## action search pattern
-        action_search_pattern = re.compile(r"\[([A-J])([0-9]) ([A-J])([0-9])\]") ## e.g. [A1 B1]
-        match = action_search_pattern.search(action)
+        match = self.action_space[player_id].search(action)
 
         if match is None:
             reason=f"Invalid action format. Player {player_id} did not input a move in the format [A0 B0]."

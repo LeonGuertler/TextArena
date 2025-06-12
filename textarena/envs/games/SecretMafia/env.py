@@ -17,6 +17,7 @@ class SecretMafiaEnv(ta.Env):
         """
         self.mafia_ratio = mafia_ratio
         self.discussion_rounds = discussion_rounds
+        self.action_space = {i: re.compile(r".*", re.DOTALL) for i in range(15)}
 
         # Role definitions
         self.roles = {

@@ -15,6 +15,7 @@ class SpellingBeeEnv(ta.Env):
         super().__init__()
         self.num_letters = num_letters
         self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
+        self.action_space = {i: re.compile(r"\[(\w+)\]") for i in range(2)}
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -41,7 +42,7 @@ class SpellingBeeEnv(ta.Env):
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         self.state.add_observation(from_id=self.state.current_player_id, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        match = re.search(r"\[(\w+)\]", action.strip().lower()) # extract provided word
+        match = self.action_space[self.state.current_player_id].search(action.strip().lower()) # extract provided word
         reason = None
         if match:
             word = match.group(1)

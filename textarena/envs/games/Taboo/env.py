@@ -31,6 +31,7 @@ class TabooEnv(ta.Env):
             self.categories = [categories]
             
         self.max_turns = max_turns
+        self.action_space = {0: re.compile(r".*", re.DOTALL), 1: re.compile(r"\[(.*?)\]")}
 
         # Load the data 
         self.data = self._load_data(data_path)

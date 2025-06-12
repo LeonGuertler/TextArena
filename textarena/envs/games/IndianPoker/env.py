@@ -19,6 +19,7 @@ class IndianPokerEnv(ta.Env):
         self.max_rounds = max_rounds
         self.starting_bank = starting_chips
         self.full_deck = list(range(52))
+        self.action_space = {i: re.compile(r"\[check\]|\[fold\]|\[call\]|\[bet (\d+)\]|\[raise (\d+)\]", re.IGNORECASE) for i in range(2)}
 
     @staticmethod
     def _rank(card: int) -> int: return (card % 13) + 2 # 0-51 → 2-14

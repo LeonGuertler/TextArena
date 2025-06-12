@@ -16,6 +16,7 @@ class BreakthroughEnv(ta.Env):
         self.max_turns = max_turns
         self._file_to_col = {chr(ord('a') + i): i for i in range(board_size)}
         self._col_to_file = {v: k for k, v in self._file_to_col.items()}
+        self.action_space = {i: re.compile(rf"\[[a-{chr(ord('a')+self.board_size-1)}][1-{self.board_size}][a-{chr(ord('a')+self.board_size-1)}][1-{self.board_size}]\]", re.IGNORECASE) for i in range(2)} 
 
     def get_board_str(self):
         return create_board_str(board=self.state.game_state["board"], board_size=self.board_size)
@@ -55,7 +56,7 @@ class BreakthroughEnv(ta.Env):
     def _execute_player_move(self, action: str):
         """Parse the action (UCI-like string [a2a3]) and execute if valid."""
         player_id = self.state.current_player_id
-        match = re.compile(rf"\[[a-{chr(ord('a')+self.board_size-1)}][1-{self.board_size}][a-{chr(ord('a')+self.board_size-1)}][1-{self.board_size}]\]", re.IGNORECASE).search(action.strip())
+        match = self.action_space[player_id].search(action.strip())
         if not match: 
             self.state.set_invalid_move(reason=f"Please use bracketed algebraic notation like [a2a3]."); return 
 

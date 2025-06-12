@@ -30,6 +30,7 @@ class SurroundEnv(ta.Env):
         self.height = height
         self.max_turns = max_turns
         self.pending_actions = {}
+        self.action_space = {i: re.compile(r"\[(up|w|down|s|left|a|right|d)\]", re.IGNORECASE) for i in range(15)}
 
     def get_board_str(self):
         return create_board_str(width=self.width, height=self.height, game_state=self.state.game_state)

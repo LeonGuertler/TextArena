@@ -19,7 +19,7 @@ class GameOfPureStrategyEnv(ta.Env):
     def __init__(self):
         super().__init__()
         self.full_hand = list(range(1, 14))
-        self.action_space = re.compile(r"\[(a|k|q|j|10|[2-9])]", re.I)
+        self.action_space = {i: re.compile(r"\[(a|k|q|j|10|[2-9])]", re.I) for i in range(2)}
 
     @staticmethod
     def _face_to_val(face: str) -> int:
@@ -74,7 +74,7 @@ class GameOfPureStrategyEnv(ta.Env):
         gs = self.state.game_state
         self.state.add_observation(from_id=pid, to_id=pid, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
 
-        tokens = self.action_space.findall(action.lower())
+        tokens = self.action_space[pid].findall(action.lower())
         print(tokens)
         if len(tokens) != 1 or len(gs["pending_bids"]) >= 2: 
             self.state.set_invalid_move(reason="Action must contain exactly ONE bracketed card token.")

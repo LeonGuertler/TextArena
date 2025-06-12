@@ -19,6 +19,7 @@ class ChopsticksEnv(ta.Env):
         First to kill both opponent hands (both zero) wins. If both die on same move, attacker wins.
         """
         self.max_turns = max_turns
+        self.action_space = {i: re.compile(r"\[\s*attack\s+([01])\s+([01])\s*\]|\[\s*split\s+(\d+)\s+(\d+)\s*\]", re.IGNORECASE) for i in range(2)}
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         self.state = ta.TwoPlayerState(num_players=num_players, max_turns=self.max_turns, seed=seed)

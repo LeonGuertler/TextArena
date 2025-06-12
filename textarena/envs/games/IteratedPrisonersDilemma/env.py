@@ -41,6 +41,7 @@ class IteratedPrisonersDilemmaEnv(ta.Env):
         # Action patterns
         self.cooperate_pattern = re.compile(r"\[Cooperate\]", re.IGNORECASE)
         self.defect_pattern = re.compile(r"\[Defect\]", re.IGNORECASE)
+        self.action_space = {i: re.compile(r"\[(Cooperate|Defect)\]", re.IGNORECASE) for i in range(2)}
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)

@@ -9,6 +9,7 @@ class BriscolaEnv(ta.Env):
         """ Initializes the Briscola card game environment """
         super().__init__()
         self.deck = self._create_deck()
+        self.action_space = {i: re.compile(r"\[play (\d+)\]", re.I) for i in range(4)}
         
     def _create_deck(self) -> List[Dict[str, Any]]:
         """ Creates a 40-card Italian deck for Briscola """
@@ -57,8 +58,7 @@ class BriscolaEnv(ta.Env):
     
     def _find_action_token(self, message: str) -> Optional[int]:
         """ Parse card play action from player message """
-        pattern = re.compile(r"\[play (\d+)\]", re.I)
-        match = pattern.search(message)
+        match = self.action_space[self.state.current_player_id].search(message)
         
         if match:
             return int(match.group(1)) - 1  # Convert to 0-based index

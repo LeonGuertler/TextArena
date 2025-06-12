@@ -15,6 +15,7 @@ class PigDiceEnv(ta.Env):
         self.winning_score = winning_score
         self.max_turns = max_turns
         self.roll_value = None
+        self.action_space = {i: re.compile(r"\[(roll|hold)\]", re.IGNORECASE) for i in range(2)}
 
     def get_board_str(self):
         return create_board_str(scores=self.state.game_state["scores"], turn_total=self.state.game_state["turn_total"], current_player=self.state.current_player_id, current_roll=self.roll_value)
@@ -35,7 +36,7 @@ class PigDiceEnv(ta.Env):
     
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         self.state.add_observation(from_id=self.state.current_player_id, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        match = re.compile(r"\[(roll|hold)\]", re.IGNORECASE).search(action.strip()) # Parse the action using regex
+        match = self.action_space[self.state.current_player_id].search(action.strip()) # Parse the action using regex
         if not match:
             self.state.set_invalid_move(reason=f"Invalid action format. Use '[roll]' or '[hold]'.")
             return self.state.step(rotate_player=False) 

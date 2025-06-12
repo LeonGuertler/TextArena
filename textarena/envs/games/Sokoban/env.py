@@ -13,7 +13,8 @@ class SokobanEnv(ta.Env):
         self.num_gen_steps = int(1.7 * (dim_room[0] + dim_room[1]))
         self.num_boxes = num_boxes
         self.max_turns = max_turns
-        self.action_space = ['up', 'down', 'left', 'right']
+        self._actions = ['up', 'down', 'left', 'right']
+        self.action_space = {0: re.compile(r"\[(up|down|left|right)\]")}
         
     def _generate_player_prompt(self, player_id: int, game_state: Dict[int, Any]) -> str:
         return """You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets.
@@ -27,7 +28,7 @@ class SokobanEnv(ta.Env):
         - Boxes on goals are visualized with '√'"""
     
     def _observe_current_state(self):
-        board_str = f"Current Board:\n\n{self.create_board_str(self.room_state)}\nAvailable Moves: " + ", ".join(self.action_space)
+        board_str = f"Current Board:\n\n{self.create_board_str(self.room_state)}\nAvailable Moves: " + ", ".join(self._actions)
         self.state.add_observation(message=board_str, observation_type=ta.ObservationType.GAME_BOARD)
 
     def get_board_str(self):
@@ -44,13 +45,13 @@ class SokobanEnv(ta.Env):
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         self.state.add_observation(from_id=self.state.current_player_id, to_id=-1, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        matches = re.compile(r'\[(up|down|left|right)\]').search(action)
+        matches = self.action_space[self.state.current_player_id].search(action)
 
         if matches is None: 
             self.state.set_invalid_move(reward=self._get_percentage_completion(), reason="The submitted move does not follow the correct format.")
         else:
             action = matches.group(1)
-            if action not in self.action_space: 
+            if action not in self._actions: 
                 self.state.set_invalid_move(reward=self._get_percentage_completion(), reason="The submitted move is not a valid action.")
             else:
                 # Check if the move would result in a wall collision
@@ -71,7 +72,7 @@ class SokobanEnv(ta.Env):
                         else:
                             self.state.add_observation(message=f"You moved [{action}].", observation_type=ta.ObservationType.GAME_MESSAGE)
                         
-                        board_str = f"Current Board:\n\n{self.create_board_str(self.room_state)}\nAvailable Moves: " + ", ".join(self.action_space)
+                        board_str = f"Current Board:\n\n{self.create_board_str(self.room_state)}\nAvailable Moves: " + ", ".join(self._actions)
                         self.state.add_observation(from_id=-1, to_id=self.state.current_player_id, message=board_str, observation_type=ta.ObservationType.GAME_BOARD)
                         
                         # Check win condition
@@ -88,7 +89,7 @@ class SokobanEnv(ta.Env):
         Check if the given action would result in a wall collision.
         Returns True if the player would collide with a wall, False otherwise.
         """
-        change = CHANGE_COORDINATES[self.action_space.index(action)]
+        change = CHANGE_COORDINATES[self._actions.index(action)]
         new_position = self.player_position + change
         
         # Check bounds
@@ -144,7 +145,7 @@ class SokobanEnv(ta.Env):
         Perform a push, if a box is adjacent in the right direction. If no box, can be pushed, try to move.
         Returns (move_successful, box_pushed)
         """
-        change = CHANGE_COORDINATES[self.action_space.index(action)]
+        change = CHANGE_COORDINATES[self._actions.index(action)]
         new_position = self.player_position + change
         current_position = self.player_position.copy()
 
@@ -185,7 +186,7 @@ class SokobanEnv(ta.Env):
         """
         Moves the player to the next field, if it is not occupied.
         """
-        change = CHANGE_COORDINATES[self.action_space.index(action)]
+        change = CHANGE_COORDINATES[self._actions.index(action)]
         new_position = self.player_position + change
         current_position = self.player_position.copy()
 

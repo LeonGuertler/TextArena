@@ -24,6 +24,8 @@ class PokerEnv(ta.Env):
         self.ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
         self.rank_values = {r: i + 2 for i, r in enumerate(self.ranks)}
 
+        self.action_space = {i: re.compile(r"^\[(check|fold|call.*?|bet (\d+)|raise (\d+))\]$", re.IGNORECASE) for i in range(15)}
+
     def get_board_str(self):
         gs = self.state.game_state
         return create_board_str(community_cards=gs["visible_community_cards"], pot=gs["pot"], player_chips=gs["player_chips"], player_hands=gs["player_hands"], bets=gs["player_bets"])

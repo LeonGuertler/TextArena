@@ -14,6 +14,7 @@ class SimpleTakEnv(ta.Env):
         super().__init__()
         self.board_size = board_size
         self.cell_mapping = {i: (i // board_size, i % board_size) for i in range(board_size * board_size)}
+        self.action_space = {i: re.compile(r"\[\s*(\d+)\s*\]") for i in range(2)}
 
     def get_board_str(self):
         return create_board_str(board=self.state.game_state["board"], board_size=self.board_size)
@@ -86,7 +87,7 @@ class SimpleTakEnv(ta.Env):
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         symbol = 'O' if self.state.current_player_id == 0 else 'X'
         self.state.add_observation(from_id=self.state.current_player_id, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        match = re.compile(r"\[\s*(\d+)\s*\]").search(action) # Regex to parse moves like [12]
+        match = self.action_space[self.state.current_player_id].search(action) # Regex to parse moves like [12]
         if match is None:
             self.state.set_invalid_move(reason="Invalid move format")
         else:

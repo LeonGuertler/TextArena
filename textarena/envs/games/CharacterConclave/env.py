@@ -11,6 +11,7 @@ class CharacterConclaveEnv(ta.Env):
             character_budget (int): Maximum number of characters each player can use during discussion.
         """
         self.character_budget = character_budget
+        self.action_space = {i: re.compile(r"\[\s*(?:player\s+)?(\d+)\s*\]") for i in range(15)}
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -100,7 +101,7 @@ class CharacterConclaveEnv(ta.Env):
 
 
     def _validate_player_vote(self, action: str):
-        match = re.search(r"\[\s*(?:player\s+)?(\d+)\s*\]", action.strip(), re.IGNORECASE) # More permissive pattern that allows text before and after the vote
+        match = self.action_space[self.state.current_player_id].search(action.strip()) # More permissive pattern that allows text before and after the vote
         if not match: return None, "Invalid voting format. Please include your vote as '[x]' or '[player x]'."
         # Extract the first vote if multiple are present
         try: target_pid = int(match.group(1))

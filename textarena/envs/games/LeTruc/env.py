@@ -15,13 +15,13 @@ class LeTrucEnv(ta.Env):
 
     def __init__(self):
         super().__init__()
-        self.action_space = re.compile(
+        self.action_space = {i: re.compile(
             r"""\[
                 (?P<verb>play|raise|accept|fold)            # action keyword
                 (?:\s+(?P<card>(10|[234567JQKA])))?         # optional rank
             \]""",
             re.IGNORECASE | re.VERBOSE,
-        )
+        ) for i in range(2)}
         # build the 32-card deck
         suits = "♣♦♥♠"
         self.deck = [r + s for r in self.order for s in suits]
@@ -55,7 +55,7 @@ class LeTrucEnv(ta.Env):
         gs  = self.state.game_state
         self.state.add_observation(from_id=pid, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
 
-        m = self.action_space.search(action)
+        m = self.action_space[pid].search(action)
         if not m: self.state.set_invalid_move(reason="Unrecognised action."); return self.state.step()
         verb  = m.group("verb").lower()
         if verb == "raise":

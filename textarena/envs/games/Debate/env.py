@@ -1,3 +1,4 @@
+import re
 import os, json, random
 import importlib.resources
 from typing import Optional, Dict, Any, Tuple
@@ -21,6 +22,7 @@ class DebateEnv(ta.Env):
         self.max_turns = max_turns
         self._load_topics(topics_path)
         self.jury = jury_class(jury_size=jury_size, options=["Affirmative", "Negative"])
+        self.action_space = {i: re.compile(r".*", re.DOTALL) for i in range(2)}
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)

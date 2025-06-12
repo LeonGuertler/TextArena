@@ -24,6 +24,7 @@ class FrozenLakeEnv(ta.Env):
             'left': (0, -1),
             'right': (0, 1)
         }
+        self.action_space = {0: re.compile(r"\[\s*(up|down|left|right|w|a|s|d)\s*\]", re.IGNORECASE)}
 
     def reset(self, num_players: int = 1, seed: Optional[int] = None):
         """Reset the environment with a new random grid layout."""
@@ -249,7 +250,7 @@ class FrozenLakeEnv(ta.Env):
         )
         
         # Parse the action - accept both words and WASD keys
-        match = re.compile(r"\[\s*(up|down|left|right|w|a|s|d)\s*\]", re.IGNORECASE).search(action)
+        match = self.action_space[self.state.current_player_id].search(action)
         
         if match is None:
             self.state.set_invalid_move(reward=self._get_percentage_completion(), reason="Invalid action format. Use [up], [down], [left], [right] or [w], [a], [s], [d].")

@@ -11,6 +11,7 @@ class ThreePlayerTicTacToeEnv(ta.Env):
         self.board_size = 5
         self.cell_mapping = {i * self.board_size + j: (i, j) for i in range(self.board_size) for j in range(self.board_size)}
         self.symbols = {0: 'A', 1: 'B', 2: 'C'}
+        self.action_space = {i: re.compile(r"\[(\d+)\]") for i in range(3)}
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -59,7 +60,7 @@ class ThreePlayerTicTacToeEnv(ta.Env):
         player_id = self.state.current_player_id
         self.state.add_observation(from_id=player_id, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
 
-        match = re.search(r"\[(\d+)\]", action)
+        match = self.action_space[player_id].search(action)
         if not match:
             if self.state.set_invalid_move(reason=f"Invalid move format. Use '[cell]' where cell is 0-{self.board_size ** 2 - 1}."):
                 self.state.set_winners(player_ids=[pid for pid in range(3) if pid!=player_id], reason=f"Player {player_id} made an invalid move")
