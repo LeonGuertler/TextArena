@@ -61,6 +61,13 @@ class BlindAuctionEnv(ta.Env):
             "Ruby Brooch", "Sapphire Tiara", "Telescope", "Amber Fossil"
         ]
 
+        self.action_space = {
+            i: re.compile(
+                r"(?:\s*\[Broadcast\s*:\s*(.*?)\]|\s*\[Broadcast((?:\s+).*?)\]|\s*\[Broadcast\](\s+.*?)(?=\s*\[|$))|"
+                r"\s*\[Whisper\s+(?:to\s+)?(?:Player\s+)?(\d+)\s*:\s*(.*?)\]|\[Bid\s+(?:on\s+)?(?:Item\s+)?(\d+)\s*:\s*(\d+)\]",
+                re.IGNORECASE | re.DOTALL
+            ) for i in range(15)}
+
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
 

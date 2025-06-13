@@ -36,6 +36,8 @@ class BullshitEnv(ta.Env):
         # rank_values: e.g. {"A": 1, "2": 2, ..., "K": 13}
         self.rank_values = {rank: i + 1 for i, rank in enumerate(self.ranks)}
 
+        self.action_space = {i: re.compile(r"^\[\s*BULLSHIT\s*\]$|^\[\s*PASS\s*\]$|^\[\s*(?P<rank>\w+)\s+(?P<indexes>(?:\d+\s*)+)\]$", re.IGNORECASE) for i in range(8)}
+
     def reset(self, num_players: int, seed: Optional[int] = None) -> None:
         """ Reset the environment for a new Bullshit game """
         self.state = ta.State(num_players=num_players, min_players=2, max_players=8)

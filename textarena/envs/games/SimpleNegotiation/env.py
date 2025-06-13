@@ -16,6 +16,7 @@ class SimpleNegotiationEnv(ta.Env):
         self.accept_pattern = re.compile(r"\[Accept\]", re.IGNORECASE)
         self.deny_pattern = re.compile(r"\[Deny\]", re.IGNORECASE)
         self.offer_pattern = re.compile(r"\[Offer:?\s*(?:I\s+(?:give|offer)\s+)?([^\[\]]+?)\s*\.*\]", re.IGNORECASE | re.DOTALL)
+        self.action_space = {i: re.compile(r"\[Accept\]|\[Deny\]|\[Offer:?\s*(?:I\s+(?:give|offer)\s+)?([^\[\]]+?)\s*\.*\]", re.IGNORECASE | re.DOTALL) for i in range(2)}
 
 
     def get_board_str(self):

@@ -56,6 +56,13 @@ class NegotiationEnv(ta.Env):
 
         self.turn_multiple = turn_multiple
 
+        self.action_space = {
+            i: re.compile(
+                r"(?:\s*\[Broadcast\s*:\s*(.*?)\]|\s*\[Broadcast((?:\s+).*?)\]|\s*\[Broadcast\](\s+.*?)(?=\s*\[|$)|\s*\[Whisper\s+(?:to\s+)?(?:Player\s+)?(\d+)\s*:\s*(.*?)\]|"
+                r"\[Offer\s+(?:to\s+)?(?:Player\s+)?(\d+)\s*:?\s*(.*?)\]|\[Accept\s*#?\s*(\d+)\]|\[Deny\s*#?\s*(\d+)\])",
+                re.IGNORECASE | re.DOTALL
+            ) for i in range(15)}
+
     @property
     def terminal_render_keys(self):
         return ["player_resources", "player_values", "pending_offers"]

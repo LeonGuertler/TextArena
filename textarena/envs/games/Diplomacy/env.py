@@ -56,6 +56,14 @@ class DiplomacyEnv(ta.Env):
         self.current_phase = None
         self.chat_history: List[Dict[str, Any]] = []
 
+        self.action_space = {
+            i: re.compile(
+                r"(?:\s*\[Broadcast\s*:\s*(.*?)\]|\s*\[Broadcast((?:\s+).*?)\]|\s*\[Broadcast\](\s+.*?)(?=\s*\[|$)|"
+                r"\s*\[Whisper\s+(?:to\s+)?(?:Player\s+)?(\d+)(?:\s+\(([A-Z]+)\))?\s*:\s*(.*?)\]|"
+                r"\[Submit\s+Orders\]([\s\S]*?)(?=\[|$))",
+                re.IGNORECASE | re.DOTALL
+            ) for i in range(7)}
+
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment and start a new game """
         self.state = ta.State(num_players=num_players, min_players=3, max_players=7, seed=seed)
