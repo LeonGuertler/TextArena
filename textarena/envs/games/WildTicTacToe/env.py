@@ -8,7 +8,7 @@ class WildTicTacToeEnv(ta.Env):
     def __init__(self):
         super().__init__()
         self.cell_mapping = {i * 3 + j: (i, j) for i in range(3) for j in range(3)}
-        self.action_space = {i: re.compile(r"\[\s*([XO])\s+(\d+)\s*\]", re.IGNORECASE) for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[\s*([XO])\s+(\d+)\s*\]", re.IGNORECASE)
 
     def get_board_str(self):
         return create_board_str(board=self.state.game_state["board"])
@@ -35,7 +35,7 @@ class WildTicTacToeEnv(ta.Env):
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         self.state.add_observation(from_id=self.state.current_player_id, message=action)
-        match = self.action_space[self.state.current_player_id].search(action)
+        match = self.action_space(self.state.current_player_id).search(action)
 
         if match is None:
             self.state.set_invalid_move(reason=f"Invalid move format. Use '[X 4]' or '[O 2]' format.")

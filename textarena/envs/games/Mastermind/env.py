@@ -17,7 +17,7 @@ class MastermindEnv(ta.Env):
         self.code_length = code_length 
         self.num_numbers = num_numbers
         self.duplicate_numbers = duplicate_numbers
-        self.action_space = {0: re.compile(r"\[(\d+(?:\s+\d+)*)\]")}
+        self.action_space = lambda player_id: re.compile(r"\[(\d+(?:\s+\d+)*)\]")
     
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -43,7 +43,7 @@ class MastermindEnv(ta.Env):
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         self.state.add_observation(from_id=self.state.current_player_id, message=action, observation_type=ta.ObservationType.PLAYER_ACTION) # Update the observation with the player's action
-        match = self.action_space[self.state.current_player_id].search(action) # e.g., [1 2 3 4]
+        match = self.action_space(self.state.current_player_id).search(action) # e.g., [1 2 3 4]
 
         if match is None:
             self.state.set_invalid_move(reward=self._get_percentage_completion(), reason=f"You did not respond with a space-separated list of numbers wrapped in square brackets.")

@@ -8,7 +8,7 @@ class ReverseTicTacToeEnv(ta.Env):
     def __init__(self):
         super().__init__()
         self.cell_mapping = {i * 3 + j: (i, j) for i in range(3) for j in range(3)}
-        self.action_space = {i: re.compile(r"\[(\d+)\]") for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[(\d+)\]")
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         self.state = ta.TwoPlayerState(num_players=num_players, seed=seed)
@@ -40,7 +40,7 @@ class ReverseTicTacToeEnv(ta.Env):
         current_symbol = 'X' if self.state.current_player_id == 1 else 'O'
         self.state.add_observation(from_id=self.state.current_player_id, message=action)
 
-        match = self.action_space[self.state.current_player_id].search(action)
+        match = self.action_space(self.state.current_player_id).search(action)
         if not match:
             self.state.set_invalid_move(reason="Invalid move format. Use '[cell]'.")
         else:

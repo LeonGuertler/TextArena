@@ -18,7 +18,7 @@ class LogicPuzzleEnv(ta.Env):
         super().__init__()
         self.difficulty = difficulty
         self.game_board_data = self._load_puzzle_data() # Load the puzzle data
-        self.action_space = {0: re.compile(r"\[([a-zA-Z]+)\s([a-zA-Z]+)\s([XOxo])\]")}
+        self.action_space = lambda player_id: re.compile(r"\[([a-zA-Z]+)\s([a-zA-Z]+)\s([XOxo])\]")
         
     def _load_puzzle_data(self, puzzle_path: Optional[str] = None):
         """
@@ -161,7 +161,7 @@ class LogicPuzzleEnv(ta.Env):
         """ Take a step in the environment based on the player's action """
         player_id = self.state.current_player_id
         self.state.add_observation(from_id=player_id, to_id=-1, message=action) ## update the observation
-        matches = self.action_space[player_id].findall(action) ## should this be search, or find all?
+        matches = self.action_space(player_id).findall(action) ## should this be search, or find all?
         matches = set(matches)
 
         if not matches:

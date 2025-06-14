@@ -16,7 +16,7 @@ class DontSayItEnv(ta.Env):
         all_words = nltk.corpus.words.words("en") if hardcore else nltk.corpus.words.words("en-basic")
         self.word_list = [word for word in all_words if nltk.pos_tag([word])[0][1] in ["NN"]] # Filter words based on POS tags
         self.max_turns = max_turns
-        self.action_space = {i: re.compile(r".*", re.DOTALL) for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r".*", re.DOTALL)
 
     def reset(self, num_players: int, seed: Optional[int]=None):
         self.state = ta.TwoPlayerState(num_players=num_players, max_turns=self.max_turns, seed=seed)

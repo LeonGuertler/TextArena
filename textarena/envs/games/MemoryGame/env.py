@@ -15,7 +15,7 @@ class MemoryGameEnv(ta.Env):
             grid_size (int): The grid size used
         """
         self.grid_size = grid_size
-        self.action_space = {i: re.compile(r"\[([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)\]") for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)\]")
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -53,7 +53,7 @@ class MemoryGameEnv(ta.Env):
     def step(self, action: List[int]) -> Tuple[bool, ta.Info]:
         player_id = self.state.current_player_id
         self.state.add_observation(from_id=player_id, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        match = self.action_space[player_id].search(action) # e.g. [0 1 1 0]
+        match = self.action_space(player_id).search(action) # e.g. [0 1 1 0]
 
         if match is None:
             self.state.set_invalid_move(reason=f"Invalid move format. Player {player_id} did not respond with a valid direction in square brackets.")

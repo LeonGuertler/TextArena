@@ -22,7 +22,7 @@ class WordSearchEnv(ta.Env):
         self.hardcore = hardcore
         self.num_words = 5
         self.num_incorrect_tries = 20
-        self.action_space = {0: re.compile(r"\[(\d+)\s(\d+)\s(\d+)\s(\d+)\]")}
+        self.action_space = lambda player_id: re.compile(r"\[(\d+)\s(\d+)\s(\d+)\s(\d+)\]")
 
         ## load the word list
         self.word_list = words.words("en") if self.hardcore else words.words("en-basic")
@@ -487,7 +487,7 @@ class WordSearchEnv(ta.Env):
         player_id = self.state.current_player_id
         self.state.add_observation(from_id=player_id, to_id=-1, message=action) ## Update the observations that was provided by the player
         ## validate the action
-        matches = self.action_space[player_id].findall(action)
+        matches = self.action_space(player_id).findall(action)
         matches = set(matches)
 
         if not matches:

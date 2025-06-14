@@ -21,7 +21,7 @@ class IteratedTwoThirdsAverageEnv(ta.Env):
         self.num_rounds = num_rounds
         self.min_guess = min_guess
         self.max_guess = max_guess
-        self.action_space = {i: re.compile(r"\[\s*([0-9]+(?:\.[0-9]*)?)\s*\]") for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[\s*([0-9]+(?:\.[0-9]*)?)\s*\]")
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         self.state = ta.TwoPlayerState(num_players=num_players, seed=seed)
@@ -47,7 +47,7 @@ class IteratedTwoThirdsAverageEnv(ta.Env):
         # self.state.add_observation(from_id=pid, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
 
         # parse guess
-        m = self.action_space[pid].search(action)
+        m = self.action_space(pid).search(action)
         if not m:
             self.state.set_invalid_move(reason="Invalid format; please submit your guess as “[<number>]”.")
         else:

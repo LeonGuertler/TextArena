@@ -10,7 +10,7 @@ class FifteenPuzzleEnv(ta.Env):
         """ Initialize the Fifteen Puzzle environment """
         super().__init__()
         self.max_turns = max_turns
-        self.action_space = {0: re.compile(r"\[([a-zA-Z]+)\]")}
+        self.action_space = lambda player_id: re.compile(r"\[([a-zA-Z]+)\]")
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -55,7 +55,7 @@ class FifteenPuzzleEnv(ta.Env):
         """ Process the player's action and update the environment state """
         player_id = self.state.current_player_id
         self.state.add_observation(from_id=player_id, to_id=-1, message=action)
-        match = self.action_space[player_id].search(action)
+        match = self.action_space(player_id).search(action)
 
         if match is None:
             reason=f"Invalid move format. Player {player_id} did not respond with a valid direction in square brackets."

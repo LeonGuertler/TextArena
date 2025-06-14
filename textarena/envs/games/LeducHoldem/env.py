@@ -17,7 +17,7 @@ class LeducHoldemEnv(ta.Env):
         self.deck = [r for r in range(3) for _ in range(2)] # deck = two of each rank 0-2  (0=J, 1=Q, 2=K)
         self.bet_sizes = [2, 4] # round-0 / round-1 fixed bet
         self.max_rounds = max_rounds
-        self.action_space = {i: re.compile(r"\[(check|call|bet|raise|fold)]", re.I) for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[(check|call|bet|raise|fold)\]", re.I)
 
     @staticmethod
     def _rank_to_str(r: int) -> str: return ["J", "Q", "K"][r]
@@ -70,7 +70,7 @@ class LeducHoldemEnv(ta.Env):
         pid = self.state.current_player_id
         gs = self.state.game_state
         self.state.add_observation(from_id=pid, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        m = self.action_space[pid].search(action)
+        m = self.action_space(pid).search(action)
         if not m:
             self.state.set_invalid_move(reason = "Supply exactly one legal action token.")
             return self.state.step()

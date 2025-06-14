@@ -12,10 +12,7 @@ class CodenamesEnv(ta.Env):
     """Environment for Codenames game."""
     def __init__(self, hardcore: Optional[bool] = False):
         self._load_word_list(hardcore=hardcore)
-        self.action_space = {
-            0: re.compile(r"\[(\w+)\s+(\d+)\]"), 1: re.compile(r"\[(\w+)\]"),
-            2: re.compile(r"\[(\w+)\s+(\d+)\]"), 3: re.compile(r"\[(\w+)\]"),
-        }
+        self.action_space = lambda player_id: re.compile(r"\[(\w+)\s+(\d+)\]") if player_id % 2 == 0 else re.compile(r"\[(\w+)\]")
 
     def _load_word_list(self, hardcore: bool = False) -> None:
         """Load a set of words for the game."""
@@ -120,7 +117,7 @@ class CodenamesEnv(ta.Env):
         self.state.add_observation(from_id=player_id, to_id=-1, message=action)
 
         if self.state.current_player_id in [0, 2]:  # Spymasters give clues
-            match = self.action_space[player_id].search(action)
+            match = self.action_space(player_id).search(action)
             
             if match:
                 word = match.group(1)  # Extracts the word
@@ -148,7 +145,7 @@ class CodenamesEnv(ta.Env):
                 self.state.set_invalid_move(player_id, reason)
                 return self.state.step()
         else:  # Operatives guess words, 1 3 indices
-            match = self.action_space[player_id].search(action)
+            match = self.action_space(player_id).search(action)
 
             if match:
                 guessed_word = match.group(1).lower()

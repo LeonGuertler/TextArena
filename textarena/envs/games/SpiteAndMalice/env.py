@@ -11,7 +11,7 @@ class SpiteAndMaliceEnv(ta.Env):
         """ Initialize the Spite and Malice environment """
         # Initialize the deck and shuffle
         self.deck = [f"{rank}{suit}" for rank in "A23456789JQK" for suit in "♠♥♦♣"] * 2
-        self.action_space = {i: re.compile(r"\[(play|discard|draw)(?: ([A23456789JQK][♠♥♦♣]) ([0-3]))?\]") for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[(play|discard|draw)(?: ([A23456789JQK][♠♥♦♣]) ([0-3]))?\]")
         
     @property
     def terminal_render_keys(self):
@@ -186,7 +186,7 @@ class SpiteAndMaliceEnv(ta.Env):
         self.state.add_observation(from_id=player_id, to_id=player_id, message=action)
 
         ## action search pattern
-        matches = self.action_space[player_id].findall(action)
+        matches = self.action_space(player_id).findall(action)
         ## Let's allow for the player to parse multiple actions 
 
         rotate_player  = False

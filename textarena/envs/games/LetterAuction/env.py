@@ -20,7 +20,7 @@ class LetterAuctionEnv(ta.Env):
         self.letters = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
         self.letter_values = [1 for _ in self.letters]
         self.starting_coins = starting_coins
-        self.action_space = {i: re.compile(r"\[(bid \d+|pass|[a-zA-Z]+)\]", re.IGNORECASE) for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[(bid \d+|pass|[a-zA-Z]+)\]", re.IGNORECASE)
 
     @property
     def terminal_render_keys(self):

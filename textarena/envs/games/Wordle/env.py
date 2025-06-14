@@ -25,7 +25,7 @@ class WordleEnv(ta.Env):
         self.num_guesses = num_guesses
         self._load_word_list(hardcore=hardcore)
         self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
-        self.action_space = {0: re.compile(r"\[(\w+)\]")}
+        self.action_space = lambda player_id: re.compile(r"\[(\w+)\]")
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -56,7 +56,7 @@ class WordleEnv(ta.Env):
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         player_id = self.state.current_player_id
         self.state.add_observation(message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        match = self.action_space[player_id].search(action) # Extract the guess using regex
+        match = self.action_space(player_id).search(action) # Extract the guess using regex
 
         if match is None:
             self.state.set_invalid_move(reward=self._get_percentage_completion(), reason=f"You tried submitting a word in the wrong format. Please make sure to use squared brackets.")

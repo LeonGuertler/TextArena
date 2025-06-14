@@ -33,7 +33,7 @@ class SnakeEnv(ta.Env):
         self.num_apples = num_apples
         self.max_turns = max_turns
         self.pending_actions: Dict[int, Optional[str]] = {}
-        self.action_space = {i: re.compile(r"\[(up|w|down|s|left|a|right|d)\]") for i in range(15)}
+        self.action_space = lambda player_id: re.compile(r"\[(up|w|down|s|left|a|right|d)\]")
 
     def _generate_spawn_positions(self, k: int) -> List[Tuple[int, int]]:
         """Farthest‑point sampling for balanced spawns."""

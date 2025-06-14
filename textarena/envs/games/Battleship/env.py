@@ -12,7 +12,7 @@ class BattleshipEnv(ta.Env):
         """
         self.grid_size = grid_size
         self.ships = {"Aircraft Carrier": 5, "Battleship": 4, "Submarine": 3, "Destroyer": 3, "Patrol Boat": 2}
-        self.action_space = {i: re.compile(r"\[([A-Z])(\d+)\]", re.IGNORECASE) for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[([A-Z])(\d+)\]", re.IGNORECASE) 
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -131,7 +131,7 @@ class BattleshipEnv(ta.Env):
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         player_id = self.state.current_player_id
         self.state.add_observation(from_id=player_id, message=action)
-        match = self.action_space[player_id].search(action)
+        match = self.action_space(player_id).search(action)
 
         if match is None:
             self.state.set_invalid_move(reason="The player did not respond with a valid coordinate in square brackets.")

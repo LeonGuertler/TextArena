@@ -17,7 +17,7 @@ class OthelloEnv(ta.Env):
         self.N = board_size
         self.show_valid = show_valid
 
-        self.action_space = {i: re.compile(r"\[\s*(\d+)\s*,?\s*(\d+)\s*\]") for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[\s*(\d+)\s*,?\s*(\d+)\s*\]")
 
     def _in_bounds(self, r: int, c: int) -> bool:
         return 0 <= r < self.N and 0 <= c < self.N
@@ -71,7 +71,7 @@ class OthelloEnv(ta.Env):
             self._handle_skip(pid, piece, opp)
             obs = f"Player {pid} had to skip their turn" #\n\n{self.state.game_state['rendered_board']}"
         else:
-            match = self.action_space[self.state.current_player_id].search(action)
+            match = self.action_space(self.state.current_player_id).search(action)
             if match is None:
                 self.state.set_invalid_move(reason="Move must be of the form [row, col].")
                 return self.state.step(rotate_player=False)

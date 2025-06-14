@@ -22,7 +22,7 @@ class TwentyQuestionsEnv(ta.Env):
         """
         self.hardcore = hardcore
         self.max_turns = max_turns
-        self.action_space = {0: re.compile(r"\[([a-zA-Z\s]+)\]")} 
+        self.action_space = lambda player_id: re.compile(r"\[([a-zA-Z\s]+)\]") 
 
         # Initialize the gamemaster
         self.gamemaster = ta.agents.OpenRouterAgent(
@@ -166,7 +166,7 @@ class TwentyQuestionsEnv(ta.Env):
         self.state.add_observation(from_id=player_id, to_id=-1, message=action)
 
         ## validate the action
-        action_match = self.action_space[player_id].search(action)
+        action_match = self.action_space(player_id).search(action)
 
         if not action_match or (action_match and '?' in action):
             ## if the action is not a guess, or if it is a action but contains a question mark, then it is a question

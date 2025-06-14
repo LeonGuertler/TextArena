@@ -11,7 +11,7 @@ class CheckersEnv(ta.Env):
             max_turns (int): Maximum number of turns before the game ends in a draw.
         """
         self.max_turns = max_turns
-        self.action_space = {i: re.compile(r"\[\s*(\d)\s+(\d)\s+(\d)\s+(\d)\s*\]") for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[\s*(\d)\s+(\d)\s+(\d)\s+(\d)\s*\]")
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
@@ -51,7 +51,7 @@ class CheckersEnv(ta.Env):
 
     def _execute_player_move(self, action: str):
         """ Parse the action to find the requested move. If valid, make the move, otherwise set it as an invalid move """
-        match = self.action_space[self.state.current_player_id].search(action.strip()) # e.g. [2 1 3 2] means moving the piece from (2,1) to (3,2)
+        match = self.action_space(self.state.current_player_id).search(action.strip()) # e.g. [2 1 3 2] means moving the piece from (2,1) to (3,2)
         if not match:
             self.state.set_invalid_move(reason="No valid move format found."); return
         row_from, col_from, row_to, col_to = map(int, match.groups()) # Extract coordinates

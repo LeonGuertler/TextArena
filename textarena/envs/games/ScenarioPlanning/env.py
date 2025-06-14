@@ -34,7 +34,7 @@ class ScenarioPlanningEnv(ta.Env):
         # Initialize judges
         self.judge = jury_class(jury_size=jury_size, options=["Player 0", "Player 1"])
 
-        self.action_space = {i: re.compile(r".*") for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r".*")
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)

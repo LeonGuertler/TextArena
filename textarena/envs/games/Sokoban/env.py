@@ -14,7 +14,7 @@ class SokobanEnv(ta.Env):
         self.num_boxes = num_boxes
         self.max_turns = max_turns
         self._actions = ['up', 'down', 'left', 'right']
-        self.action_space = {0: re.compile(r"\[(up|down|left|right)\]")}
+        self.action_space = lambda player_id: re.compile(r"\[(up|down|left|right)\]")
         
     def _generate_player_prompt(self, player_id: int, game_state: Dict[int, Any]) -> str:
         return """You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets.
@@ -45,7 +45,7 @@ class SokobanEnv(ta.Env):
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         self.state.add_observation(from_id=self.state.current_player_id, to_id=-1, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
-        matches = self.action_space[self.state.current_player_id].search(action)
+        matches = self.action_space(self.state.current_player_id).search(action)
 
         if matches is None: 
             self.state.set_invalid_move(reward=self._get_percentage_completion(), reason="The submitted move does not follow the correct format.")

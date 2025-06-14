@@ -19,7 +19,7 @@ class GuessWhoEnv(ta.Env):
         # Load character list
         self.characters = self._load_characters()
 
-        self.action_space = {0: re.compile(r"\[([a-zA-Z]+)\]")}
+        self.action_space = lambda player_id: re.compile(r"\[([a-zA-Z]+)\]")
 
 
     def _load_characters(self, characters_path: Optional[str] = None):
@@ -105,7 +105,7 @@ class GuessWhoEnv(ta.Env):
         """ Process the player's action and update the environment state """
         player_id = self.state.current_player_id
         self.state.add_observation(from_id=player_id, to_id=-1, message=action) ## update the observation
-        action_match = self.action_space[player_id].search(action)
+        action_match = self.action_space(player_id).search(action)
         if not action_match: ## if the action is not a guess, then it is a question
             gamemaster_response = self.get_gamemaster_response(action)
             self.state.add_observation(from_id=-1, to_id=player_id, message=gamemaster_response)

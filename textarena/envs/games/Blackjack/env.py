@@ -10,7 +10,7 @@ class BlackjackEnv(ta.Env):
         self.num_hands = num_hands
         self.ranks = ['2','3','4','5','6','7','8','9','10','J','Q','K','A']
         self.suits = ['♠','♥','♦','♣']
-        self.action_space = {0: re.compile(r"\[hit\]|\[stand\]", re.IGNORECASE)}
+        self.action_space = lambda player_id: re.compile(r"\[hit\]|\[stand\]", re.IGNORECASE)
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         self.state = ta.SinglePlayerState(num_players=num_players, seed=seed)

@@ -15,7 +15,7 @@ class ConnectFourEnv(ta.Env):
         self.is_open = is_open 
         self.num_rows = num_rows 
         self.num_cols = num_cols 
-        self.action_space = {i: re.compile(r'.*\[(?:col\s*)?(\d+)\].*', re.IGNORECASE) for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r'.*\[(?:col\s*)?(\d+)\].*', re.IGNORECASE)
 
     def get_board_str(self):
         return create_board_str(board=self.state.game_state["board"])
@@ -61,7 +61,7 @@ class ConnectFourEnv(ta.Env):
         return self.state.step()
 
     def _validate_action(self, action: str) -> Tuple[bool, Optional[int], Optional[str]]:
-        match = self.action_space[self.state.current_player_id].search(action)
+        match = self.action_space(self.state.current_player_id).search(action)
         if not match: return False, None, f"Player {self.state.current_player_id}, Invalid action format. Expected format: '[col x]'."
         col = int(match.group(1))
         if not (0 <= col < self.num_cols): return False, None, f"Player {self.state.current_player_id}, Invalid action. Column {col} is out of bounds."

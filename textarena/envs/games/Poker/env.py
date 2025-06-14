@@ -24,7 +24,7 @@ class PokerEnv(ta.Env):
         self.ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
         self.rank_values = {r: i + 2 for i, r in enumerate(self.ranks)}
 
-        self.action_space = {i: re.compile(r"^\[(check|fold|call.*?|bet (\d+)|raise (\d+))\]$", re.IGNORECASE) for i in range(15)}
+        self.action_space = lambda player_id: re.compile(r"^\[(check|fold|call.*?|bet (\d+)|raise (\d+))\]$", re.IGNORECASE)
 
     def get_board_str(self):
         gs = self.state.game_state

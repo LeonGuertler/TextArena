@@ -17,7 +17,7 @@ class SudokuEnv(ta.Env):
         """
         self.clues = clues
         self.max_turns = max_turns
-        self.action_space = {0: re.compile(r"\[(\d+)\s(\d+)\s(\d+)\]")}
+        self.action_space = lambda player_id: re.compile(r"\[(\d+)\s(\d+)\s(\d+)\]")
 
     
     def get_board_str(self):
@@ -262,7 +262,7 @@ class SudokuEnv(ta.Env):
 
         ## validate the actions
         ## extract the format [row column number] from the action
-        match = self.action_space[player_id].search(action)
+        match = self.action_space(player_id).search(action)
 
         if not match:
             reason=f"Invalid move format. Player {player_id} did not respond with valid 'row column number'."

@@ -9,7 +9,7 @@ class GermanWhistEnv(ta.Env):
         """ Initializes the German Whist card game environment """
         super().__init__()
         self.deck = self._create_deck()
-        self.action_space = {i: re.compile(r"\[play (\d+)\]", re.I) for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[play (\d+)\]", re.I)
         
     def _create_deck(self) -> List[Dict[str, Any]]:
         """ Creates a standard 52-card deck for German Whist """
@@ -41,7 +41,7 @@ class GermanWhistEnv(ta.Env):
     
     def _find_action_token(self, message: str) -> Optional[int]:
         """ Parse card play action from player message """
-        match = self.action_space[self.state.current_player_id].search(message)
+        match = self.action_space(self.state.current_player_id).search(message)
         
         if match:
             return int(match.group(1)) - 1  # Convert to 0-based index

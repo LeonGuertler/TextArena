@@ -20,7 +20,7 @@ class TruthAndDeceptionEnv(ta.Env):
         self._load_facts(data_path=data_path)
         self.guess_fact1_pattern = re.compile(r"\[Fact 1\]", re.IGNORECASE)
         self.guess_fact2_pattern = re.compile(r"\[Fact 2\]", re.IGNORECASE)
-        self.action_space = {i: re.compile(r".*", re.DOTALL) for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r".*", re.DOTALL)
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)

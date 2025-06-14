@@ -29,7 +29,7 @@ class WordLadderEnv(ta.Env):
         self.max_turns = max_turns
         self.word_list = words.words("en-basic") # Source word lists
         self.universal_word_list = self._load_universal_word_list()
-        self.action_space = {0: re.compile(r"\[([a-zA-Z]+)\]")}
+        self.action_space = lambda player_id: re.compile(r"\[([a-zA-Z]+)\]")
 
     def _load_universal_word_list(self):
         """Combine NLTK + US/UK spell-check dictionaries (no proper nouns)."""
@@ -143,7 +143,7 @@ class WordLadderEnv(ta.Env):
         player_id = self.state.current_player_id
         self.state.add_observation(from_id=player_id, to_id=-1, message=action)
 
-        match = self.action_space[player_id].search(action)
+        match = self.action_space(player_id).search(action)
         if not match:
             reason = f"Invalid format. Wrap your word in square brackets, e.g. `[word]`."
             self.state.set_invalid_move(player_id, reason)

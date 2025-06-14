@@ -10,7 +10,7 @@ class RandomizedTicTacToeEnv(ta.Env):
         super().__init__()
         self.cell_mapping = {i * 3 + j: (i, j) for i in range(3) for j in range(3)}
         self.effects = ["swap", "block", "double", "wild"]
-        self.action_space = {i: re.compile(r"\[(\d+)\]") for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[(\d+)\]")
 
     def get_board_str(self):
         return create_board_str(board=self.state.game_state["board"])
@@ -54,7 +54,7 @@ class RandomizedTicTacToeEnv(ta.Env):
         symbol = 'X' if self.state.current_player_id == 1 else 'O'
         self.state.add_observation(from_id=self.state.current_player_id, message=action)
 
-        match = self.action_space[self.state.current_player_id].search(action)
+        match = self.action_space(self.state.current_player_id).search(action)
         if not match:
             self.state.set_invalid_move(reason="Invalid format. Use '[cell]'.")
         else:

@@ -16,7 +16,7 @@ class ChessEnv(ta.Env):
         self.max_turns = max_turns
         self.is_open = is_open 
         self.show_valid = show_valid 
-        self.action_space = {i: re.compile(r"\[[a-h][1-8][a-h][1-8][qrbn]?\]", re.IGNORECASE) for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[[a-h][1-8][a-h][1-8][qrbn]?\]", re.IGNORECASE)
 
     def get_board_str(self):
         return create_board_str(board=self.state.game_state["board"])
@@ -44,7 +44,7 @@ class ChessEnv(ta.Env):
 
     def _execute_player_move(self, action: str):
         """Execute the player's move based on the action string."""
-        match = self.action_space[self.state.current_player_id].search(action.strip())
+        match = self.action_space(self.state.current_player_id).search(action.strip())
         
         if match is None: # check if a move was provided
             self.state.set_invalid_move(reason=f"Wrong move format.")

@@ -22,11 +22,11 @@ class TakEnv(ta.Env):
         self.players = None
         self.board = None
 
-        self.action_space = {i: re.compile(
+        self.action_space = lambda player_id: re.compile(
             r"\[(place|move)\s"               # Match action: "place" or "move"
             r"\((\d+,\d+|\s*)\)\s"            # Match source: "(row,col)" or "()"
             r"({.*?})\]"                      # Match allocation dictionary
-        ) for i in range(2)}
+        )
 
     @property 
     def terminal_render_keys(self):
@@ -179,7 +179,7 @@ class TakEnv(ta.Env):
         self.state.add_observation(from_id=self.state.current_player_id, to_id=-1, message=action)
 
         ## action search pattern
-        match = self.action_space[self.state.current_player_id].search(action)
+        match = self.action_space(self.state.current_player_id).search(action)
 
         if not match:
             ## no matching action

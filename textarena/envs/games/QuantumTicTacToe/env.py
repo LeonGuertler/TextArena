@@ -6,7 +6,7 @@ class QuantumTicTacToeEnv(ta.Env):
     def __init__(self):
         super().__init__()
         self.cell_mapping = {i * 3 + j: (i, j) for i in range(3) for j in range(3)}
-        self.action_space = {i: re.compile(r"\[(\d+),(\d+)\]") for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[(\d+),(\d+)\]")
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         self.state = ta.TwoPlayerState(num_players=2, max_turns=25, seed=seed)
@@ -75,7 +75,7 @@ class QuantumTicTacToeEnv(ta.Env):
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         symbol = 'X' if self.state.current_player_id == 1 else 'O'
         self.state.add_observation(from_id=self.state.current_player_id, message=action)
-        match = self.action_space[self.state.current_player_id].search(action.replace(" ", ""))
+        match = self.action_space(self.state.current_player_id).search(action.replace(" ", ""))
         if not match:
             self.state.set_invalid_move(reason="Invalid format. Use '[a,b]'.")
         else:

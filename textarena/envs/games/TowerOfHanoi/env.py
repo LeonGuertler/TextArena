@@ -14,7 +14,7 @@ class TowerOfHanoiEnv(ta.Env):
         super().__init__()
         self.num_disks = num_disks
         self.max_turns = max_turns
-        self.action_space = {0: re.compile(r"\[([ABCabc])\s*,?\s*([ABCabc])\]")}
+        self.action_space = lambda player_id: re.compile(r"\[([ABCabc])\s*,?\s*([ABCabc])\]")
 
     def get_board_str(self):
         return create_board_str(towers=self.state.game_state['towers'])
@@ -41,7 +41,7 @@ class TowerOfHanoiEnv(ta.Env):
     
     def step(self, action: str) -> Tuple[bool, ta.Info]:
         self.state.add_observation(message=action, observation_type=ta.ObservationType.PLAYER_ACTION) ## update the observation
-        matches = self.action_space[self.state.current_player_id].findall(action) # e.g. [A, C], [A C], [a c], [a, c]
+        matches = self.action_space(self.state.current_player_id).findall(action) # e.g. [A, C], [A C], [a c], [a, c]
 
         if not matches:
             self.state.set_invalid_move(reward=self._get_percentage_completion(), reason="You did not respond with valid '[source] [target]'.")

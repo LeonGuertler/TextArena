@@ -18,7 +18,7 @@ class HighSocietyEnv(ta.Env):
     def __init__(self):
         super().__init__()
         self.money_cards = list(range(1, 12))   # 1-11
-        self.action_space = {i: re.compile(r"\[(11|10|[1-9])]", re.I) for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[(11|10|[1-9])\]", re.I)
 
     @staticmethod
     def _intlist_to_str(lst): return " ".join(f"'[{str(x)}]'" for x in sorted(lst))
@@ -62,7 +62,7 @@ class HighSocietyEnv(ta.Env):
         gs  = self.state.game_state
         self.state.add_observation(from_id=pid, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
 
-        t = self.action_space[pid].findall(action)
+        t = self.action_space(pid).findall(action)
         if len(t) != 1:
             self.state.set_invalid_move("Must include exactly one [X] money card.")
             return self.state.step()

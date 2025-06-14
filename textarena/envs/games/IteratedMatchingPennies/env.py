@@ -18,7 +18,7 @@ class IteratedMatchingPenniesEnv(ta.Env):
         After num_rounds, whoever has more round-wins is the overall winner.
         """
         self.num_rounds = num_rounds
-        self.action_space = {i: re.compile(r"\[\s*(heads|h|tails|t)\s*\]", re.IGNORECASE) for i in range(2)} # regex to parse [heads], [tails], or shorthand [h], [t]
+        self.action_space = lambda player_id: re.compile(r"\[\s*(heads|h|tails|t)\s*\]", re.IGNORECASE) # regex to parse [heads], [tails], or shorthand [h], [t]
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         self.state = ta.TwoPlayerState(num_players=num_players, seed=seed)
@@ -45,7 +45,7 @@ class IteratedMatchingPenniesEnv(ta.Env):
         pid = self.state.current_player_id
 
         # parse choice
-        m = self.action_space[pid].search(action)
+        m = self.action_space(pid).search(action)
         if not m:
             self.state.set_invalid_move(reason="Invalid format; please submit '[heads]' or '[tails]'.")
         else:

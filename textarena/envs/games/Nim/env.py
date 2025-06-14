@@ -12,7 +12,7 @@ class NimEnv(ta.Env):
         """
         super().__init__()
         self.initial_piles = piles if piles is not None else [3, 4, 5] # Default to [3,4,5] if no pile sizes are given
-        self.action_space = {i: re.compile(r"\[\s*(\d+)\s+(\d+)\s*\]") for i in range(2)}
+        self.action_space = lambda player_id: re.compile(r"\[\s*(\d+)\s+(\d+)\s*\]")
 
     def get_board_str(self):
         return create_board_str(self.state.game_state["piles"])
@@ -38,7 +38,7 @@ class NimEnv(ta.Env):
         return self.state.step() # Proceed to the next turn (or finalize if done)
 
     def _execute_move(self, action: str) -> None:
-        match = self.action_space[self.state.current_player_id].search(action.strip()) # We'll look for actions in the format [pile_index quantity_to_remove], e.g. [1 3].
+        match = self.action_space(self.state.current_player_id).search(action.strip()) # We'll look for actions in the format [pile_index quantity_to_remove], e.g. [1 3].
         if not match:
             self.state.set_invalid_move(reason="No valid move format found. Use '[pile quantity]'."); return
         try: # Extract pile index and quantity to remove
