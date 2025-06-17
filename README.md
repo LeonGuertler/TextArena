@@ -173,6 +173,7 @@ rewards = env.close()
 | [Othello](textarena/envs/Othello/README.md) (Reversi)     | 2        | ✅           | ❌          | —                                                                    |
 | [PigDice](textarena/envs/PigDice/README.md) ¶             | 2        | ✅           | ❌          | —                                                                    |
 | Santorini †           | 2        | ❌           | ❌          | —                                                                    |
+| Santorini Base with Fixed Worker Placement           | 2-3        | ✅           | ✅          | —                                                                    |
 | [ScenarioPlanning](textarena/envs/ScenarioPlanning/README.md)      | 2        | ✅           | ❌          | —                                                                    |
 | SeaBattle †           | 2        | ❌           | ❌          | —                                                                    |
 | [SimpleBlindAuction](textarena/envs/SimpleBlindAuction/README.md) ¶  | 2        | ✅           | ❌          | —                                                                    |
