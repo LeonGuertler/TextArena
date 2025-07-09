@@ -59,12 +59,10 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
         if num_players not in [2, 3]:
             raise ValueError("Number of players must be 2 or 3")
             
-        self.state = ta.State(
+        self.state = ta.FFAMultiPlayerState(
+            seed=seed,
             num_players=num_players,
-            min_players=2,
-            max_players=3,
             max_turns=None,  # No turn limit in Santorini
-            role_mapping={i: self.PLAYER_COLORS[i] for i in range(num_players)},
             error_allowance=self.error_allowance  # Set error allowance for invalid moves
         )
 
@@ -84,7 +82,10 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
             "valid_moves": self._get_valid_moves(0)  # Initial valid moves for first player
         }
 
-        self.state.reset(seed=seed, game_state=game_state, player_prompt_function=self._generate_player_prompt)
+        self.state.reset(game_state=game_state, 
+                         player_prompt_function=self._generate_player_prompt,
+                         role_mapping={i: self.PLAYER_COLORS[i] for i in range(num_players)},
+                         )
 
     def _generate_player_prompt(self, player_id: int, game_state: Dict[int, Any]) -> str:
         """Generate the initial prompt for a player."""
@@ -243,7 +244,7 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
         """Process the player's move."""
         # Update the log
         player_id = self.state.current_player_id
-        self.state.add_observation(from_id=player_id, to_id=-1, message=action)
+        self.state.add_observation(from_id=player_id, to_id=-1, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
 
         # Execute move
         if not self._execute_player_move(action=action):
@@ -263,7 +264,7 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
                 from_id=ta.GAME_ID,
                 to_id=-1,
                 message=create_board_str(self.board),
-                for_logging=False
+                observation_type = ta.ObservationType.GAME_BOARD
             )
 
         return self.state.step()
@@ -366,7 +367,7 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
 
         # Log the move
         message = f"Player {player_id} ({self.PLAYER_COLORS[player_id]}) moved worker {worker_num} from {source} to {dest} and built at {build}"
-        self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=message)
+        self.state.add_observation(from_id=ta.GAME_ID, to_id=-1, message=message, observation_type = ta.ObservationType.GAME_ACTION_DESCRIPTION)
         
         return True
 
