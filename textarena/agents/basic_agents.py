@@ -104,6 +104,99 @@ class OpenRouterAgent(Agent):
         return self._retry_request(observation)
 
 
+
+class AsyncVllmAgent:
+    def __init__(self, model_name: str, *, max_parallel_seq: int=32, max_model_len: int=4096, temperature: float=0.7, top_p: float=0.95) -> None:
+        if "CUDA_VISIBLE_DEVICES" not in os.environ: os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, range(os.getenv("N_GPUS", "1"))))
+        try:
+            import asyncio
+            from vllm import EngineArgs, LLMEngine, SamplingParams
+        except ImportError: raise ImportError(f"You need vllm and asyncio to use the AsyncVllmAgent. Install it via 'pip install asyncio vllm'.")
+
+        engine_args = EngineArgs(model=model_name, task="generate", max_num_seqs=max_parallel_seq, max_model_len=max_model_len, enforce_eager=False, disable_custom_all_reduce=True, disable_log_stats=True)
+        self.engine: LLMEngine = LLMEngine.from_engine_args(engine_args)
+        self.sampling_params = SamplingParams(temperature=temperature, top_p=top_p)
+        self._queue: deque = deque() 
+        self._futures: Dict[str, asyncio.Future] = {}
+        self._prev_tok_cnt: Dict[str, int] = defaultdict(int)
+        self._next_req_id = 0
+        self._queued = 0
+        self._running = 0
+        self._last_step_time = time.monotonic()
+        self._loop = asyncio.get_event_loop()
+        self._batch_task = self._loop.create_task(self._batch_loop())
+
+    async def a_generate(self, prompt: str) -> str:
+        fut: asyncio.Future = self._loop.create_future()
+        self._queue.append((prompt, fut))
+        self._queued += 1
+        return await fut
+
+    def generate(self, prompt: str) -> str:
+        try: loop = asyncio.get_running_loop()
+        except RuntimeError: return asyncio.run(self.a_generate(prompt)) # no running loop
+        else:  # already in async context
+            fut = asyncio.run_coroutine_threadsafe(self.a_generate(prompt), loop)
+            return fut.result()
+
+    __call__ = generate
+    async def _batch_loop(self) -> None:
+        FIFO_SLEEP = 0.02
+        DEADLOCK_SEC = 30
+        while True:
+            await asyncio.sleep(FIFO_SLEEP)
+
+            # dead‑lock detection
+            if time.monotonic() - self._last_step_time > DEADLOCK_SEC: print("⚠️  no engine.step for %.1f s – queued=%d running=%d", time.monotonic()-self._last_step_time, self._queued, self._running)
+
+            # ship queued requests into vLLM ------------------------------ #
+            while self._queue:
+                prompt, fut = self._queue.popleft()
+                self._queued -= 1
+                self._running += 1
+
+                req_id = str(self._next_req_id)
+                self._next_req_id += 1
+                self._futures[req_id] = fut
+    
+                try: self.engine.add_request(req_id, prompt, self.sampling_params)
+                except Exception as e:
+                    print("add_request failed (id=%s): %s", req_id, e)
+                    self._running -= 1
+                    fut.set_exception(e)
+
+            # one batched forward pass ------------------------------------ #
+            try:
+                t0 = time.monotonic()
+                outputs = self.engine.step()
+                self._last_step_time = time.monotonic()
+                dur = self._last_step_time - t0
+                if dur > 5.0: print("WARNING, Slow engine.step(): %.1f s", dur)
+            except Exception:
+                print("engine.step() failed – retrying in 1 s")
+                await asyncio.sleep(1.0)
+                continue
+
+            # post‑process tokens ----------------------------------------- #
+            for out in outputs:
+                req_id = out.request_id
+                segment = out.outputs[-1]   # last partial
+                tok_ids = getattr(segment, "token_ids", [])
+                delta = len(tok_ids) - self._prev_tok_cnt[req_id]
+                if delta > 0:
+                    ts = time.monotonic()
+                    self._prev_tok_cnt[req_id] += delta
+
+                # finished?
+                if segment.finish_reason is not None:
+                    fut = self._futures.pop(req_id, None)
+                    if fut and not fut.done(): fut.set_result(segment.text)
+                    self._running -= 1
+                    self._prev_tok_cnt.pop(req_id, None)
+
+
+
+
 class GeminiAgent(Agent):
     """Agent class using the Google Gemini API to generate responses."""
     def __init__(self, model_name: str, system_prompt: Optional[str]=STANDARD_GAME_PROMPT, verbose: bool=False, generation_config: Optional[dict]=None):

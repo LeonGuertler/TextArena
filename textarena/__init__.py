@@ -18,5 +18,5 @@ __all__ = [
     "make_mgc_online", # play online with MGC
 ]
 
-__version__ = "0.6.17"
+__version__ = "0.7.3"
 
