@@ -3,6 +3,8 @@ from textarena.wrappers import LLMObservationWrapper, ActionFormattingWrapper, G
 
 
 DEFAULT_WRAPPERS = [LLMObservationWrapper, ActionFormattingWrapper]
+BOARDGAME_WRAPPERS = [GameMessagesAndCurrentBoardObservationWrapper, ActionFormattingWrapper]
+
 
 # Reasoning Gym
 REASONING_GYM_GAMES = [
@@ -19,5 +21,7 @@ for g in REASONING_GYM_GAMES:
     register_with_versions(id=f"ReasoningGym-{name}", entry_point="textarena.external_envs.ReasoningGym.env:ReasoningGymEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS}, reasoning_gym_env_id=g)
 
 
-
 # ArcAGI-3
+register_with_versions(id=f"ArcAGI3-LS20", entry_point="textarena.external_envs.ArcAGI3.env:ArcAGI3Env", wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS, "-minimal": BOARDGAME_WRAPPERS}, game_name="ls20")
+register_with_versions(id=f"ArcAGI3-FT09", entry_point="textarena.external_envs.ArcAGI3.env:ArcAGI3Env", wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS, "-minimal": BOARDGAME_WRAPPERS}, game_name="ft09")
+register_with_versions(id=f"ArcAGI3-VC30", entry_point="textarena.external_envs.ArcAGI3.env:ArcAGI3Env", wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS, "-minimal": BOARDGAME_WRAPPERS}, game_name="vc30")

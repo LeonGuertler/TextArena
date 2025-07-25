@@ -20,6 +20,7 @@ A suite of 80+ Single-/Two-/Multi-Player texted based games for benchmarking and
 </div>
 
 ## Updates
+* **25/07/2025** We added all **ReasoningGym** environments and the **Arc-AGI-3** challenge as TextArena environments.
 * **14/07/2025** Announcing **MindGames** a NeurIPS2025 competition for training LLMs on various TextArena games that require theory of mind.
 * **01/07/2025** Release of v0.6.9 with **100** games and simplified states, new observation wrappers for training and default wrappers for environments. 
 * **01/07/2025** Release of __SPIRAL: Self-Play on Zero-Sum Games Incentivizes Reasoning via Multi-Agent Multi-Turn Reinforcement Learning__ introducing RL via self-play on TextArena games as a potential new training paradigm.
