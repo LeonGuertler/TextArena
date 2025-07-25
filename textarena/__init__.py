@@ -7,6 +7,7 @@ from textarena.api import make_online, make_mgc_online
 from textarena import wrappers, agents
 
 import textarena.envs
+import textarena.external_envs
 import textarena.envs.utils 
 
 __all__ = [
