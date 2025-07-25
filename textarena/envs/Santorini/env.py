@@ -277,7 +277,7 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
         # Check if a move was provided
         if match is None:
             self.state.set_invalid_move(
-                player_id=player_id,
+                # player_id=player_id,
                 reason=f"Invalid move format. Expected format: [worker_id source dest build], e.g. [N1C1C2B2]"
             )
             return False
@@ -294,7 +294,7 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
         # Validate player is moving their own worker
         if player_id != expected_player:
             self.state.set_invalid_move(
-                player_id=player_id,
+                # player_id=player_id,
                 reason=f"Cannot move {self.PLAYER_COLORS[expected_player]} worker (you are {self.PLAYER_COLORS[player_id]})"
             )
             return False
@@ -313,7 +313,7 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
         # Validate worker ownership
         if self.board[source_row][source_col][1] != (player_id, worker_num):
             self.state.set_invalid_move(
-                player_id=player_id,
+                # player_id=player_id,
                 reason=f"No worker {worker_num} at position {source}"
             )
             return False
@@ -325,7 +325,7 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
         if not self._is_valid_move(source_row, source_col, dest_row, dest_col):
             # print("Move validation failed")
             self.state.set_invalid_move(
-                player_id=player_id,
+                # player_id=player_id,
                 reason=f"Invalid move from {source} to {dest}"
             )
             return False
@@ -345,7 +345,7 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
                                     build_row, build_col):
             # print("Build validation failed")
             self.state.set_invalid_move(
-                player_id=player_id,
+                # player_id=player_id,
                 reason=f"Invalid build at {build}"
             )
             return False
