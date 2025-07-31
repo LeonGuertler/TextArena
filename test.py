@@ -4,12 +4,12 @@ import textarena as ta
 
 agents = {
     # 0: ta.agents.HumanAgent(),
-    # 0: ta.agents.OpenRouterAgent(model_name="google/gemini-2.0-flash-001"),
-    0: ta.agents.OpenRouterAgent(model_name="x-ai/grok-4"),
+    0: ta.agents.OpenRouterAgent(model_name="qwen/qwen3-30b-a3b-instruct-2507"),
+    # 0: ta.agents.OpenRouterAgent(model_name="x-ai/grok-4"),
 }
 
 # initialize the environment
-env = ta.make(env_id="ArcAGI3-LS20-train")
+env = ta.make(env_id="ArcAGI3-FT09-train")
 # env = ta.wrappers.SimpleRenderWrapper(env=env) #, render_mode="standard")
 env.reset(num_players=len(agents))
 

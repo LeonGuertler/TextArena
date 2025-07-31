@@ -37,6 +37,11 @@ def glyph_ls20(v: int) -> str:
     if 0<=v<=9: return str(v)
     return chr(ord("A") + v - 10)
 
+def glyph_ft09(v: int) -> str:
+    match v:
+        case 4: return " "
+        case 3: return "#"
+        case _: return str(v)
 
 
 def _render_block(mat: np.ndarray, glyph_fn) -> list[str]:
@@ -50,6 +55,28 @@ def render_ls20_board(board) -> str:
     shrunk = mixed_downsample(arr)
     lines = _render_block(shrunk, glyph_fn=glyph_ls20)
     return "\n" + "\n".join(lines)
+
+
+def render_ft09_board(board) -> str:
+    arr = np.asarray(board, dtype=int)
+    shrunk = full_downsample(arr)
+    lines = _render_block(shrunk, glyph_fn=glyph_ft09)
+    W = len(lines[0]) if lines else 0
+    top_digits = []
+    bot_digits = []
+    for c in range(W):
+        s = str(c)
+        top_digits.append(s[-2] if len(s) >= 2 else " ")  # tens
+        bot_digits.append(s[-1])                           # ones
+    header_top = "".join(top_digits)
+    header_bot = "".join(bot_digits)
+    out = []
+    out.append("      " + header_top + " ")
+    out.append("      " + header_bot + " ")
+    out.append("    + " + "-" * W + "+")  # separator line
+    for i, line in enumerate(lines): out.append(f" {i:<2} | {line} | {i:<2}")
+    return "\n" + "\n".join(out)
+
 
 def downsample_least(arr: np.ndarray, block: int) -> np.ndarray:
     H, W = arr.shape
@@ -79,6 +106,12 @@ def mixed_downsample(board: np.ndarray) -> np.ndarray:
     # insert back into board
     H, W = board.shape
     board[H-4:H-1, 1:4] = bottom_corner
+    return board
+
+def full_downsample(board: np.ndarray) -> np.ndarray:
+    board = np.asarray(board)
+    H, W = board.shape
+    board = downsample_least(board, 2)
     return board
 
 
@@ -119,7 +152,7 @@ class ArcAGI3Env(ta.Env):
             f"\nAction 3:\n\tExplanation: the exact in-game effect depends on the title—for example, it might represent 'move left' or 'select option C'.\n\tExample: '[A3]'."
             f"\nAction 4:\n\tExplanation: the exact in-game effect depends on the title—for example, it might represent 'move right' or 'select option D'.\n\tExample: '[A4]'."
             f"\nAction 5:\n\tExplanation: the exact in-game effect depends on the title—for example, it might represent 'jump', 'rotate', 'fire' or 'select option E'.\n\tExample: '[A5]'."
-            # f"\nAction 6:\n\tExplanation: a two-parameter command that supplies explicit X/Y coordinates—to an active game session. Common use-cases include 'click/tap at (x,y)', 'place a tile', or 'shoot a projectile', depending on the game's mechanics.\n\tExample: '[A6 12 63]' (will submit the coordinates x=12 y=63 to the game)."
+            f"\nAction 6:\n\tExplanation: a two-parameter command that supplies explicit X/Y coordinates—to an active game session. Common use-cases include 'click/tap at (x,y)', 'place a tile', or 'shoot a projectile', depending on the game's mechanics.\n\tExample: '[A6 12 25]' (will submit the coordinates x=12 y=25 to the game)."
             f"Keep in mind you may not have to use all of them. Start by testing the simple actions and if they don't suffice work your way to the more complex ones."
             f"without assuming to know how to solve it. Once you understand what your actions do and what the objective is, you can try solving it. There "
             f"is no turn limit at all, but depending on the game, after a number of moves you might re-start from the starting position."
@@ -127,7 +160,7 @@ class ArcAGI3Env(ta.Env):
 
     def _render_board(self):
         if self.game_name == "ls20":    return render_ls20_board(board=self.state.game_state["board"])
-        elif self.game_name == "ft09":  pass 
+        elif self.game_name == "ft09":  return render_ft09_board(board=self.state.game_state["board"]) 
         elif self.game_name == "vc30":  pass
         else:                           raise
 
@@ -153,8 +186,8 @@ class ArcAGI3Env(ta.Env):
         if num == 6:
             if not (x_s and y_s):
                 return None, {}, "ACTION6 requires coordinates: [A6 x y]"
-            payload["x"] = int(x_s)
-            payload["y"] = int(y_s)
+            payload["x"] = int(x_s)*2 # *2 because it's downfiltered
+            payload["y"] = int(y_s)*2 # *2 because it's downfiltered
         return num, payload, None
 
     def step(self, action: str) -> Tuple[bool, ta.Info]:
