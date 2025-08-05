@@ -45,7 +45,7 @@ class BohnanzaEnv(ta.Env):
         # Regex patterns for parsing actions
         self.plant_pattern = re.compile(r"\[Plant\]\s*(\d+)", re.IGNORECASE)
         self.harvest_pattern = re.compile(r"\[Harvest\]\s*(\d+)", re.IGNORECASE)
-        self.trade_pattern = re.compile(r"\[Trade\]\s*(.+?)\s*for\s*(.+?)\s*with\s*Player(\d+)", re.IGNORECASE)
+        self.trade_pattern = re.compile(r"\[Trade\]\s*(.+?)\s*for\s*(.+)", re.IGNORECASE)
         self.accept_pattern = re.compile(r"\[Accept\]\s*Trade(\d+)", re.IGNORECASE)
         self.reject_pattern = re.compile(r"\[Reject\]\s*Trade(\d+)", re.IGNORECASE)
         self.end_trading_pattern = re.compile(r"\[EndTrading\]", re.IGNORECASE)
@@ -182,14 +182,14 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                 prompt += f"\n- Waiting for Player {self.state.current_player_id + 1} to plant"
         
         elif current_phase == "draw_trade":
+            prompt += f"\n- Trading phase: Any player can propose or respond to trades"
+            prompt += f"\n- Free text discussion allowed before bracketed actions"
             if is_active:
                 prompt += f"\n- You drew face-up cards for trading"
-                prompt += f"\n- Negotiate and propose trades with other players"
-                prompt += f"\n- Actions: [Trade] <offer> for <want> with Player<X>, [EndTrading]"
+                prompt += f"\n- Actions: [Trade] <offer> for <want>, [EndTrading]"
             else:
-                prompt += f"\n- Player {self.state.current_player_id + 1} is trading"
-                prompt += f"\n- You can accept/reject trades proposed to you"
-                prompt += f"\n- Actions: [Accept] Trade<X>, [Reject] Trade<X>"
+                prompt += f"\n- You can propose trades or respond to existing ones"
+                prompt += f"\n- Actions: [Trade] <offer> for <want>, [Accept] Trade<X>, [Reject] Trade<X>"
         
         elif current_phase == "plant_mandatory":
             if game_state["mandatory_plants"][player_id]:
@@ -234,8 +234,10 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         success = self._process_action(current_player_id, action)
         
         if success:
-            # Check for phase transitions and game end
-            self._check_phase_transition()
+            # Only check for phase transitions on specific actions that end phases
+            phase_ended = self._check_if_phase_should_end(current_player_id, action)
+            if phase_ended:
+                self._check_phase_transition()
             self._check_game_end()
         
         # Store the current player before TextArena tries to advance it
@@ -282,8 +284,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             return self._plant_from_hand(player_id, field_num)
         elif pass_match:
             # Can only pass after planting first card
-            player = self.state.game_state["players"][player_id]
-            if not hasattr(self, '_planted_first') or not self._planted_first:
+            if not hasattr(self, '_planted_count') or self._planted_count == 0:
                 self.state.set_invalid_move("Must plant first card from hand before passing")
                 return False
             return True
@@ -298,12 +299,11 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         reject_match = self.reject_pattern.search(action)
         end_trading_match = self.end_trading_pattern.search(action)
         
-        if trade_match and player_id == self.state.current_player_id:
-            # Only active player can propose trades
+        if trade_match:
+            # Any player can propose trades during trading phase
             offer = trade_match.group(1).strip()
             want = trade_match.group(2).strip()
-            target_player = int(trade_match.group(3)) - 1  # Convert to 0-based
-            return self._propose_trade(player_id, offer, want, target_player)
+            return self._propose_open_trade(player_id, offer, want)
         
         elif accept_match:
             trade_id = int(accept_match.group(1))
@@ -386,16 +386,23 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             self.state.set_invalid_move(f"Invalid field number. Use 1-{len(player['fields'])}")
             return False
         
-        # Must plant first card in order
-        if not hasattr(self, '_planted_first') or not self._planted_first:
+        # Track planted cards per turn
+        if not hasattr(self, '_planted_count'):
+            self._planted_count = 0
+        
+        # Must plant first card in order, then can plant second card
+        if self._planted_count == 0:
+            # Must plant first card
             bean_to_plant = player["hand"][0]
-            self._planted_first = True
-        else:
-            # Can plant second card
-            if len(player["hand"]) < 2:
+        elif self._planted_count == 1:
+            # Can plant second card (which is now at position 0 after first was removed)
+            if len(player["hand"]) == 0:
                 self.state.set_invalid_move("No second card to plant")
                 return False
-            bean_to_plant = player["hand"][1]
+            bean_to_plant = player["hand"][0]
+        else:
+            self.state.set_invalid_move("Already planted maximum cards this turn")
+            return False
         
         # Check if field is compatible
         field = player["fields"][field_num]
@@ -409,16 +416,39 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         else:
             player["fields"][field_num] = (bean_to_plant, 1)
         
-        # Remove from hand
-        if not hasattr(self, '_planted_first') or bean_to_plant == player["hand"][0]:
-            player["hand"].pop(0)
-        else:
-            player["hand"].pop(1)
+        # Remove from hand (always remove first card since we maintain order)
+        player["hand"].pop(0)
+        
+        # Increment planted count after successful planting
+        self._planted_count += 1
         
         self.state.add_observation(
             from_id=ta.GAME_ID,
             to_id=-1,
             message=f"Player {player_id + 1} planted {bean_to_plant} in field {field_num + 1}",
+            observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
+        )
+        
+        return True
+    
+    def _propose_open_trade(self, proposer_id: int, offer: str, want: str) -> bool:
+        """Propose an open trade that any player can accept."""
+        # Create trade
+        trade_id = self.state.game_state["trade_counter"] + 1
+        self.state.game_state["trade_counter"] = trade_id
+        
+        self.state.game_state["active_trades"][trade_id] = {
+            "proposer": proposer_id,
+            "target": None,  # Open to any player
+            "offer": offer,
+            "want": want,
+            "status": "pending"
+        }
+        
+        self.state.add_observation(
+            from_id=ta.GAME_ID,
+            to_id=-1,
+            message=f"Trade{trade_id}: Player {proposer_id + 1} offers {offer} for {want} (open to all)",
             observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
         )
         
@@ -463,13 +493,23 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         
         trade = self.state.game_state["active_trades"][trade_id]
         
-        if trade["target"] != player_id:
+        # Check if this is an open trade or targeted trade
+        if trade["target"] is not None and trade["target"] != player_id:
             self.state.set_invalid_move("This trade is not for you")
+            return False
+        
+        # Cannot accept your own trade
+        if trade["proposer"] == player_id:
+            self.state.set_invalid_move("Cannot accept your own trade")
             return False
         
         if trade["status"] != "pending":
             self.state.set_invalid_move("Trade is no longer pending")
             return False
+        
+        # For open trades, set the target to the accepting player
+        if trade["target"] is None:
+            trade["target"] = player_id
         
         # Execute the trade
         proposer = self.state.game_state["players"][trade["proposer"]]
@@ -707,7 +747,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         if current_phase == "plant":
             # Move to draw_trade phase
             self.state.game_state["current_phase"] = "draw_trade"
-            self._planted_first = False  # Reset for next turn
+            self._planted_count = 0  # Reset for next turn
             
             # Draw face-up cards for trading
             self._draw_face_up_cards(2)
@@ -820,3 +860,42 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         observation.append((ta.GAME_ID, board_str, ta.ObservationType.GAME_BOARD))
         
         return player_id, observation
+    
+    def _check_if_phase_should_end(self, player_id: int, action: str) -> bool:
+        """Check if the current phase should end based on the action taken."""
+        current_phase = self.state.game_state["current_phase"]
+        
+        if current_phase == "plant":
+            # Phase ends when:
+            # 1. Active player passes (after planting first card), OR
+            # 2. Active player has planted 2 cards (maximum), OR
+            # 3. Active player has no more cards to plant
+            if player_id == self.state.current_player_id:
+                if self.pass_pattern.search(action):
+                    return True
+                # Check if we've planted maximum cards or no more cards available
+                if hasattr(self, '_planted_count'):
+                    player = self.state.game_state["players"][player_id]
+                    if self._planted_count >= 2 or len(player["hand"]) == 0:
+                        return True
+            return False
+        
+        elif current_phase == "draw_trade":
+            # Phase ends when active player uses [EndTrading]
+            return self.end_trading_pattern.search(action) is not None and player_id == self.state.current_player_id
+        
+        elif current_phase == "plant_mandatory":
+            # Phase ends when all players have no mandatory plants left
+            # This is checked in the transition logic, not based on a specific action
+            return False
+        
+        elif current_phase == "draw":
+            # Phase ends immediately after active player draws (automatic)
+            return player_id == self.state.current_player_id
+        
+        elif current_phase == "harvest":
+            # Phase ends when active player passes or harvests (or any harvest action)
+            return (self.pass_pattern.search(action) is not None or 
+                   self.harvest_pattern.search(action) is not None) and player_id == self.state.current_player_id
+        
+        return False
