@@ -110,7 +110,14 @@ class BohnanzaEnv(ta.Env):
     def _generate_player_prompt(self, player_id: int, game_state: Dict[str, Any]) -> str:
         """Generate the prompt for a player."""
         current_phase = game_state["current_phase"]
-        is_active = player_id == self.state.current_player_id
+        
+        # Store current state info in game_state to ensure synchronization
+        game_state["_current_active_player"] = self.state.current_player_id
+        game_state["_current_turn"] = self.state.turn
+        
+        current_active_player = game_state["_current_active_player"]
+        current_turn = game_state["_current_turn"]
+        is_active = player_id == current_active_player
         player = game_state["players"][player_id]
         
         # Base game information
@@ -130,33 +137,6 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             payouts_str = ", ".join([f"{coins}:{beans}" for coins, beans in config["payouts"].items()])
             prompt += f"\n  {bean_type}: {payouts_str}"
         
-        # Current game state
-        prompt += f"\n\nCURRENT STATE:"
-        prompt += f"\n- Turn: {self.state.turn + 1}"
-        prompt += f"\n- Phase: {current_phase}"
-        prompt += f"\n- Active Player: Player {self.state.current_player_id}"
-        prompt += f"\n- Deck Cycles: {game_state['deck_cycles']}/3"
-        prompt += f"\n- Cards in Deck: {len(game_state['deck'])}"
-        
-        # Player's status
-        prompt += f"\n\nYOUR STATUS:"
-        prompt += f"\n- Coins: {player['coins']}"
-        prompt += f"\n- Hand ({len(player['hand'])} cards): "
-        if player['hand']:
-            # Show your complete hand
-            prompt += f"[{', '.join(player['hand'])}]"
-        else:
-            prompt += "Empty"
-        
-        # Fields
-        prompt += f"\n- Fields:"
-        for i, field in enumerate(player['fields']):
-            if field:
-                bean_type, count = field
-                prompt += f"\n  Field {i + 1}: {count} {bean_type} beans"
-            else:
-                prompt += f"\n  Field {i + 1}: Empty"
-        
         # Face-up cards (visible to all)
         if game_state["face_up_cards"]:
             prompt += f"\n\nFACE-UP CARDS: {', '.join(game_state['face_up_cards'])}"
@@ -175,55 +155,6 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         # Mandatory plants
         if game_state["mandatory_plants"][player_id]:
             prompt += f"\n\nMUST PLANT: {', '.join(game_state['mandatory_plants'][player_id])}"
-        
-        # Phase-specific instructions
-        prompt += f"\n\nCURRENT PHASE: {current_phase.upper()}"
-        
-        if current_phase == "plant":
-            if is_active:
-                prompt += f"\n- MUST plant first card from hand: {player['hand'][0] if player['hand'] else 'None'}"
-                prompt += f"\n- MAY plant second card from hand"
-                prompt += f"\n- Actions: [Plant] <field_number>, [Pass] (after first plant)"
-            else:
-                prompt += f"\n- Waiting for Player {self.state.current_player_id} to plant"
-        
-        elif current_phase == "draw_trade":
-            # Get the original active player who started trading
-            trading_active_player = getattr(self, '_trading_active_player', self.state.current_player_id)
-            
-            prompt += f"\n- Trading phase: Player {trading_active_player} is the active trader"
-            prompt += f"\n- Free text discussion allowed before bracketed actions"
-            if player_id == trading_active_player:
-                prompt += f"\n- You drew face-up cards for trading"
-                prompt += f"\n- Actions: [Trade] <offer> for <want> (open to all), [EndTrading]"
-                prompt += f"\n- Trade format: [Trade] Blue for Red, [Trade] 2 Blue for Nothing (gift), [Trade] Nothing for Red (request gift)"
-            else:
-                prompt += f"\n- You can make counter-offers to the active player or respond to trades"
-                prompt += f"\n- Actions: [Trade] <offer> for <want> (to active player), [Accept] Trade<X>, [Pass]"
-                prompt += f"\n- Trade format: [Trade] Blue for Red, [Trade] 2 Blue for Nothing (gift), [Trade] Nothing for Red (request gift)"
-        
-        elif current_phase == "plant_mandatory":
-            if game_state["mandatory_plants"][player_id]:
-                prompt += f"\n- MUST plant all received beans: {', '.join(game_state['mandatory_plants'][player_id])}"
-                prompt += f"\n- Actions: [Plant] <field_number>, [Harvest] <field_number> (if needed)"
-            else:
-                prompt += f"\n- No mandatory plants for you"
-                prompt += f"\n- Actions: [Pass]"
-        
-        elif current_phase == "draw":
-            if is_active:
-                prompt += f"\n- Drawing 3 cards to your hand"
-                prompt += f"\n- Actions: [Pass] (automatic)"
-            else:
-                prompt += f"\n- Waiting for Player {self.state.current_player_id} to draw"
-        
-        elif current_phase == "harvest":
-            if is_active:
-                prompt += f"\n- Optional: Harvest any field for coins"
-                prompt += f"\n- Cannot harvest 1-bean field if other fields have 2+ beans"
-                prompt += f"\n- Actions: [Harvest] <field_number>, [Pass]"
-            else:
-                prompt += f"\n- Waiting for Player {self.state.current_player_id} to harvest"
         
         prompt += f"\n\nWrite your reasoning and include your action in brackets."
         
@@ -969,10 +900,14 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             # Add remaining face-up cards to original active player's mandatory plants
             if hasattr(self, '_trading_active_player'):
                 active_player = self._trading_active_player
+                # Store the original active player for later restoration
+                self._original_active_player = active_player
                 # Reset trading active player
                 delattr(self, '_trading_active_player')
             else:
                 active_player = self.state.current_player_id
+                # Store the original active player for later restoration
+                self._original_active_player = active_player
             
             remaining_face_up = self.state.game_state["face_up_cards"]
             self.state.game_state["mandatory_plants"][active_player].extend(remaining_face_up)
@@ -990,8 +925,12 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                     # Move to next player who has mandatory plants
                     self.state.current_player_id = next_player
                 else:
-                    # All players finished - move to draw phase
+                    # All players finished - move to draw phase and restore original active player
                     self.state.game_state["current_phase"] = "draw"
+                    # Restore the original active player who should draw cards
+                    if hasattr(self, '_original_active_player'):
+                        self.state.current_player_id = self._original_active_player
+                        delattr(self, '_original_active_player')
         
         elif current_phase == "draw":
             # Move to harvest phase
