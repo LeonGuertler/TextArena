@@ -940,11 +940,8 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             # Move to next player's turn - this is the only place we advance the turn
             self.state.game_state["current_phase"] = "plant"
             
-            # Clear accepted trades
-            self.state.game_state["active_trades"] = {
-                k: v for k, v in self.state.game_state["active_trades"].items()
-                if v["status"] == "pending"
-            }
+            # Clear all active trades at the end of each turn
+            self.state.game_state["active_trades"] = {}
             
             # Advance to next player
             self.state.current_player_id = (self.state.current_player_id + 1) % self.state.num_players
