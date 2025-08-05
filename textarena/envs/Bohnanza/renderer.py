@@ -10,7 +10,7 @@ def create_board_str(game_state: Dict[str, Any], current_player_id: int) -> str:
     lines.append("GAME PHASES & ACTIONS:")
     lines.append("-" * 60)
     lines.append("1. PLANT: [Plant] <field#> (must plant 1st card, may plant 2nd), [Pass]")
-    lines.append("2. DRAW_TRADE: [Trade] <offer> for <want>, [Accept] Trade<#>, [Reject] Trade<#>, [EndTrading]")
+    lines.append("2. DRAW_TRADE: [Trade] <offer> for <want>, [Accept] Trade<#>, [Pass], [EndTrading]")
     lines.append("3. PLANT_MANDATORY: [Plant] <field#>, [Harvest] <field#> (if needed), [Pass]")
     lines.append("4. DRAW: [Pass] (automatic - draws 3 cards)")
     lines.append("5. HARVEST: [Harvest] <field#>, [Pass] (optional)")

@@ -47,7 +47,7 @@ class BohnanzaEnv(ta.Env):
         self.harvest_pattern = re.compile(r"\[Harvest\]\s*(\d+)", re.IGNORECASE)
         self.trade_pattern = re.compile(r"\[Trade\]\s*(.+?)\s*for\s*(.+)", re.IGNORECASE)
         self.accept_pattern = re.compile(r"\[Accept\]\s*Trade(\d+)", re.IGNORECASE)
-        self.reject_pattern = re.compile(r"\[Reject\]\s*Trade(\d+)", re.IGNORECASE)
+        self.pass_trade_pattern = re.compile(r"\[Pass\]", re.IGNORECASE)
         self.end_trading_pattern = re.compile(r"\[EndTrading\]", re.IGNORECASE)
         self.pass_pattern = re.compile(r"\[Pass\]", re.IGNORECASE)
     
@@ -199,7 +199,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                 prompt += f"\n- Trade format: [Trade] Blue for Red, [Trade] 2 Blue for Nothing (gift), [Trade] Nothing for Red (request gift)"
             else:
                 prompt += f"\n- You can make counter-offers to the active player or respond to trades"
-                prompt += f"\n- Actions: [Trade] <offer> for <want> (to active player), [Accept] Trade<X>, [Reject] Trade<X>"
+                prompt += f"\n- Actions: [Trade] <offer> for <want> (to active player), [Accept] Trade<X>, [Pass]"
                 prompt += f"\n- Trade format: [Trade] Blue for Red, [Trade] 2 Blue for Nothing (gift), [Trade] Nothing for Red (request gift)"
         
         elif current_phase == "plant_mandatory":
@@ -321,7 +321,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         """Process actions during draw and trade phase."""
         trade_match = self.trade_pattern.search(action)
         accept_match = self.accept_pattern.search(action)
-        reject_match = self.reject_pattern.search(action)
+        pass_match = self.pass_trade_pattern.search(action)
         end_trading_match = self.end_trading_pattern.search(action)
         
         # Get the original active player who started trading
@@ -342,9 +342,15 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             trade_id = int(accept_match.group(1))
             return self._accept_trade(player_id, trade_id)
         
-        elif reject_match:
-            trade_id = int(reject_match.group(1))
-            return self._reject_trade(player_id, trade_id)
+        elif pass_match:
+            # [Pass] during trading phase - just log that player passed on trading
+            self.state.add_observation(
+                from_id=ta.GAME_ID,
+                to_id=-1,
+                message=f"Player {player_id} passed on trading",
+                observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
+            )
+            return True
         
         elif end_trading_match:
             # Only the original active player (who started trading) can end trading
@@ -645,46 +651,6 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         
         return True
     
-    def _reject_trade(self, player_id: int, trade_id: int) -> bool:
-        """Reject a trade proposal."""
-        if trade_id not in self.state.game_state["active_trades"]:
-            self.state.set_invalid_move(f"Trade{trade_id} does not exist")
-            return False
-        
-        trade = self.state.game_state["active_trades"][trade_id]
-        
-        # For open trades (target is None), any player except the proposer can reject
-        # For targeted trades, only the target can reject
-        if trade["target"] is not None and trade["target"] != player_id:
-            self.state.set_invalid_move("This trade is not for you")
-            return False
-        
-        # Cannot reject your own trade
-        if trade["proposer"] == player_id:
-            self.state.set_invalid_move("Cannot reject your own trade")
-            return False
-        
-        # For open trades, just log the rejection but don't remove the trade
-        # For targeted trades, remove the trade
-        if trade["target"] is None:
-            # Open trade - just log the rejection
-            self.state.add_observation(
-                from_id=ta.GAME_ID,
-                to_id=-1,
-                message=f"Player {player_id} declined Trade{trade_id}",
-                observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
-            )
-        else:
-            # Targeted trade - remove it
-            del self.state.game_state["active_trades"][trade_id]
-            self.state.add_observation(
-                from_id=ta.GAME_ID,
-                to_id=-1,
-                message=f"Player {player_id} rejected Trade{trade_id}",
-                observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
-            )
-        
-        return True
     
     def _plant_mandatory(self, player_id: int, field_num: int) -> bool:
         """Plant a mandatory bean (from trades or face-up cards)."""
