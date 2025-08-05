@@ -5,8 +5,16 @@ def create_board_str(game_state: Dict[str, Any], current_player_id: int) -> str:
     """Create a string representation of the current game board."""
     lines = []
     
-    # Bean type reference at the top for easy reference
+    # Game phases and actions reference at the top
     lines.append("=" * 60)
+    lines.append("GAME PHASES & ACTIONS:")
+    lines.append("-" * 60)
+    lines.append("1. PLANT: [Plant] <field#> (must plant 1st card, may plant 2nd), [Pass]")
+    lines.append("2. DRAW_TRADE: [Trade] <offer> for <want>, [Accept] Trade<#>, [Reject] Trade<#>, [EndTrading]")
+    lines.append("3. PLANT_MANDATORY: [Plant] <field#>, [Harvest] <field#> (if needed), [Pass]")
+    lines.append("4. DRAW: [Pass] (automatic - draws 3 cards)")
+    lines.append("5. HARVEST: [Harvest] <field#>, [Pass] (optional)")
+    lines.append("")
     lines.append("BEAN TYPES & PAYOUTS (coins:beans_needed):")
     lines.append("-" * 60)
     
@@ -48,7 +56,12 @@ def create_board_str(game_state: Dict[str, Any], current_player_id: int) -> str:
         lines.append("ACTIVE TRADES:")
         for trade_id, trade in game_state["active_trades"].items():
             status = trade["status"]
-            lines.append(f"  Trade{trade_id} ({status}): Player{trade['proposer'] + 1} offers '{trade['offer']}' for '{trade['want']}' with Player{trade['target'] + 1}")
+            if trade["target"] is None:
+                # Open trade
+                lines.append(f"  Trade{trade_id} ({status}): Player{trade['proposer']} offers '{trade['offer']}' for '{trade['want']}' (open to all)")
+            else:
+                # Targeted trade
+                lines.append(f"  Trade{trade_id} ({status}): Player{trade['proposer']} offers '{trade['offer']}' for '{trade['want']}' with Player{trade['target']}")
         lines.append("")
     
     # Player information
@@ -58,7 +71,7 @@ def create_board_str(game_state: Dict[str, Any], current_player_id: int) -> str:
     for player_id, player in game_state["players"].items():
         # Player header
         player_marker = " >>> " if player_id == current_player_id else "     "
-        lines.append(f"{player_marker}Player {player_id + 1} - {player['coins']} coins")
+        lines.append(f"{player_marker}Player {player_id} - {player['coins']} coins")
         
         # Hand info (only show your own hand, others are completely hidden)
         hand = player["hand"]
@@ -98,7 +111,7 @@ def render_player_summary(game_state: Dict[str, Any], player_id: int) -> str:
     player = game_state["players"][player_id]
     lines = []
     
-    lines.append(f"Player {player_id + 1} Summary:")
+    lines.append(f"Player {player_id} Summary:")
     lines.append(f"Coins: {player['coins']}")
     lines.append(f"Hand: {len(player['hand'])} cards")
     
@@ -120,7 +133,7 @@ def render_trade_summary(active_trades: Dict[int, Dict[str, Any]]) -> str:
     
     lines = ["Active Trades:"]
     for trade_id, trade in active_trades.items():
-        lines.append(f"Trade{trade_id}: Player{trade['proposer'] + 1} → Player{trade['target'] + 1}")
+        lines.append(f"Trade{trade_id}: Player{trade['proposer']} → Player{trade['target']}")
         lines.append(f"  Offers: {trade['offer']}")
         lines.append(f"  Wants: {trade['want']}")
         lines.append(f"  Status: {trade['status']}")

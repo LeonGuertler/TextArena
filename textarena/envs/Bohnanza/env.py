@@ -114,7 +114,7 @@ class BohnanzaEnv(ta.Env):
         player = game_state["players"][player_id]
         
         # Base game information
-        prompt = f"""You are Player {player_id + 1} in a Bohnanza bean trading game.
+        prompt = f"""You are Player {player_id} in a Bohnanza bean trading game.
 
 GAME RULES:
 - Plant, trade, and harvest beans to earn coins
@@ -133,7 +133,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         prompt += f"\n\nCURRENT STATE:"
         prompt += f"\n- Turn: {self.state.turn + 1}"
         prompt += f"\n- Phase: {current_phase}"
-        prompt += f"\n- Active Player: Player {self.state.current_player_id + 1}"
+        prompt += f"\n- Active Player: Player {self.state.current_player_id}"
         prompt += f"\n- Deck Cycles: {game_state['deck_cycles']}/3"
         prompt += f"\n- Cards in Deck: {len(game_state['deck'])}"
         
@@ -179,17 +179,20 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                 prompt += f"\n- MAY plant second card from hand"
                 prompt += f"\n- Actions: [Plant] <field_number>, [Pass] (after first plant)"
             else:
-                prompt += f"\n- Waiting for Player {self.state.current_player_id + 1} to plant"
+                prompt += f"\n- Waiting for Player {self.state.current_player_id} to plant"
         
         elif current_phase == "draw_trade":
-            prompt += f"\n- Trading phase: Any player can propose or respond to trades"
+            # Get the original active player who started trading
+            trading_active_player = getattr(self, '_trading_active_player', self.state.current_player_id)
+            
+            prompt += f"\n- Trading phase: Player {trading_active_player} is the active trader"
             prompt += f"\n- Free text discussion allowed before bracketed actions"
-            if is_active:
+            if player_id == trading_active_player:
                 prompt += f"\n- You drew face-up cards for trading"
-                prompt += f"\n- Actions: [Trade] <offer> for <want>, [EndTrading]"
+                prompt += f"\n- Actions: [Trade] <offer> for <want> (open to all), [EndTrading]"
             else:
-                prompt += f"\n- You can propose trades or respond to existing ones"
-                prompt += f"\n- Actions: [Trade] <offer> for <want>, [Accept] Trade<X>, [Reject] Trade<X>"
+                prompt += f"\n- You can make counter-offers to the active player or respond to trades"
+                prompt += f"\n- Actions: [Trade] <offer> for <want> (to active player), [Accept] Trade<X>, [Reject] Trade<X>"
         
         elif current_phase == "plant_mandatory":
             if game_state["mandatory_plants"][player_id]:
@@ -204,7 +207,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                 prompt += f"\n- Drawing 3 cards to your hand"
                 prompt += f"\n- Actions: [Pass] (automatic)"
             else:
-                prompt += f"\n- Waiting for Player {self.state.current_player_id + 1} to draw"
+                prompt += f"\n- Waiting for Player {self.state.current_player_id} to draw"
         
         elif current_phase == "harvest":
             if is_active:
@@ -212,7 +215,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                 prompt += f"\n- Cannot harvest 1-bean field if other fields have 2+ beans"
                 prompt += f"\n- Actions: [Harvest] <field_number>, [Pass]"
             else:
-                prompt += f"\n- Waiting for Player {self.state.current_player_id + 1} to harvest"
+                prompt += f"\n- Waiting for Player {self.state.current_player_id} to harvest"
         
         prompt += f"\n\nWrite your reasoning and include your action in brackets."
         
@@ -240,15 +243,29 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                 self._check_phase_transition()
             self._check_game_end()
         
-        # Store the current player before TextArena tries to advance it
+        # Store the current player and phase before TextArena processes
         intended_current_player = self.state.current_player_id
+        current_phase = self.state.game_state["current_phase"]
         
         # Let TextArena do its step processing
         done, info = self.state.step()
         
-        # Override TextArena's turn advancement - we control turns manually
+        # Override TextArena's turn advancement based on phase
         if not self.state.done:
-            self.state.current_player_id = intended_current_player
+            if current_phase == "draw_trade":
+                # During trading phase, manage turn advancement carefully
+                if not hasattr(self, '_trading_active_player'):
+                    # First time entering trading phase - store the original active player
+                    self._trading_active_player = intended_current_player
+                    # Keep turn with the original active player for the first trade offer
+                    self.state.current_player_id = intended_current_player
+                else:
+                    # Already in trading phase - allow normal turn advancement for discussion
+                    pass  # Don't override the turn advancement
+            else:
+                # During all other phases, prevent TextArena from advancing turns
+                # The turn only advances when we explicitly transition from harvest to plant phase
+                self.state.current_player_id = intended_current_player
         
         return done, info
     
@@ -299,11 +316,19 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         reject_match = self.reject_pattern.search(action)
         end_trading_match = self.end_trading_pattern.search(action)
         
+        # Get the original active player who started trading
+        trading_active_player = getattr(self, '_trading_active_player', self.state.current_player_id)
+        
         if trade_match:
-            # Any player can propose trades during trading phase
             offer = trade_match.group(1).strip()
             want = trade_match.group(2).strip()
-            return self._propose_open_trade(player_id, offer, want)
+            
+            if player_id == trading_active_player:
+                # Active player can make open trades to anyone
+                return self._propose_open_trade(player_id, offer, want)
+            else:
+                # Non-active players can only make targeted trades to the active player
+                return self._propose_trade(player_id, offer, want, trading_active_player)
         
         elif accept_match:
             trade_id = int(accept_match.group(1))
@@ -313,16 +338,18 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             trade_id = int(reject_match.group(1))
             return self._reject_trade(player_id, trade_id)
         
-        elif end_trading_match and player_id == self.state.current_player_id:
-            # Only active player can end trading
-            return True
+        elif end_trading_match:
+            # Only the original active player (who started trading) can end trading
+            if player_id == trading_active_player:
+                return True
+            else:
+                self.state.set_invalid_move("Only the active player can end trading")
+                return False
         
         else:
-            if player_id == self.state.current_player_id:
-                self.state.set_invalid_move("Use [Trade] <offer> for <want> with Player<X> or [EndTrading]")
-            else:
-                self.state.set_invalid_move("Use [Accept] Trade<X> or [Reject] Trade<X>")
-            return False
+            # Allow free text discussion - just return True for any other text
+            # This allows players to discuss without using bracketed actions
+            return True
     
     def _process_plant_mandatory_phase(self, player_id: int, action: str) -> bool:
         """Process actions during mandatory planting phase."""
@@ -425,7 +452,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         self.state.add_observation(
             from_id=ta.GAME_ID,
             to_id=-1,
-            message=f"Player {player_id + 1} planted {bean_to_plant} in field {field_num + 1}",
+            message=f"Player {player_id} planted {bean_to_plant} in field {field_num + 1}",
             observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
         )
         
@@ -433,6 +460,15 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
     
     def _propose_open_trade(self, proposer_id: int, offer: str, want: str) -> bool:
         """Propose an open trade that any player can accept."""
+        # Validate bean types
+        if not self._validate_bean_types(offer):
+            self.state.set_invalid_move(f"Invalid bean type(s) in offer: '{offer}'. Valid types: {', '.join(self.BEAN_TYPES.keys())}")
+            return False
+        
+        if not self._validate_bean_types(want):
+            self.state.set_invalid_move(f"Invalid bean type(s) in want: '{want}'. Valid types: {', '.join(self.BEAN_TYPES.keys())}")
+            return False
+        
         # Create trade
         trade_id = self.state.game_state["trade_counter"] + 1
         self.state.game_state["trade_counter"] = trade_id
@@ -448,7 +484,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         self.state.add_observation(
             from_id=ta.GAME_ID,
             to_id=-1,
-            message=f"Trade{trade_id}: Player {proposer_id + 1} offers {offer} for {want} (open to all)",
+            message=f"Trade{trade_id}: Player {proposer_id} offers {offer} for {want} (open to all)",
             observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
         )
         
@@ -462,6 +498,15 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         
         if target_id == proposer_id:
             self.state.set_invalid_move("Cannot trade with yourself")
+            return False
+        
+        # Validate bean types
+        if not self._validate_bean_types(offer):
+            self.state.set_invalid_move(f"Invalid bean type(s) in offer: '{offer}'. Valid types: {', '.join(self.BEAN_TYPES.keys())}")
+            return False
+        
+        if not self._validate_bean_types(want):
+            self.state.set_invalid_move(f"Invalid bean type(s) in want: '{want}'. Valid types: {', '.join(self.BEAN_TYPES.keys())}")
             return False
         
         # Create trade
@@ -479,7 +524,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         self.state.add_observation(
             from_id=ta.GAME_ID,
             to_id=-1,
-            message=f"Trade{trade_id}: Player {proposer_id + 1} offers {offer} for {want} with Player {target_id + 1}",
+            message=f"Trade{trade_id}: Player {proposer_id} offers {offer} for {want} with Player {target_id}",
             observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
         )
         
@@ -529,7 +574,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         self.state.add_observation(
             from_id=ta.GAME_ID,
             to_id=-1,
-            message=f"Player {player_id + 1} accepted Trade{trade_id}",
+            message=f"Player {player_id} accepted Trade{trade_id}",
             observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
         )
         
@@ -543,19 +588,36 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         
         trade = self.state.game_state["active_trades"][trade_id]
         
-        if trade["target"] != player_id:
+        # For open trades (target is None), any player except the proposer can reject
+        # For targeted trades, only the target can reject
+        if trade["target"] is not None and trade["target"] != player_id:
             self.state.set_invalid_move("This trade is not for you")
             return False
         
-        # Remove the trade
-        del self.state.game_state["active_trades"][trade_id]
+        # Cannot reject your own trade
+        if trade["proposer"] == player_id:
+            self.state.set_invalid_move("Cannot reject your own trade")
+            return False
         
-        self.state.add_observation(
-            from_id=ta.GAME_ID,
-            to_id=-1,
-            message=f"Player {player_id + 1} rejected Trade{trade_id}",
-            observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
-        )
+        # For open trades, just log the rejection but don't remove the trade
+        # For targeted trades, remove the trade
+        if trade["target"] is None:
+            # Open trade - just log the rejection
+            self.state.add_observation(
+                from_id=ta.GAME_ID,
+                to_id=-1,
+                message=f"Player {player_id} declined Trade{trade_id}",
+                observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
+            )
+        else:
+            # Targeted trade - remove it
+            del self.state.game_state["active_trades"][trade_id]
+            self.state.add_observation(
+                from_id=ta.GAME_ID,
+                to_id=-1,
+                message=f"Player {player_id} rejected Trade{trade_id}",
+                observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
+            )
         
         return True
     
@@ -593,7 +655,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         self.state.add_observation(
             from_id=ta.GAME_ID,
             to_id=-1,
-            message=f"Player {player_id + 1} planted mandatory {bean_to_plant} in field {field_num + 1}",
+            message=f"Player {player_id} planted mandatory {bean_to_plant} in field {field_num + 1}",
             observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
         )
         
@@ -632,7 +694,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         self.state.add_observation(
             from_id=ta.GAME_ID,
             to_id=-1,
-            message=f"Player {player_id + 1} harvested {bean_count} {bean_type} beans for {coins_earned} coins",
+            message=f"Player {player_id} harvested {bean_count} {bean_type} beans for {coins_earned} coins",
             observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
         )
         
@@ -722,6 +784,18 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
         )
     
+    def _validate_bean_types(self, bean_str: str) -> bool:
+        """Validate that all bean types in a string are valid game beans."""
+        try:
+            beans = self._parse_bean_list(bean_str)
+            for bean in beans:
+                if bean not in self.BEAN_TYPES:
+                    return False
+            return True
+        except:
+            # If parsing fails, it's invalid
+            return False
+    
     def _parse_bean_list(self, bean_str: str) -> List[str]:
         """Parse a string like '2 Coffee Bean' into list of beans."""
         # Simplified parsing - assume format like "2 Coffee Bean" or "Coffee Bean"
@@ -756,8 +830,14 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             # Move to plant_mandatory phase
             self.state.game_state["current_phase"] = "plant_mandatory"
             
-            # Add remaining face-up cards to active player's mandatory plants
-            active_player = self.state.current_player_id
+            # Add remaining face-up cards to original active player's mandatory plants
+            if hasattr(self, '_trading_active_player'):
+                active_player = self._trading_active_player
+                # Reset trading active player
+                delattr(self, '_trading_active_player')
+            else:
+                active_player = self.state.current_player_id
+            
             remaining_face_up = self.state.game_state["face_up_cards"]
             self.state.game_state["mandatory_plants"][active_player].extend(remaining_face_up)
             self.state.game_state["face_up_cards"] = []
@@ -881,8 +961,9 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             return False
         
         elif current_phase == "draw_trade":
-            # Phase ends when active player uses [EndTrading]
-            return self.end_trading_pattern.search(action) is not None and player_id == self.state.current_player_id
+            # Phase ends when original active player uses [EndTrading]
+            trading_active_player = getattr(self, '_trading_active_player', self.state.current_player_id)
+            return self.end_trading_pattern.search(action) is not None and player_id == trading_active_player
         
         elif current_phase == "plant_mandatory":
             # Phase ends when all players have no mandatory plants left
