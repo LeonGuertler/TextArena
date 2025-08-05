@@ -119,8 +119,9 @@ class BohnanzaEnv(ta.Env):
 GAME RULES:
 - Plant, trade, and harvest beans to earn coins
 - You CANNOT rearrange your hand - must plant beans in order
-- Only the active player can propose trades
+- Only the active player can accept trades
 - All traded beans must be planted immediately
+- Cannot harvest 1-bean field if other fields have 2+ beans
 - Game ends after deck is reshuffled 3 times
 
 BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
@@ -164,7 +165,12 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         if game_state["active_trades"]:
             prompt += f"\n\nACTIVE TRADES:"
             for trade_id, trade in game_state["active_trades"].items():
-                prompt += f"\n  Trade{trade_id}: Player{trade['proposer'] + 1} offers {trade['offer']} for {trade['want']} with Player{trade['target'] + 1}"
+                if trade['target'] is None:
+                    # Open trade
+                    prompt += f"\n  Trade{trade_id}: Player{trade['proposer']} offers {trade['offer']} for {trade['want']} (open to all)"
+                else:
+                    # Targeted trade
+                    prompt += f"\n  Trade{trade_id}: Player{trade['proposer']} offers {trade['offer']} for {trade['want']} with Player{trade['target']}"
         
         # Mandatory plants
         if game_state["mandatory_plants"][player_id]:
@@ -190,9 +196,11 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             if player_id == trading_active_player:
                 prompt += f"\n- You drew face-up cards for trading"
                 prompt += f"\n- Actions: [Trade] <offer> for <want> (open to all), [EndTrading]"
+                prompt += f"\n- Trade format: [Trade] Blue for Red, [Trade] 2 Blue for Nothing (gift), [Trade] Nothing for Red (request gift)"
             else:
                 prompt += f"\n- You can make counter-offers to the active player or respond to trades"
                 prompt += f"\n- Actions: [Trade] <offer> for <want> (to active player), [Accept] Trade<X>, [Reject] Trade<X>"
+                prompt += f"\n- Trade format: [Trade] Blue for Red, [Trade] 2 Blue for Nothing (gift), [Trade] Nothing for Red (request gift)"
         
         elif current_phase == "plant_mandatory":
             if game_state["mandatory_plants"][player_id]:
@@ -460,6 +468,20 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
     
     def _propose_open_trade(self, proposer_id: int, offer: str, want: str) -> bool:
         """Propose an open trade that any player can accept."""
+        # Check for empty strings (not "Nothing")
+        if not offer.strip() or not want.strip():
+            self.state.set_invalid_move("Empty trade not allowed. Use 'Nothing' for gift trades.")
+            return False
+        
+        # Parse beans to check for gift trades
+        offer_beans = self._parse_bean_list(offer)
+        want_beans = self._parse_bean_list(want)
+        
+        # Prevent both sides being "Nothing"
+        if len(offer_beans) == 0 and len(want_beans) == 0:
+            self.state.set_invalid_move("Cannot trade Nothing for Nothing. At least one side must have beans.")
+            return False
+        
         # Validate bean types
         if not self._validate_bean_types(offer):
             self.state.set_invalid_move(f"Invalid bean type(s) in offer: '{offer}'. Valid types: {', '.join(self.BEAN_TYPES.keys())}")
@@ -467,6 +489,12 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         
         if not self._validate_bean_types(want):
             self.state.set_invalid_move(f"Invalid bean type(s) in want: '{want}'. Valid types: {', '.join(self.BEAN_TYPES.keys())}")
+            return False
+        
+        # Validate that proposer has the beans they're offering (skip if offering Nothing)
+        if len(offer_beans) > 0 and not self._player_has_beans(proposer_id, offer_beans):
+            missing_beans = self._get_missing_beans(proposer_id, offer_beans)
+            self.state.set_invalid_move(f"You don't have the required beans to make this offer. Missing: {', '.join(missing_beans)}")
             return False
         
         # Create trade
@@ -500,6 +528,20 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             self.state.set_invalid_move("Cannot trade with yourself")
             return False
         
+        # Check for empty strings (not "Nothing")
+        if not offer.strip() or not want.strip():
+            self.state.set_invalid_move("Empty trade not allowed. Use 'Nothing' for gift trades.")
+            return False
+        
+        # Parse beans to check for gift trades
+        offer_beans = self._parse_bean_list(offer)
+        want_beans = self._parse_bean_list(want)
+        
+        # Prevent both sides being "Nothing"
+        if len(offer_beans) == 0 and len(want_beans) == 0:
+            self.state.set_invalid_move("Cannot trade Nothing for Nothing. At least one side must have beans.")
+            return False
+        
         # Validate bean types
         if not self._validate_bean_types(offer):
             self.state.set_invalid_move(f"Invalid bean type(s) in offer: '{offer}'. Valid types: {', '.join(self.BEAN_TYPES.keys())}")
@@ -507,6 +549,12 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         
         if not self._validate_bean_types(want):
             self.state.set_invalid_move(f"Invalid bean type(s) in want: '{want}'. Valid types: {', '.join(self.BEAN_TYPES.keys())}")
+            return False
+        
+        # Validate that proposer has the beans they're offering (skip if offering Nothing)
+        if len(offer_beans) > 0 and not self._player_has_beans(proposer_id, offer_beans):
+            missing_beans = self._get_missing_beans(proposer_id, offer_beans)
+            self.state.set_invalid_move(f"You don't have the required beans to make this offer. Missing: {', '.join(missing_beans)}")
             return False
         
         # Create trade
@@ -552,17 +600,30 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             self.state.set_invalid_move("Trade is no longer pending")
             return False
         
-        # For open trades, set the target to the accepting player
+        # Parse offer and want to validate both players have required beans
+        offer_beans = self._parse_bean_list(trade["offer"])
+        want_beans = self._parse_bean_list(trade["want"])
+        
+        # Validate that proposer has the beans they're offering
+        if not self._player_has_beans(trade["proposer"], offer_beans):
+            missing_beans = self._get_missing_beans(trade["proposer"], offer_beans)
+            self.state.set_invalid_move(f"Trade proposer (Player {trade['proposer']}) doesn't have required beans. Missing: {', '.join(missing_beans)}")
+            return False
+        
+        # Validate that the accepting player has the beans they need to give
+        target_player = trade["target"] if trade["target"] is not None else player_id
+        if not self._player_has_beans(target_player, want_beans):
+            missing_beans = self._get_missing_beans(target_player, want_beans)
+            self.state.set_invalid_move(f"You don't have the required beans for this trade. Missing: {', '.join(missing_beans)}")
+            return False
+        
+        # For open trades, set the target to the accepting player ONLY after validation passes
         if trade["target"] is None:
             trade["target"] = player_id
         
-        # Execute the trade
-        proposer = self.state.game_state["players"][trade["proposer"]]
-        target = self.state.game_state["players"][trade["target"]]
-        
-        # Parse offer and want (simplified - assume single bean names)
-        offer_beans = self._parse_bean_list(trade["offer"])
-        want_beans = self._parse_bean_list(trade["want"])
+        # Execute the trade - remove beans from players and add to mandatory plants
+        self._remove_beans_from_player(trade["proposer"], offer_beans)
+        self._remove_beans_from_player(trade["target"], want_beans)
         
         # Add to mandatory plants
         self.state.game_state["mandatory_plants"][trade["proposer"]].extend(want_beans)
@@ -784,6 +845,85 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
         )
     
+    def _player_has_beans(self, player_id: int, required_beans: List[str]) -> bool:
+        """Check if a player has the required beans available for trading."""
+        player = self.state.game_state["players"][player_id]
+        available_beans = []
+        
+        # Add beans from hand (all players can trade from hand)
+        available_beans.extend(player["hand"])
+        
+        # If this is the active player during draw_trade phase, include face-up cards
+        current_phase = self.state.game_state["current_phase"]
+        trading_active_player = getattr(self, '_trading_active_player', self.state.current_player_id)
+        if (current_phase == "draw_trade" and player_id == trading_active_player and 
+            self.state.game_state["face_up_cards"]):
+            available_beans.extend(self.state.game_state["face_up_cards"])
+        
+        # Check if we have enough of each required bean type
+        from collections import Counter
+        available_count = Counter(available_beans)
+        required_count = Counter(required_beans)
+        
+        for bean_type, needed in required_count.items():
+            if available_count[bean_type] < needed:
+                return False
+        
+        return True
+    
+    def _get_missing_beans(self, player_id: int, required_beans: List[str]) -> List[str]:
+        """Get list of beans that a player is missing for a trade."""
+        player = self.state.game_state["players"][player_id]
+        available_beans = []
+        
+        # Add beans from hand (all players can trade from hand)
+        available_beans.extend(player["hand"])
+        
+        # If this is the active player during draw_trade phase, include face-up cards
+        current_phase = self.state.game_state["current_phase"]
+        trading_active_player = getattr(self, '_trading_active_player', self.state.current_player_id)
+        if (current_phase == "draw_trade" and player_id == trading_active_player and 
+            self.state.game_state["face_up_cards"]):
+            available_beans.extend(self.state.game_state["face_up_cards"])
+        
+        # Calculate missing beans
+        from collections import Counter
+        available_count = Counter(available_beans)
+        required_count = Counter(required_beans)
+        
+        missing = []
+        for bean_type, needed in required_count.items():
+            available = available_count[bean_type]
+            if available < needed:
+                shortage = needed - available
+                missing.extend([bean_type] * shortage)
+        
+        return missing
+    
+    def _remove_beans_from_player(self, player_id: int, beans_to_remove: List[str]) -> None:
+        """Remove beans from a player's available trading beans."""
+        player = self.state.game_state["players"][player_id]
+        from collections import Counter
+        beans_needed = Counter(beans_to_remove)
+        
+        # First, try to remove from hand
+        for bean_type in list(beans_needed.keys()):
+            while beans_needed[bean_type] > 0 and bean_type in player["hand"]:
+                player["hand"].remove(bean_type)
+                beans_needed[bean_type] -= 1
+        
+        # If this is the active player during draw_trade phase, also remove from face-up cards
+        current_phase = self.state.game_state["current_phase"]
+        if current_phase == "draw_trade":
+            # Get the original active player who started trading
+            trading_active_player = getattr(self, '_trading_active_player', self.state.current_player_id)
+            if player_id == trading_active_player and self.state.game_state["face_up_cards"]:
+                face_up_cards = self.state.game_state["face_up_cards"]
+                for bean_type in list(beans_needed.keys()):
+                    while beans_needed[bean_type] > 0 and bean_type in face_up_cards:
+                        face_up_cards.remove(bean_type)
+                        beans_needed[bean_type] -= 1
+    
     def _validate_bean_types(self, bean_str: str) -> bool:
         """Validate that all bean types in a string are valid game beans."""
         try:
@@ -797,20 +937,33 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             return False
     
     def _parse_bean_list(self, bean_str: str) -> List[str]:
-        """Parse a string like '2 Coffee Bean' into list of beans."""
-        # Simplified parsing - assume format like "2 Coffee Bean" or "Coffee Bean"
-        beans = []
-        parts = bean_str.strip().split()
+        """Parse a string like '2 Blue, 2 Red' or 'Blue, Red' into list of beans."""
+        # Handle "Nothing" as a special case for gift trades
+        if bean_str.strip().lower() == "nothing":
+            return []
         
-        if parts and parts[0].isdigit():
-            # Format: "2 Coffee Bean"
-            count = int(parts[0])
-            bean_type = " ".join(parts[1:])
-            beans.extend([bean_type] * count)
-        else:
-            # Format: "Coffee Bean"
-            bean_type = bean_str.strip()
-            beans.append(bean_type)
+        beans = []
+        
+        # Split by comma to handle multiple bean types
+        bean_parts = [part.strip() for part in bean_str.split(',')]
+        
+        for part in bean_parts:
+            if not part:
+                continue
+                
+            words = part.strip().split()
+            if not words:
+                continue
+                
+            if words[0].isdigit():
+                # Format: "2 Blue"
+                count = int(words[0])
+                bean_type = " ".join(words[1:])
+                beans.extend([bean_type] * count)
+            else:
+                # Format: "Blue" (default count = 1)
+                bean_type = " ".join(words)
+                beans.append(bean_type)
         
         return beans
     
@@ -895,7 +1048,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                     self.state.add_observation(
                         from_id=ta.GAME_ID,
                         to_id=-1,
-                        message=f"Final harvest: Player {player_id + 1} harvested {bean_count} {bean_type} beans for {coins_earned} coins",
+                        message=f"Final harvest: Player {player_id} harvested {bean_count} {bean_type} beans for {coins_earned} coins",
                         observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
                     )
         
@@ -908,7 +1061,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             winner_id = winners[0]
             self.state.set_winners(
                 player_ids=[winner_id],
-                reason=f"Player {winner_id + 1} wins with {max_coins} coins!"
+                reason=f"Player {winner_id} wins with {max_coins} coins!"
             )
         else:
             # Tie-breaking: player furthest clockwise from starting player (player 0)
@@ -916,7 +1069,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             winner_id = max(winners)
             self.state.set_winners(
                 player_ids=[winner_id],
-                reason=f"Player {winner_id + 1} wins tie-break with {max_coins} coins (furthest from starting player)"
+                reason=f"Player {winner_id} wins tie-break with {max_coins} coins (furthest from starting player)"
             )
         
         # Set final scores as rewards
