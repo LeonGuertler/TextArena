@@ -361,6 +361,10 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
     
     def _process_plant_mandatory_phase(self, player_id: int, action: str) -> bool:
         """Process actions during mandatory planting phase."""
+        # Auto-pass if player has no mandatory plants
+        if not self.state.game_state["mandatory_plants"][player_id]:
+            return True
+        
         plant_match = self.plant_pattern.search(action)
         harvest_match = self.harvest_pattern.search(action)
         pass_match = self.pass_pattern.search(action)
@@ -967,6 +971,19 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         
         return beans
     
+    def _find_next_player_with_mandatory_plants(self) -> Optional[int]:
+        """Find the next player (in turn order) who has mandatory plants to plant."""
+        current_player = self.state.current_player_id
+        
+        # Check all players starting from the next player in turn order
+        for i in range(1, self.state.num_players):
+            next_player = (current_player + i) % self.state.num_players
+            if self.state.game_state["mandatory_plants"][next_player]:
+                return next_player
+        
+        # No player has mandatory plants
+        return None
+    
     def _check_phase_transition(self):
         """Check if we should transition to the next phase."""
         current_phase = self.state.game_state["current_phase"]
@@ -996,13 +1013,19 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             self.state.game_state["face_up_cards"] = []
         
         elif current_phase == "plant_mandatory":
-            # Check if all players have planted their mandatory beans
-            all_planted = all(
-                not plants for plants in self.state.game_state["mandatory_plants"].values()
-            )
+            # Check if current player has finished their mandatory plants
+            current_player_finished = not self.state.game_state["mandatory_plants"][self.state.current_player_id]
             
-            if all_planted:
-                self.state.game_state["current_phase"] = "draw"
+            if current_player_finished:
+                # Find next player with mandatory plants
+                next_player = self._find_next_player_with_mandatory_plants()
+                
+                if next_player is not None:
+                    # Move to next player who has mandatory plants
+                    self.state.current_player_id = next_player
+                else:
+                    # All players finished - move to draw phase
+                    self.state.game_state["current_phase"] = "draw"
         
         elif current_phase == "draw":
             # Move to harvest phase
@@ -1119,8 +1142,11 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             return self.end_trading_pattern.search(action) is not None and player_id == trading_active_player
         
         elif current_phase == "plant_mandatory":
-            # Phase ends when all players have no mandatory plants left
-            # This is checked in the transition logic, not based on a specific action
+            # Phase ends when current player finishes their mandatory plants
+            # This triggers the transition logic to find next player or move to draw phase
+            if player_id == self.state.current_player_id:
+                # Check if current player has finished their mandatory plants
+                return not self.state.game_state["mandatory_plants"][player_id]
             return False
         
         elif current_phase == "draw":
