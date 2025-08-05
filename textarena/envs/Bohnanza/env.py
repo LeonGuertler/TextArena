@@ -44,6 +44,7 @@ class BohnanzaEnv(ta.Env):
         
         # Regex patterns for parsing actions
         self.plant_pattern = re.compile(r"\[Plant\]\s*(\d+)", re.IGNORECASE)
+        self.plant_mandatory_pattern = re.compile(r"\[Plant\]\s*(\w+)\s*(\d+)", re.IGNORECASE)
         self.harvest_pattern = re.compile(r"\[Harvest\]\s*(\d+)", re.IGNORECASE)
         self.trade_pattern = re.compile(r"\[Trade\]\s*(.+?)\s*for\s*(.+)", re.IGNORECASE)
         self.accept_pattern = re.compile(r"\[Accept\]\s*Trade(\d+)", re.IGNORECASE)
@@ -302,13 +303,14 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         if not self.state.game_state["mandatory_plants"][player_id]:
             return True
         
-        plant_match = self.plant_pattern.search(action)
+        plant_mandatory_match = self.plant_mandatory_pattern.search(action)
         harvest_match = self.harvest_pattern.search(action)
         pass_match = self.pass_pattern.search(action)
         
-        if plant_match:
-            field_num = int(plant_match.group(1)) - 1
-            return self._plant_mandatory(player_id, field_num)
+        if plant_mandatory_match:
+            bean_type = plant_mandatory_match.group(1)
+            field_num = int(plant_mandatory_match.group(2)) - 1
+            return self._plant_mandatory_with_choice(player_id, bean_type, field_num)
         elif harvest_match:
             field_num = int(harvest_match.group(1)) - 1
             return self._harvest_field(player_id, field_num)
@@ -319,7 +321,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                 return False
             return True
         else:
-            self.state.set_invalid_move("Use [Plant] <field_number>, [Harvest] <field_number>, or [Pass]")
+            self.state.set_invalid_move("Use [Plant] <bean_type> <field_number>, [Harvest] <field_number>, or [Pass]")
             return False
     
     def _process_draw_phase(self, player_id: int, action: str) -> bool:
@@ -583,8 +585,57 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         return True
     
     
+    def _plant_mandatory_with_choice(self, player_id: int, bean_type: str, field_num: int) -> bool:
+        """Plant a specific mandatory bean chosen by the player."""
+        mandatory_plants = self.state.game_state["mandatory_plants"][player_id]
+        
+        if not mandatory_plants:
+            self.state.set_invalid_move("No mandatory beans to plant")
+            return False
+        
+        if field_num < 0 or field_num >= len(self.state.game_state["players"][player_id]["fields"]):
+            self.state.set_invalid_move(f"Invalid field number")
+            return False
+        
+        # Validate bean type exists in mandatory plants
+        if bean_type not in mandatory_plants:
+            available_beans = list(set(mandatory_plants))  # Get unique bean types
+            self.state.set_invalid_move(f"You don't have {bean_type} beans to plant. Available: {', '.join(available_beans)}")
+            return False
+        
+        # Validate bean type is a valid game bean
+        if bean_type not in self.BEAN_TYPES:
+            self.state.set_invalid_move(f"Invalid bean type: {bean_type}. Valid types: {', '.join(self.BEAN_TYPES.keys())}")
+            return False
+        
+        player = self.state.game_state["players"][player_id]
+        field = player["fields"][field_num]
+        
+        # Check field compatibility
+        if field and field[0] != bean_type:
+            self.state.set_invalid_move(f"Field {field_num + 1} has {field[0]} beans, cannot plant {bean_type}")
+            return False
+        
+        # Plant the chosen bean
+        if field:
+            player["fields"][field_num] = (field[0], field[1] + 1)
+        else:
+            player["fields"][field_num] = (bean_type, 1)
+        
+        # Remove one instance of the chosen bean from mandatory plants
+        mandatory_plants.remove(bean_type)
+        
+        self.state.add_observation(
+            from_id=ta.GAME_ID,
+            to_id=-1,
+            message=f"Player {player_id} planted mandatory {bean_type} in field {field_num + 1}",
+            observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION
+        )
+        
+        return True
+
     def _plant_mandatory(self, player_id: int, field_num: int) -> bool:
-        """Plant a mandatory bean (from trades or face-up cards)."""
+        """Plant a mandatory bean (from trades or face-up cards) - legacy method."""
         mandatory_plants = self.state.game_state["mandatory_plants"][player_id]
         
         if not mandatory_plants:
