@@ -125,19 +125,34 @@ class BohnanzaEnv(ta.Env):
         # Base game information
         prompt = f"""You are Player {player_id} in a Bohnanza bean trading game.
 
-GAME RULES:
-- Plant, trade, and harvest beans to earn coins
-- You CANNOT rearrange your hand - must plant beans in order
-- Only the active player can accept trades
-- All traded beans must be planted immediately
-- Cannot harvest 1-bean field if other fields have 2+ beans
-- Game ends after deck is reshuffled 3 times
+OBJECTIVE:
+Earn the most coins by planting, trading, and harvesting beans. Each bean type has different payout rates based on quantity harvested.
 
-BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
-        
-        for bean_type, config in self.BEAN_TYPES.items():
-            payouts_str = ", ".join([f"{coins}:{beans}" for coins, beans in config["payouts"].items()])
-            prompt+=f"\n{bean_type:10} ({config['count']:2} cards): {payouts_str}"
+TURN PHASES:
+1. PLANT Phase: Plant at least 1 and up to 2 beans from your hand (in order) - can harvest anytime
+2. DRAW_TRADE Phase: Draw 2 face-up cards, trade with other players - can harvest anytime
+3. PLANT_MANDATORY Phase: Plant all beans received from trades or remaining face-up cards - can harvest anytime
+4. DRAW Phase: Draw 3 cards to your hand - can harvest anytime
+
+KEY RULES:
+- Hand Order: You CANNOT rearrange your hand - must plant beans in order
+- Trading: Only during DRAW_TRADE phase; all traded beans must be planted immediately
+- Harvesting: Can harvest any time during your turn to make field space
+- Harvest Priority: Cannot harvest 1-bean field if other fields have 2+ beans
+- Fields: Limited field space ({len(game_state['players'][player_id]['fields'])} fields for you)
+
+ACTIONS:
+- [Plant] <field_number> - Plant from hand during PLANT phase
+- [Plant] <bean_type> <field_number> - Plant specific mandatory bean
+- [Harvest] <field_number> - Harvest field for coins (available anytime)
+- [Trade] <offer> for <want> - Propose trade during DRAW_TRADE phase
+- [Accept] Trade<#> - Accept trade proposal
+- [EndTrading] - End trading phase (active player only)
+- [Draw] - Draw 3 cards during DRAW phase
+- [Pass] - Skip/pass when allowed
+
+GAME END:
+Game ends after deck is reshuffled 3 times. All remaining fields are harvested automatically. Player with most coins wins!"""
         
         # Face-up cards (visible to all)
         if game_state["face_up_cards"]:
