@@ -50,6 +50,7 @@ class BohnanzaEnv(ta.Env):
         self.accept_pattern = re.compile(r"\[Accept\]\s*Trade(\d+)", re.IGNORECASE)
         self.pass_trade_pattern = re.compile(r"\[Pass\]", re.IGNORECASE)
         self.end_trading_pattern = re.compile(r"\[EndTrading\]", re.IGNORECASE)
+        self.draw_pattern = re.compile(r"\[Draw\]", re.IGNORECASE)
         self.pass_pattern = re.compile(r"\[Pass\]", re.IGNORECASE)
     
     def reset(self, num_players: int, seed: Optional[int] = None):
@@ -136,7 +137,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         
         for bean_type, config in self.BEAN_TYPES.items():
             payouts_str = ", ".join([f"{coins}:{beans}" for coins, beans in config["payouts"].items()])
-            prompt += f"\n  {bean_type}: {payouts_str}"
+            prompt+=f"\n{bean_type:10} ({config['count']:2} cards): {payouts_str}"
         
         # Face-up cards (visible to all)
         if game_state["face_up_cards"]:
@@ -156,8 +157,6 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         # Mandatory plants
         if game_state["mandatory_plants"][player_id]:
             prompt += f"\n\nMUST PLANT: {', '.join(game_state['mandatory_plants'][player_id])}"
-        
-        prompt += f"\n\nWrite your reasoning and include your action in brackets."
         
         return prompt
     
@@ -330,9 +329,15 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             self.state.set_invalid_move("Not your turn")
             return False
         
-        # Automatically draw 3 cards
-        self._draw_cards_to_hand(player_id, 3)
-        return True
+        draw_match = self.draw_pattern.search(action)
+        
+        if draw_match:
+            # Draw 3 cards when [Draw] is used
+            self._draw_cards_to_hand(player_id, 3)
+            return True
+        else:
+            self.state.set_invalid_move("Use [Draw] to draw 3 cards")
+            return False
     
     def _process_harvest_phase(self, player_id: int, action: str) -> bool:
         """Process actions during harvest phase."""
@@ -1103,8 +1108,8 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             return False
         
         elif current_phase == "draw":
-            # Phase ends immediately after active player draws (automatic)
-            return player_id == self.state.current_player_id
+            # Phase ends when active player uses [Draw]
+            return self.draw_pattern.search(action) is not None and player_id == self.state.current_player_id
         
         elif current_phase == "harvest":
             # Phase ends when active player passes or harvests (or any harvest action)
