@@ -4,7 +4,7 @@ import textarena as ta
 
 # agents = {
 #     0: ta.agents.AWSBedrockAgent(model_id='anthropic.claude-3-5-sonnet-20241022-v2:0',region_name='us-west-2'),
-#     1: ta.agents.AWSBedrockAgent(model_id='anthropic.claude-3-5-sonnet-20241022-v2:0',region_name='us-west-2'),
+#     1: ta.agents.HumanAgent(), #ta.agents.AWSBedrockAgent(model_id='anthropic.claude-3-5-sonnet-20241022-v2:0',region_name='us-west-2'),
 #     2: ta.agents.AWSBedrockAgent(model_id='anthropic.claude-3-5-sonnet-20241022-v2:0',region_name='us-west-2'),
 #     3: ta.agents.AWSBedrockAgent(model_id='anthropic.claude-3-5-sonnet-20241022-v2:0',region_name='us-west-2'),
 #     4: ta.agents.AWSBedrockAgent(model_id='anthropic.claude-3-5-sonnet-20241022-v2:0',region_name='us-west-2'),
@@ -14,8 +14,8 @@ agents = {
     0: ta.agents.HumanAgent(),
     1: ta.agents.HumanAgent(),
     2: ta.agents.HumanAgent(),
-    3: ta.agents.HumanAgent(),
-    4: ta.agents.HumanAgent(),
+    # 3: ta.agents.HumanAgent(),
+    # 4: ta.agents.HumanAgent(),
 }
 
 # initialize the environment
