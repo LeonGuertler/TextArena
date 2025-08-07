@@ -233,11 +233,15 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             return False
         
         plant_match = self.plant_pattern.search(action)
+        harvest_match = self.harvest_pattern.search(action)
         pass_match = self.pass_pattern.search(action)
         
         if plant_match:
             field_num = int(plant_match.group(1)) - 1  # Convert to 0-based
             return self._plant_from_hand(player_id, field_num)
+        elif harvest_match:
+            field_num = int(harvest_match.group(1)) - 1
+            return self._harvest_field(player_id, field_num)
         elif pass_match:
             # Can only pass after planting first card
             if not hasattr(self, '_planted_count') or self._planted_count == 0:
@@ -245,13 +249,14 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                 return False
             return True
         else:
-            self.state.set_invalid_move("Use [Plant] <field_number> or [Pass]")
+            self.state.set_invalid_move("Use [Plant] <field_number>, [Harvest] <field_number>, or [Pass]")
             return False
     
     def _process_draw_trade_phase(self, player_id: int, action: str) -> bool:
         """Process actions during draw and trade phase."""
         trade_match = self.trade_pattern.search(action)
         accept_match = self.accept_pattern.search(action)
+        harvest_match = self.harvest_pattern.search(action)
         pass_match = self.pass_trade_pattern.search(action)
         end_trading_match = self.end_trading_pattern.search(action)
         
@@ -272,6 +277,10 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
         elif accept_match:
             trade_id = int(accept_match.group(1))
             return self._accept_trade(player_id, trade_id)
+        
+        elif harvest_match:
+            field_num = int(harvest_match.group(1)) - 1
+            return self._harvest_field(player_id, field_num)
         
         elif pass_match:
             # [Pass] during trading phase - just log that player passed on trading
@@ -330,13 +339,17 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
             return False
         
         draw_match = self.draw_pattern.search(action)
+        harvest_match = self.harvest_pattern.search(action)
         
         if draw_match:
             # Draw 3 cards when [Draw] is used
             self._draw_cards_to_hand(player_id, 3)
             return True
+        elif harvest_match:
+            field_num = int(harvest_match.group(1)) - 1
+            return self._harvest_field(player_id, field_num)
         else:
-            self.state.set_invalid_move("Use [Draw] to draw 3 cards")
+            self.state.set_invalid_move("Use [Draw] to draw 3 cards or [Harvest] <field_number>")
             return False
     
     def _process_harvest_phase(self, player_id: int, action: str) -> bool:
@@ -989,11 +1002,7 @@ BEAN TYPES & PAYOUTS (coins earned : beans needed):"""
                         delattr(self, '_original_active_player')
         
         elif current_phase == "draw":
-            # Move to harvest phase
-            self.state.game_state["current_phase"] = "harvest"
-        
-        elif current_phase == "harvest":
-            # Move to next player's turn - this is the only place we advance the turn
+            # Move to next player's turn - advance turn after draw phase
             self.state.game_state["current_phase"] = "plant"
             
             # Clear all active trades at the end of each turn
