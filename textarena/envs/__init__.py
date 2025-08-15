@@ -97,6 +97,9 @@ register_with_versions(id="Secretary-v0-long",  entry_point="textarena.envs.Secr
 # Set [1 Player]
 register_with_versions(id="Set-v0", entry_point="textarena.envs.Set.env:SetEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS})
 
+# Klondike Solitaire [1 Player]
+register_with_versions(id="Klondike-v0", entry_point="textarena.envs.Klondike.env:KlondikeEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS}, max_turns=200, draw_count=1)
+
 # Slitherlink [1 Player]
 register_with_versions(id="Slitherlink-v0", entry_point="textarena.envs.Slitherlink.env:SlitherlinkEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS}, rows = 4, cols = 4, max_turns = 200)
 
