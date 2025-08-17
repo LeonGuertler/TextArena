@@ -107,6 +107,10 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
             "You can include additional text in your messages, but you must only mention the valid move pattern once.\n"
         )
 
+        #add initial board state if it's player 0
+        if player_id == 0:
+            prompt+=create_board_str(self.board)
+        
         return prompt
 
     def _get_valid_moves(self, player_id: int) -> str:
