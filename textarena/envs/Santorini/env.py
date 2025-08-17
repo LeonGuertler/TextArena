@@ -110,6 +110,7 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
         #add initial board state if it's player 0
         if player_id == 0:
             prompt+=create_board_str(self.board)
+            prompt+=f"\nValid Moves: {self._get_valid_moves(0)}"
         
         return prompt
 
@@ -256,7 +257,7 @@ class SantoriniBaseFixedWorkerEnv(ta.Env):
         self.state.add_observation(
             from_id=ta.GAME_ID,
             to_id=-1,
-            message=create_board_str(self.board),
+            message=create_board_str(self.board, self.state.game_state["valid_moves"]),
             observation_type = ta.ObservationType.GAME_BOARD
         )
 
