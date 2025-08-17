@@ -8,12 +8,10 @@ def test_init():
     env = SantoriniBaseFixedWorkerEnv()
     assert env.rows == 5
     assert env.cols == 5
-    assert env.is_open == True
-    assert env.show_valid == True
+    assert env.error_allowance==10
 
-    env = SantoriniBaseFixedWorkerEnv(is_open=False, show_valid=False)
-    assert env.is_open == False
-    assert env.show_valid == False
+    env = SantoriniBaseFixedWorkerEnv(error_allowance=3)
+    assert env.error_allowance==3
 
 def test_reset():
     """Test environment reset with different player counts."""
