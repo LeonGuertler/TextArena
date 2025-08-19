@@ -103,6 +103,5 @@ If you use **TextArena** in your research, please cite:
 If you have any questions at all, feel free to reach out on discord. The below issues are great starting points if you want to contribute:
 - Transfer the 'How to Contribute' from here to individual issues
 - Make RushHour board generation algorithmic
-- extend 2048 to arbitrary board sizes (should be very straight forward)
 - extend Fifteenpuzzel to arbitrary sizes
 - Add a nice end-of-game screen to the SimpleRenderWrapper visualizations
