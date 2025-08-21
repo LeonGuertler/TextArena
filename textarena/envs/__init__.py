@@ -580,3 +580,18 @@ register_with_versions(id="ScorableGames-v0-7players",
     entry_point="textarena.envs.ScorableGames.env:ScorableGamesEnv", 
     wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS}, 
     game_config="base_7players", max_rounds=140, invalid_move_default="[Accept]")
+
+register_with_versions(id="WinAsMuchAsYouCan-v0", 
+    entry_point="textarena.envs.WinAsMuchAsYouCan.env:WinAsMuchAsYouCanEnv", 
+    wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS})
+
+# NegotiateToSurvive [5 Players] - Resource trading survival game
+register_with_versions(id="NegotiateToSurvive-v0-distributive", 
+    entry_point="textarena.envs.NegotiateToSurvive.env:NegotiateToSurviveEnv", 
+    wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS}, 
+    game_variant="distributive", max_rounds=100, starting_coins=50)
+
+register_with_versions(id="NegotiateToSurvive-v0-integrative", 
+    entry_point="textarena.envs.NegotiateToSurvive.env:NegotiateToSurviveEnv", 
+    wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS}, 
+    game_variant="integrative", max_rounds=100, starting_coins=50)
