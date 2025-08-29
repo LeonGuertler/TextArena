@@ -584,3 +584,8 @@ register_with_versions(id="ScorableGames-v0-7players",
     entry_point="textarena.envs.ScorableGames.env:ScorableGamesEnv", 
     wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS}, 
     game_config="base_7players", max_rounds=140, invalid_move_default="[Accept]")
+
+register_with_versions(id="ScorableGames-v0-medical-ethics", 
+    entry_point="textarena.envs.ScorableGames.env:ScorableGamesEnv", 
+    wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS}, 
+    game_config="medical_ethics", max_rounds=80, invalid_move_default="[Accept]")
