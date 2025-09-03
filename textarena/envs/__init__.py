@@ -195,6 +195,7 @@ register_with_versions(id="ColonelBlotto-v0-extreme",   entry_point="textarena.e
 register_with_versions(id="ConnectFour-v0",       entry_point="textarena.envs.ConnectFour.env:ConnectFourEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS}, is_open=True,  num_rows=6,  num_cols=7  )
 register_with_versions(id="ConnectFour-v0-blind", entry_point="textarena.envs.ConnectFour.env:ConnectFourEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS}, is_open=False, num_rows=6,  num_cols=7  )
 register_with_versions(id="ConnectFour-v0-large", entry_point="textarena.envs.ConnectFour.env:ConnectFourEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS}, is_open=True,  num_rows=12, num_cols=15 )
+register_with_versions(id="ConnectFour-v1",       entry_point="textarena.envs.ConnectFour.env-v1:ConnectFourEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS}, is_open=True,  num_rows=5,  num_cols=4 )
 
 # Coup [2 Player]
 # TODO
@@ -356,6 +357,7 @@ register_with_versions(id="Tak-v0-hard", entry_point="textarena.envs.Tak.env:Tak
 
 # TicTacToe [2 Player]
 register_with_versions(id="TicTacToe-v0", entry_point="textarena.envs.TicTacToe.env:TicTacToeEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS})
+register_with_versions(id="TicTacToe-v1", entry_point="textarena.envs.TicTacToe.env-v1:TicTacToeEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS})
 
 # TruthAndDeception [2 Player]
 register_with_versions(id="TruthAndDeception-v0",         entry_point="textarena.envs.TruthAndDeception.env:TruthAndDeceptionEnv", wrappers={"default": [LLMObservationWrapper], "-train": CONVERSATIONAL_WRAPPERS}, max_turns=6    )
