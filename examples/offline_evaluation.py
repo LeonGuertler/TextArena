@@ -1,8 +1,7 @@
 """
 In addition to evaluating your model online, here is a short example of how to
 evaluate it offline against a fixed opponent.
-We evaluate Qwen/Qwen3-1.7B against a fixed opponent
-(google/gemini-2.0-flash-001).
+We evaluate Groq's llama3-70b-8192 against a fixed opponent (Groq's mixtral-8x7b-32768).
 """
 import os
 from collections import defaultdict
@@ -15,7 +14,7 @@ import textarena as ta
 
 NUM_EPISODES = 8
 EVAL_ENV_IDS = [("TicTacToe-v0", 2), ("Snake-v0", 4)]  # (env-id, num_players)
-OPPONENT_NAME = "google/gemini-2.0-flash-001"
+OPPONENT_NAME = "moonshotai/kimi-k2:free"
 FILE_NAME = "eval_summary.csv"
 
 # Model to evaluate

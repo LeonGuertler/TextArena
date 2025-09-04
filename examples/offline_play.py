@@ -5,11 +5,12 @@ import textarena as ta
 
 agents = {
     0: ta.agents.HumanAgent(),
-    1: ta.agents.OpenRouterAgent(model_name="google/gemini-2.0-flash-lite-001"),
+    1: ta.agents.OpenRouterAgent(model_name="moonshotai/kimi-k2:free"), 
 }
 
 # initialize the environment
-env = ta.make(env_id="TicTacToe-v0-train")
+#env = ta.make(env_id="TicTacToe-v0-train")
+env = ta.make(env_id="Chess-v0") 
 env.reset(num_players=len(agents))
 
 # main game loop

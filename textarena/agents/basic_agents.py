@@ -6,7 +6,7 @@ from typing import Optional, Tuple
 from textarena.core import Agent
 import textarena as ta 
 
-__all__ = ["HumanAgent", "OpenRouterAgent", "GeminiAgent", "OpenAIAgent", "HFLocalAgent", "CerebrasAgent", "AWSBedrockAgent", "AnthropicAgent"]
+__all__ = ["HumanAgent", "OpenRouterAgent", "GeminiAgent", "OpenAIAgent", "HFLocalAgent", "CerebrasAgent", "AWSBedrockAgent", "AnthropicAgent", "GroqAgent", "OllamaAgent", "LlamaCppAgent"]
 STANDARD_GAME_PROMPT = "You are a competitive game player. Make sure you read the game instructions carefully, and always follow the required format."
     
 
@@ -480,3 +480,113 @@ class AnthropicAgent(Agent):
         if not isinstance(observation, str):
             raise ValueError(f"Observation must be a string. Received type: {type(observation)}")
         return self._retry_request(observation)
+
+
+class GroqAgent(Agent):
+    """Agent class using the Groq API to generate responses."""
+    def __init__(self, model_name: str, system_prompt: Optional[str]=STANDARD_GAME_PROMPT,
+                 verbose: bool=False, **kwargs):
+        super().__init__()
+        self.model_name = model_name
+        self.system_prompt = system_prompt
+        self.verbose = verbose
+        self.kwargs = kwargs
+        try:
+            from groq import Groq
+        except ImportError:
+            raise ImportError("Groq package is required for GroqAgent. Install it with: pip install groq")
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise ValueError("Groq API key not found. Please set GROQ_API_KEY.")
+        self.client = Groq(api_key=api_key)
+
+    def _make_request(self, observation: str) -> str:
+        messages=[{"role":"system","content":self.system_prompt},
+                  {"role":"user","content":observation}]
+        resp = self.client.chat.completions.create(
+            model=self.model_name, messages=messages, n=1, **self.kwargs)
+        return resp.choices[0].message.content.strip()
+
+    def _retry_request(self, observation: str, retries: int=3, delay: int=5) -> str:
+        last_exc=None
+        for i in range(1, retries+1):
+            try:
+                out = self._make_request(observation)
+                if self.verbose: print(f"\nObservation: {observation}\nResponse: {out}")
+                return out
+            except Exception as e:
+                last_exc=e
+                print(f"Attempt {i} failed with error: {e}")
+                if i < retries: time.sleep(delay)
+        raise last_exc
+
+    def __call__(self, observation: str) -> str:
+        if not isinstance(observation, str):
+            raise ValueError(f"Observation must be a string. Received {type(observation)}")
+        return self._retry_request(observation)
+
+
+class OllamaAgent(Agent):
+    """Local agent using the Ollama Python client."""
+    def __init__(self, model_name: str, system_prompt: Optional[str]=STANDARD_GAME_PROMPT,
+                 host: Optional[str]=None, verbose: bool=False, **kwargs):
+        super().__init__()
+        self.model_name = model_name
+        self.system_prompt = system_prompt
+        self.verbose = verbose
+        self.kwargs = kwargs
+        try:
+            from ollama import Client
+        except ImportError:
+            raise ImportError("Ollama package is required for OllamaAgent. Install it with: pip install ollama")
+        host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.client = Client(host=host)
+
+    def _make_request(self, observation: str) -> str:
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": observation}
+        ]
+        resp = self.client.chat(model=self.model_name, messages=messages, **self.kwargs)
+        # Response schema: {'message': {'role': 'assistant', 'content': '...'}, ...}
+        return resp["message"]["content"].strip()
+
+    def __call__(self, observation: str) -> str:
+        if not isinstance(observation, str):
+            raise ValueError(f"Observation must be a string. Received {type(observation)}")
+        try:
+            out = self._make_request(observation)
+            if self.verbose: print(f"\nObservation: {observation}\nResponse: {out}")
+            return out
+        except Exception as e:
+            return f"ERROR (Ollama): {e}"
+
+
+class LlamaCppAgent(Agent):
+    """Local agent using llama.cpp Python bindings (llama-cpp-python)."""
+    def __init__(self, model_path: str, system_prompt: Optional[str]=STANDARD_GAME_PROMPT,
+                 n_ctx: int=8192, n_threads: Optional[int]=None, chat_format: Optional[str]=None,
+                 verbose: bool=False, **gen_kwargs):
+        super().__init__()
+        self.system_prompt = system_prompt
+        self.verbose = verbose
+        self.gen_kwargs = gen_kwargs
+        try:
+            from llama_cpp import Llama
+        except ImportError:
+            raise ImportError("llama-cpp-python is required. Install with: pip install llama-cpp-python")
+        # chat_format can be None or e.g. "llama-2", "chatml", "gemma"
+        self.llm = Llama(model_path=model_path, n_ctx=n_ctx, n_threads=n_threads, chat_format=chat_format)
+
+    def __call__(self, observation: str) -> str:
+        if not isinstance(observation, str):
+            raise ValueError(f"Observation must be a string. Received {type(observation)}")
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": observation}
+        ]
+        # Returns OpenAI-like dict; see docs for parameters (temperature, top_p, max_tokens, stop, etc.)
+        out = self.llm.create_chat_completion(messages=messages, **self.gen_kwargs)
+        text = out["choices"][0]["message"]["content"].strip()
+        if self.verbose: print(f"\nObservation: {observation}\nResponse: {text}")
+        return text
