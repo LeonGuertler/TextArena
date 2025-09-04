@@ -591,6 +591,12 @@ register_with_versions(id="ScorableGames-v0-7players",
     wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS}, 
     game_config="base_7players", max_rounds=140, invalid_move_default="[Accept]")
 
+
+# Bohnanza [3-5 Players] - Bean trading game
+register_with_versions(id="Bohnanza-v0", 
+    entry_point="textarena.envs.Bohnanza.env:BohnanzaEnv", 
+    wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS})
+
 # UltimateTexasHoldem [1 Player]
 register_with_versions(id="UltimateTexasHoldem-v0",
     entry_point="textarena.envs.UltimateTexasHoldem.env:UltimateTexasHoldemEnv",
