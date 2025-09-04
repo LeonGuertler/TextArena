@@ -362,6 +362,9 @@ register_with_versions(id="TruthAndDeception-v0",         entry_point="textarena
 register_with_versions(id="TruthAndDeception-v0-long",    entry_point="textarena.envs.TruthAndDeception.env:TruthAndDeceptionEnv", wrappers={"default": [LLMObservationWrapper], "-train": CONVERSATIONAL_WRAPPERS}, max_turns=12   )
 register_with_versions(id="TruthAndDeception-v0-extreme", entry_point="textarena.envs.TruthAndDeception.env:TruthAndDeceptionEnv", wrappers={"default": [LLMObservationWrapper], "-train": CONVERSATIONAL_WRAPPERS}, max_turns=50   )
 
+# TwoDollar [2 Player]
+register_with_versions(id="TwoDollar-v0", entry_point="textarena.envs.TwoDollar.env:TwoDollarEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": CONVERSATIONAL_WRAPPERS})
+
 # UltimateTicTacToe [2 Player]
 register_with_versions(id="UltimateTicTacToe-v0", entry_point="textarena.envs.UltimateTicTacToe.env:UltimateTicTacToeEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS})
 
