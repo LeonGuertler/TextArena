@@ -147,7 +147,13 @@ class SecretMafiaEnv(ta.Env):
         role_obj = self.roles[player_id]
         return role_obj.get_prompt(player_id = player_id, player_roles = self.player_roles, num_players = self.state.num_players, num_discussion_rounds = self.discussion_rounds)
 
-    def step(self, action: str) -> Tuple[bool, ta.Info]:
+    def step(self, action: Optional[str]) -> Tuple[bool, ta.Info]:
+        # Type checking and conversion
+        if action is None:
+            action = ""
+        elif not isinstance(action, str):
+            raise TypeError(f"Expected str or None, got {type(action).__name__}: {action!r}")
+    
         pid = self.state.current_player_id
         phase_dispatch = {
             Phase.DAY_DISCUSSION: self._handle_discussion, Phase.DAY_VOTING: self._handle_day_vote, Phase.NIGHT_MAFIA: self._handle_mafia_vote, 
