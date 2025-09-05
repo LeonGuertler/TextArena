@@ -113,7 +113,7 @@ class SecretMafiaEnv(ta.Env):
         self.discussion_rounds = discussion_rounds
 
     def reset(self, num_players: int, seed: Optional[int] = None):
-        assert 6 <= num_players <= 15, "Player count must be between 5 and 15."
+        assert 6 <= num_players <= 15, "Player count must be between 6 and 15."
         self.state = ta.TeamMultiPlayerState(num_players=num_players, seed=seed)
         self._assign_roles(num_players)
         self.phase: Phase = Phase.NIGHT_MAFIA
