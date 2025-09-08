@@ -94,6 +94,12 @@ register_with_versions(id="RushHour-v0", entry_point="textarena.envs.RushHour.en
 register_with_versions(id="Secretary-v0",       entry_point="textarena.envs.Secretary.env:SecretaryEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS}, N=5    )
 register_with_versions(id="Secretary-v0-long",  entry_point="textarena.envs.Secretary.env:SecretaryEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS}, N=10   )
 
+# Set [1 Player]
+register_with_versions(id="Set-v0", entry_point="textarena.envs.Set.env:SetEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS})
+
+# Klondike Solitaire [1 Player]
+register_with_versions(id="Klondike-v0", entry_point="textarena.envs.Klondike.env:KlondikeEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS}, max_turns=200, draw_count=1)
+
 # Slitherlink [1 Player]
 register_with_versions(id="Slitherlink-v0", entry_point="textarena.envs.Slitherlink.env:SlitherlinkEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS}, rows = 4, cols = 4, max_turns = 200)
 
@@ -356,6 +362,9 @@ register_with_versions(id="TruthAndDeception-v0",         entry_point="textarena
 register_with_versions(id="TruthAndDeception-v0-long",    entry_point="textarena.envs.TruthAndDeception.env:TruthAndDeceptionEnv", wrappers={"default": [LLMObservationWrapper], "-train": CONVERSATIONAL_WRAPPERS}, max_turns=12   )
 register_with_versions(id="TruthAndDeception-v0-extreme", entry_point="textarena.envs.TruthAndDeception.env:TruthAndDeceptionEnv", wrappers={"default": [LLMObservationWrapper], "-train": CONVERSATIONAL_WRAPPERS}, max_turns=50   )
 
+# TwoDollar [2 Player]
+register_with_versions(id="TwoDollar-v0", entry_point="textarena.envs.TwoDollar.env:TwoDollarEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": CONVERSATIONAL_WRAPPERS})
+
 # UltimateTicTacToe [2 Player]
 register_with_versions(id="UltimateTicTacToe-v0", entry_point="textarena.envs.UltimateTicTacToe.env:UltimateTicTacToeEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": BOARDGAME_WRAPPERS})
 
@@ -584,3 +593,9 @@ register_with_versions(id="ScorableGames-v0-7players",
     entry_point="textarena.envs.ScorableGames.env:ScorableGamesEnv", 
     wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS}, 
     game_config="base_7players", max_rounds=140, invalid_move_default="[Accept]")
+
+# UltimateTexasHoldem [1 Player]
+register_with_versions(id="UltimateTexasHoldem-v0",
+    entry_point="textarena.envs.UltimateTexasHoldem.env:UltimateTexasHoldemEnv",
+    wrappers={"default": DEFAULT_WRAPPERS, "-train": [GameMessagesObservationWrapper, ActionFormattingWrapper]},
+    max_turns = 1000, start_chips = 1000, ante_amount = 25)
