@@ -6,7 +6,7 @@ from textarena.envs.Chess.renderer import create_board_str
 
 
 class ChessEnv(ta.Env):
-    def __init__(self, is_open: bool=True, max_turns: int=30, show_valid: bool=True):
+    def __init__(self, is_open: bool=True, max_turns: int=30, show_valid: bool=True, error_allowance: int = 1):
         """
         Args:
             is_open (bool): If True, both players can see the current board state. If False, players receive minimal information.
@@ -16,11 +16,12 @@ class ChessEnv(ta.Env):
         self.max_turns = max_turns
         self.is_open = is_open 
         self.show_valid = show_valid 
+        self.error_allowance = error_allowance
 
     def get_board_str(self): return create_board_str(board=self.state.game_state["board"])
 
     def reset(self, num_players: int, seed: Optional[int]=None):
-        self.state = ta.TwoPlayerState(num_players=num_players, max_turns=self.max_turns, seed=seed)
+        self.state = ta.TwoPlayerState(num_players=num_players, max_turns=self.max_turns, seed=seed, error_allowance=self.error_allowance)
         board = chess.Board()
         valid_moves = ', '.join([f'[{move.uci()}]' for move in board.legal_moves])
         game_state = {"board": board, "valid_moves": valid_moves}

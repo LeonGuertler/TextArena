@@ -5,15 +5,16 @@ import textarena as ta
 from textarena.envs.TicTacToe.renderer import create_board_str
 
 class TicTacToeEnv(ta.Env):
-    def __init__(self):
+    def __init__(self, error_allowance: int = 1):
         super().__init__()
         self.cell_mapping = {i * 3 + j: (i, j) for i in range(3) for j in range(3)}
+        self.error_allowance = error_allowance
 
     def get_board_str(self): return create_board_str(board=self.state.game_state["board"])
     def _render_board(self): return "\n---+---+---\n".join("|".join(f" {self.state.game_state['board'][r][c]} " if self.state.game_state['board'][r][c] else f" {str(r * 3 + c)} " for c in range(3)) for r in range(3))
     
     def reset(self, num_players: int, seed: Optional[int]=None):
-        self.state = ta.TwoPlayerState(num_players=num_players, seed=seed)
+        self.state = ta.TwoPlayerState(num_players=num_players, seed=seed, error_allowance=self.error_allowance)
         self.state.reset(game_state={"board": [['' for _ in range(3)] for _ in range(3)]}, player_prompt_function=self._prompt)
         self._observer_current_state()
 

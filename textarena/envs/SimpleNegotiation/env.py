@@ -6,8 +6,10 @@ from textarena.envs.SimpleNegotiation.renderer import create_board_str
 
 
 class SimpleNegotiationEnv(ta.Env):
-    def __init__(self, max_turns: Optional[int] = 10):
+    def __init__(self, max_turns: Optional[int] = 10, error_allowance: int = 1):
         self.max_turns = max_turns
+        self.error_allowance = error_allowance
+
         self.resource_names = ["Wheat", "Wood", "Sheep", "Brick", "Ore"]
         self.base_values = {"Wheat": 5, "Wood": 10, "Sheep": 15, "Brick": 25, "Ore": 40}
         self.accept_pattern = re.compile(r"\[Accept\]", re.IGNORECASE)
@@ -21,7 +23,7 @@ class SimpleNegotiationEnv(ta.Env):
         )
 
     def reset(self, num_players: int, seed: Optional[int] = None):
-        self.state = ta.TwoPlayerState(num_players=num_players, max_turns=self.max_turns, seed=seed)
+        self.state = ta.TwoPlayerState(num_players=num_players, max_turns=self.max_turns, seed=seed, error_allowance=self.error_allowance)
         player_resources = {0: {resource: random.randint(5, 25) for resource in self.resource_names}, 1: {resource: random.randint(5, 25) for resource in self.resource_names}}
         game_state = {"current_offer": None, "player_resources": player_resources, "player_values": {}, "trade_history": []}
 

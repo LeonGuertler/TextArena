@@ -13,11 +13,12 @@ class PokerEnv(ta.Env):
     _BET_RE = re.compile(r"\[bet (\d+)\]", re.IGNORECASE)
     _RAISE_RE = re.compile(r"\[raise (\d+)\]", re.IGNORECASE)
 
-    def __init__(self, num_rounds: int = 10, starting_chips: int = 1_000, small_blind: int = 10, big_blind: int = 20):
+    def __init__(self, num_rounds: int = 10, starting_chips: int = 1_000, small_blind: int = 10, big_blind: int = 20, error_allowance: int = 1):
         self.num_rounds = num_rounds
         self.starting_chips = starting_chips
         self.small_blind = small_blind
         self.big_blind = big_blind
+        self.error_allowance = error_allowance
 
         self.suits = ["♠", "♥", "♦", "♣"]
         self.ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
@@ -43,7 +44,7 @@ class PokerEnv(ta.Env):
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         assert 2 <= num_players <= 15, "The number of players has to be 2≤x≤15"
-        self.state = ta.FFAMultiPlayerState(num_players=num_players, seed=seed)
+        self.state = ta.FFAMultiPlayerState(num_players=num_players, seed=seed, error_allowance=self.error_allowance)
         gs = {
             "round": 1, "betting_round": 0, "player_chips": {pid: self.starting_chips for pid in range(num_players)}, "player_hands": {pid: [] for pid in range(num_players)},
             "community_cards": [], "visible_community_cards": [], "pot": 0, "current_bet": 0, "player_bets": {pid: 0 for pid in range(num_players)}, "button": 0, "folded_players": set(),

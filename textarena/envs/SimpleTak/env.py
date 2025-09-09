@@ -6,18 +6,19 @@ import textarena as ta
 from textarena.envs.SimpleTak.renderer import create_board_str
 
 class SimpleTakEnv(ta.Env):
-    def __init__(self, board_size: int = 5):
+    def __init__(self, board_size: int = 5, error_allowance: int = 1):
         """
         Args:
             board_size (int): The size of the NxN board (default 5).
         """
         super().__init__()
         self.board_size = board_size
+        self.error_allowance = error_allowance
         self.cell_mapping = {i: (i // board_size, i % board_size) for i in range(board_size * board_size)}
 
     def get_board_str(self): return create_board_str(board=self.state.game_state["board"], board_size=self.board_size)
     def reset(self, num_players: int = 2, seed: Optional[int] = None):
-        self.state = ta.TwoPlayerState(num_players=num_players, seed=seed)
+        self.state = ta.TwoPlayerState(num_players=num_players, seed=seed, error_allowance=self.error_allowance)
         self.state.reset(game_state={"board": [['' for _ in range(self.board_size)] for _ in range(self.board_size)]}, player_prompt_function=self._prompt)
         self._observe_current_state()
 

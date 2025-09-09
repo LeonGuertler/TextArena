@@ -103,7 +103,7 @@ class SecretMafiaEnv(ta.Env):
         "Doctor":    Doctor,
         "Detective": Detective,
     }
-    def __init__(self, mafia_ratio: float = 0.25, discussion_rounds: int = 3):
+    def __init__(self, mafia_ratio: float = 0.25, discussion_rounds: int = 3, error_allowance: int = 1):
         """
         Args:
             mafia_ratio (float): Ratio of Mafia members to total players (default: 0.25)
@@ -111,10 +111,11 @@ class SecretMafiaEnv(ta.Env):
         """
         self.mafia_ratio = mafia_ratio
         self.discussion_rounds = discussion_rounds
+        self.error_allowance = error_allowance
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         assert 6 <= num_players <= 15, "Player count must be between 5 and 15."
-        self.state = ta.TeamMultiPlayerState(num_players=num_players, seed=seed)
+        self.state = ta.TeamMultiPlayerState(num_players=num_players, seed=seed, error_allowance=self.error_allowance)
         self._assign_roles(num_players)
         self.phase: Phase = Phase.NIGHT_MAFIA
         game_state = {

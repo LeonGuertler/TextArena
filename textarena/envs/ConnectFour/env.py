@@ -5,7 +5,7 @@ import textarena as ta
 from textarena.envs.ConnectFour.renderer import create_board_str
 
 class ConnectFourEnv(ta.Env):
-    def __init__(self, is_open: bool=True, num_rows: int=6, num_cols: int=7):
+    def __init__(self, is_open: bool=True, num_rows: int=6, num_cols: int=7, error_allowance: int = 1):
         """
         Args:
             is_open (bool): If True, the game state is visible to the players.
@@ -15,12 +15,13 @@ class ConnectFourEnv(ta.Env):
         self.is_open = is_open 
         self.num_rows = num_rows 
         self.num_cols = num_cols 
+        self.error_allowance = error_allowance
 
     def get_board_str(self):
         return create_board_str(board=self.state.game_state["board"])
 
     def reset(self, num_players: int, seed: Optional[int] = None):
-        self.state = ta.TwoPlayerState(num_players=num_players, seed=seed)
+        self.state = ta.TwoPlayerState(num_players=num_players, seed=seed, error_allowance=self.error_allowance)
         game_state = {"board": [["." for _ in range(self.num_cols)] for _ in range(self.num_rows)]} 
         self.state.reset(game_state=game_state, player_prompt_function=self._generate_player_prompt)
         self.state.add_observation(message=(f"Board state:\n{self._render_board()}" if self.is_open else "The game board is not visible to players."), observation_type=ta.ObservationType.GAME_BOARD)
