@@ -4,13 +4,23 @@ import textarena as ta
 
 
 agents = {
-    0: ta.agents.HumanAgent(),
-    1: ta.agents.OpenRouterAgent(model_name="moonshotai/kimi-k2:free"), 
+    0: ta.agents.TTTAgent(),
+    1: ta.agents.TTTAgent(),
 }
 
+# agents = {
+#     0: ta.agents.C4Agent(),
+#     1: ta.agents.C4Agent(),
+# }
+
+# agents = {
+#     0: ta.agents.HumanAgent(),
+#     1: ta.agents.HumanAgent(),
+# }
+
 # initialize the environment
-#env = ta.make(env_id="TicTacToe-v0-train")
-env = ta.make(env_id="Chess-v0") 
+env = ta.make(env_id="TicTacToe-v0", summary_output_path="ttt_summary.json")
+# env = ta.make(env_id="ConnectFour-v0", summary_output_path="c4_summary.json")
 env.reset(num_players=len(agents))
 
 # main game loop

@@ -129,8 +129,6 @@ class C4Agent(Agent):
             self._seen_moves = moves_now
 
     def __call__(self, observation: str) -> str:
-        print("\n\n+++ +++ +++")  # visualization marker
-
         # If new game detected, reset local state
         self._maybe_reset(observation)
         # Bring our local pos_str up-to-date from the observation
@@ -160,7 +158,7 @@ class C4Agent(Agent):
         self._seen_moves.append(move)
 
         # Return TextArena-friendly format (your validator accepts “[col x]”)
-        return f"[col {move}]"
+        return f"[{move}]"
 
 class TTTAgent(Agent):
     """

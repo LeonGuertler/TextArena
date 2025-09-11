@@ -5,11 +5,12 @@ import textarena as ta
 from textarena.envs.TicTacToe.renderer import create_board_str
 
 class TicTacToeEnv(ta.Env):
-    def __init__(self, error_allowance: int = 1):
+    def __init__(self, error_allowance: int = 1, summary_output_path="ttt_summary.json"):
         super().__init__()
         self.cell_mapping = {i * 3 + j: (i, j) for i in range(3) for j in range(3)}
         self.error_allowance = error_allowance
         self._last_eval = None
+        self.summary_output_path = summary_output_path
 
     def get_board_str(self): return create_board_str(board=self.state.game_state["board"])
     def _render_board(self): return "\n---+---+---\n".join("|".join(f" {self.state.game_state['board'][r][c]} " if self.state.game_state['board'][r][c] else f" {str(r * 3 + c)} " for c in range(3)) for r in range(3))
@@ -85,8 +86,10 @@ class TicTacToeEnv(ta.Env):
             "action_level": action_level, 
             "action_score": action_score,  
         })
+        self.save_action_levels_json(self.summary_output_path)
 
         self._observer_current_state()
+        
         return self.state.step()
     def _check_winner(self) -> bool:
         board = self.state.game_state["board"]
@@ -188,36 +191,30 @@ class TicTacToeEnv(ta.Env):
             observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION,
         )
 
-    def save_action_levels_json(self, filepath: str, include_scores: bool = False):
+    def save_action_levels_json(self, filepath: str):
         """
         {
         "player_0": { "actions": [0,3,7], "levels": [1,2,1] },
         "player_1": { "actions": [4,2,8], "levels": [1,1,3] }
         }
         """
-        p0_actions, p0_levels, p0_scores = [], [], []
-        p1_actions, p1_levels, p1_scores = [], [], []
+        p0_actions, p0_levels = [], []
+        p1_actions, p1_levels = [], []
 
         for t in self.state.game_state.get("turn_summaries", []):
             action = t.get("applied")
             level  = t.get("action_level")
-            score  = t.get("action_score")
             if t["player_id"] == 0:
                 p0_actions.append(action)
                 p0_levels.append(level)
-                if include_scores: p0_scores.append(score)
             else:  # player_id == 1
                 p1_actions.append(action)
                 p1_levels.append(level)
-                if include_scores: p1_scores.append(score)
 
         out = {
             "player_0": {"actions": p0_actions, "levels": p0_levels},
             "player_1": {"actions": p1_actions, "levels": p1_levels},
         }
-        if include_scores:
-            out["player_0"]["scores"] = p0_scores
-            out["player_1"]["scores"] = p1_scores
 
         import json, os
         os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
