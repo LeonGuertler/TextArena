@@ -507,6 +507,7 @@ That is a fair deal for both off us.
         """End the game and determine winners."""
         survival_met = self._check_game_end()
         
+        rewards = {}
         if survival_met:
             self.state.add_observation(
                 from_id=ta.GAME_ID,
@@ -523,18 +524,29 @@ That is a fair deal for both off us.
                 if len(winners) == 1:
                     winner_id = winners[0]
                     for pid in range(self.num_players):
-                        self.state.game_info[pid]["winner"] = (pid == winner_id)
+                        if pid==winner_id:
+                            self.state.game_info[pid]["winner"] = True
+                            rewards[pid] = 1
+                        else:
+                            self.state.game_info[pid]["winner"] = False
+                            rewards[pid] = -1
                     self.state.step_info["winner_reason"] = f"Player {winner_id} wins with {max_coins} coins"
                 else:
                     # Tie
                     for pid in range(self.num_players):
                         self.state.game_info[pid]["winner"] = False
+                        #co-winners get drawn; others get lost
+                        if pid in winners:
+                            rewards[pid] = 0
+                        else:
+                            rewards[pid] = -1
                     self.state.step_info["draw_reason"] = f"Tie with {max_coins} coins among players {winners}"
             
             elif self.game_variant == "integrative":
                 # All players win
                 for pid in range(self.num_players):
                     self.state.game_info[pid]["winner"] = True
+                    rewards[pid] = 1
                 self.state.step_info["winner_reason"] = "All players survived together"
         
         else:
@@ -548,14 +560,8 @@ That is a fair deal for both off us.
             
             for pid in range(self.num_players):
                 self.state.game_info[pid]["winner"] = False
+                rewards[pid] = -1
             self.state.step_info["draw_reason"] = "Survival conditions not met"
-        
-        # Set rewards based on coins (normalized)
-        max_coins = max(self.player_coins.values()) if self.player_coins.values() else 1
-        rewards = {}
-        for pid, coins in self.player_coins.items():
-            normalized_coins = int((coins / max_coins) * 100) if max_coins > 0 else 0
-            rewards[pid] = max(0, normalized_coins)
         
         self.state.rewards = rewards
         self.state.done = True
