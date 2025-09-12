@@ -330,12 +330,15 @@ Prepare for your meeting with Sally Soprano's agent.
             
             if winner == "Sally's Agent":
                 self.state.set_winners([0], decision)
+                self.rewards = {0: 1, 1: -1}
                 return
             elif winner == "Business Manager":
                 self.state.set_winners([1], decision)
+                self.rewards = {0: -1, 1: 1}
                 return
             elif winner == "Draw":
                 self.state.set_draw(decision)
+                self.rewards = {0: 0, 1: 0}
                 return
         
         # If parsing fails, default to draw
