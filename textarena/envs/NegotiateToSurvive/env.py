@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import textarena as ta
 from textarena.state import TeamMultiPlayerState
 from textarena.envs.NegotiateToSurvive.renderer import (
-    render_game_state,
+    get_board_str,
     render_resources_and_coins
 )
 
@@ -566,7 +566,7 @@ That is a fair deal for both off us.
         observation = self.state.get_current_player_observation()
         
         # Add current game state
-        game_state_info = render_game_state(
+        game_state_info = get_board_str(
             self.player_resources,
             self.resource_history,
             self.proposals,

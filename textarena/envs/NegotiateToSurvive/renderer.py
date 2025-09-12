@@ -1,7 +1,7 @@
 from typing import Dict, List, Any, Optional
 
 
-def render_game_state(player_resources: Dict[int, List[str]], 
+def get_board_str(player_resources: Dict[int, List[str]], 
                      resource_history: Dict[str, List[int]], 
                      proposals: Dict[int, Dict], 
                      game_variant: str) -> str:
@@ -122,73 +122,5 @@ def render_resources_and_coins(player_id: int,
             lines.append(f"Player {pid} (YOU): {coins} coins")
         else:
             lines.append(f"Player {pid}: {coins} coins")
-    
-    return "\n".join(lines)
-
-
-def render_whisper_notification(from_player: int, to_player: int, current_player: int) -> str:
-    """Render whisper notification for players who aren't involved."""
-    if current_player == from_player or current_player == to_player:
-        return ""  # Don't show notification to participants
-    
-    return f"Player {from_player} whispered to Player {to_player}"
-
-
-def render_trade_summary(proposer: int, accepter: int, coins: int, resource: str) -> str:
-    """Render a trade completion summary."""
-    return f"TRADE: Player {accepter} gave {resource} to Player {proposer} for {coins} coins"
-
-
-def render_survival_status(resource_history: Dict[str, List[int]], game_variant: str) -> str:
-    """Render current survival status."""
-    resources_obtained = set()
-    for resource, history in resource_history.items():
-        if history:
-            resources_obtained.add(resource)
-    
-    if game_variant == "distributive":
-        target = 4
-        progress = f"{len(resources_obtained)} out of 4 resources obtained"
-        if len(resources_obtained) >= 4:
-            return f"SURVIVAL CONDITIONS MET! ({progress})"
-        else:
-            return f"Survival progress: {progress}"
-    else:  # integrative
-        target = 5
-        progress = f"{len(resources_obtained)} out of 5 resources obtained"
-        if len(resources_obtained) >= 5:
-            return f"SURVIVAL CONDITIONS MET! ({progress})"
-        else:
-            return f"Survival progress: {progress}"
-
-
-def render_player_summary(player_resources: Dict[int, str], player_coins: Dict[int, int]) -> str:
-    """Render a summary of all players' resources and coins."""
-    lines = ["PLAYER SUMMARY:"]
-    lines.append("=" * 15)
-    
-    for pid in sorted(player_resources.keys()):
-        resource = player_resources.get(pid, "None")
-        coins = player_coins.get(pid, 0)
-        lines.append(f"Player {pid}: {resource}, {coins} coins")
-    
-    return "\n".join(lines)
-
-
-def render_resource_flow(resource_history: Dict[str, List[int]]) -> str:
-    """Render the flow of resources between players."""
-    lines = ["RESOURCE FLOW:"]
-    lines.append("=" * 15)
-    
-    resources = ["food", "water", "shelter", "medicine", "clothing"]
-    for resource in resources:
-        history = resource_history.get(resource, [])
-        if len(history) > 1:
-            flow = " -> ".join([f"P{pid}" for pid in history])
-            lines.append(f"{resource.capitalize()}: {flow}")
-        elif len(history) == 1:
-            lines.append(f"{resource.capitalize()}: P{history[0]} (original)")
-        else:
-            lines.append(f"{resource.capitalize()}: No history")
     
     return "\n".join(lines)
