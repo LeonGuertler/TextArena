@@ -383,9 +383,13 @@ Remember: Roland needs 3000 or more oranges for rind at 250000 dollars or less, 
         
         if winner == "Roland":
             self.state.set_winners([0], final_decision)
+            self.rewards = {0:1, 1:-1}
         elif winner == "Jones":
             self.state.set_winners([1], final_decision)
+            self.rewards = {0:-1, 1:1}
         elif winner == "Both":
             self.state.set_winners([0, 1], final_decision)
+            self.rewards = {0:1, 1:1}
         else:
             self.state.set_winners([], final_decision)
+            self.rewards = {0:0, 1:0}
