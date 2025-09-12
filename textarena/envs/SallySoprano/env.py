@@ -2,7 +2,7 @@ import re
 from typing import Any, Dict, Optional, Tuple
 
 import textarena as ta
-from textarena.envs.SallySoprano.renderer import render_negotiation_state
+from textarena.envs.SallySoprano.renderer import get_board_str
 
 
 class SallySopranoEnv(ta.Env):
@@ -109,7 +109,7 @@ Prepare for your meeting with Sally Soprano's agent.
 
     def render(self, player_id: Optional[int] = None) -> str:
         """Render the current state for a player."""
-        return render_negotiation_state(
+        return get_board_str(
             self.state.game_state, 
             player_id
         )
