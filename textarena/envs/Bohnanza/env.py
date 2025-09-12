@@ -3,7 +3,7 @@ import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import textarena as ta
-from textarena.envs.Bohnanza.renderer import create_board_str
+from textarena.envs.Bohnanza.renderer import get_board_str
 
 
 class BohnanzaEnv(ta.Env):
@@ -1094,7 +1094,7 @@ Game ends after deck is reshuffled 3 times. All remaining fields are harvested a
         observation = self.state.get_current_player_observation()
         
         # Add current game board state
-        board_str = create_board_str(self.state.game_state, player_id)
+        board_str = get_board_str(self.state.game_state, player_id)
         observation.append((ta.GAME_ID, board_str, ta.ObservationType.GAME_BOARD))
         
         return player_id, observation

@@ -1,7 +1,7 @@
 from typing import Dict, Any
 
 
-def create_board_str(game_state: Dict[str, Any], current_player_id: int) -> str:
+def get_board_str(game_state: Dict[str, Any], current_player_id: int) -> str:
     """Create a string representation of the current game board."""
     lines = []
     
