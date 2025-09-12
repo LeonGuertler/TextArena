@@ -1077,13 +1077,13 @@ Game ends after deck is reshuffled 3 times. All remaining fields are harvested a
                 reason=f"Player {winner_id} wins tie-break with {max_coins} coins (furthest from starting player)"
             )
         
-        # Set final scores as rewards
-        max_score = max(final_scores.values()) if final_scores else 1
+        # Set rewards as 1 and -1 to follow textarena convention
         rewards = {}
         for pid, score in final_scores.items():
-            # Normalize to 0-100 range
-            normalized_score = int((score / max_score) * 100) if max_score > 0 else 0
-            rewards[pid] = max(0, normalized_score)
+            if pid==winner_id:
+                rewards[pid] = 1
+            else: 
+                rewards[pid] = -1
         
         self.state.rewards = rewards
         self.state.done = True
