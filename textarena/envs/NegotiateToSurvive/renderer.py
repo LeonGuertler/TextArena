@@ -94,33 +94,6 @@ def render_game_state(player_resources: Dict[int, List[str]],
     
     return "\n".join(lines)
 
-
-def render_proposals(proposals: Dict[int, Dict], player_resources: Dict[int, str]) -> str:
-    """Render active proposals in a compact format."""
-    if not proposals:
-        return "No active proposals"
-    
-    lines = ["Active Proposals:"]
-    for proposal_id, proposal in proposals.items():
-        proposer = proposal["proposer"]
-        coins = proposal["coins"]
-        resource = proposal["resource"]
-        
-        # Find who can accept
-        resource_owner = None
-        for pid, owned_resource in player_resources.items():
-            if owned_resource == resource:
-                resource_owner = pid
-                break
-        
-        if resource_owner is not None:
-            lines.append(f"  Proposal {proposal_id}: {coins} coins for {resource} (Player {resource_owner} can accept)")
-        else:
-            lines.append(f"  Proposal {proposal_id}: {coins} coins for {resource} (No current owner)")
-    
-    return "\n".join(lines)
-
-
 def render_resources_and_coins(player_id: int, 
                               player_resources: Dict[int, List[str]], 
                               player_coins: Dict[int, int]) -> str:

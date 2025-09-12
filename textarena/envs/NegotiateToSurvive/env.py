@@ -5,7 +5,6 @@ import textarena as ta
 from textarena.state import TeamMultiPlayerState
 from textarena.envs.NegotiateToSurvive.renderer import (
     render_game_state,
-    render_proposals,
     render_resources_and_coins
 )
 
