@@ -5,19 +5,26 @@ import textarena as ta
 
 
 class Game2048Env(ta.Env):
-    BOARD_SIZE = 4
+    DEFAULT_BOARD_SIZE = 4
     CELL_W = 6  
     ACTIONS = {"[UP]": 0, "[DOWN]": 1, "[LEFT]": 2, "[RIGHT]": 3, "[W]": 0, "[S]": 1, "[A]": 2, "[D]": 3}
     _BRACKET_GROUP_RE = re.compile(r"\[[^\[\]]*\]")
     _VALID_DIRECTIONS = {"UP", "DOWN", "LEFT", "RIGHT", "W", "A", "S", "D"}
                                                                                             
-    def __init__(self, target_tile: int = 2048):
+    def __init__(self, target_tile: int = 2048, board_size: int = None):
         super().__init__()
         self.target_tile = target_tile
+        self.board_size = board_size if board_size is not None else self.DEFAULT_BOARD_SIZE
+        
+        # Validate board size
+        if self.board_size < 2:
+            raise ValueError("Board size must be at least 2")
+        if self.board_size > 10:
+            raise ValueError("Board size cannot exceed 10 for practical reasons")
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         self.state = ta.SinglePlayerState(num_players=num_players, seed=seed)
-        board = [[0] * self.BOARD_SIZE for _ in range(self.BOARD_SIZE)]
+        board = [[0] * self.board_size for _ in range(self.board_size)]
         self._spawn_tile(board)
         self._spawn_tile(board)
         self.state.reset(game_state={"board": board, "score": 0}, player_prompt_function=self._prompt)
@@ -25,7 +32,7 @@ class Game2048Env(ta.Env):
 
     def _prompt(self, player_id: int, game_state: Dict[str, Any]) -> str:
         return (
-            f"You are playing 2048. Your goal is to each a {self.target_tile} tile by sliding identical numbers together!\n"
+            f"You are playing 2048 on a {self.board_size}x{self.board_size} board. Your goal is to reach a {self.target_tile} tile by sliding identical numbers together!\n"
             "Valid moves: [Up], [Down], [Left], [Right]. Tiles combine when they collide, doubling their value.\n"
         )
 
@@ -95,13 +102,13 @@ class Game2048Env(ta.Env):
         # the left‑shift logic for every direction.
         def iterable_rows():
             if dir_idx == 0:  # Up: treat each column top→bottom
-                for c in range(self.BOARD_SIZE):    yield [board[r][c] for r in range(self.BOARD_SIZE)], c, True
+                for c in range(self.board_size):    yield [board[r][c] for r in range(self.board_size)], c, True
             elif dir_idx == 1:  # Down: column bottom→top (reversed)
-                for c in range(self.BOARD_SIZE):    yield [board[r][c] for r in reversed(range(self.BOARD_SIZE))], c, True
+                for c in range(self.board_size):    yield [board[r][c] for r in reversed(range(self.board_size))], c, True
             elif dir_idx == 2:  # Left: natural rows
-                for r in range(self.BOARD_SIZE):    yield board[r][:], r, False
+                for r in range(self.board_size):    yield board[r][:], r, False
             else:  # Right: rows reversed
-                for r in range(self.BOARD_SIZE):    yield list(reversed(board[r])), r, False
+                for r in range(self.board_size):    yield list(reversed(board[r])), r, False
 
         for line, idx, is_col in iterable_rows():
             original = line[:]
@@ -114,10 +121,10 @@ class Game2048Env(ta.Env):
             for i, v in enumerate(new_line):
                 if is_col:
                     if dir_idx == 0:    board[i][idx] = v # Up: top→bottom
-                    else:               board[self.BOARD_SIZE - 1 - i][idx] = v # Down: bottom→top
+                    else:               board[self.board_size - 1 - i][idx] = v # Down: bottom→top
                 else:
                     if dir_idx == 2:    board[idx][i] = v # Left
-                    else:               board[idx][self.BOARD_SIZE - 1 - i] = v # Right
+                    else:               board[idx][self.board_size - 1 - i] = v # Right
 
         return moved, gained
 
@@ -134,12 +141,12 @@ class Game2048Env(ta.Env):
                 i += 1
             else:
                 i += 1
-        tiles.extend([0] * (self.BOARD_SIZE - len(tiles)))
+        tiles.extend([0] * (self.board_size - len(tiles)))
         return tiles, score_gain
 
     def _spawn_tile(self, board: List[List[int]]):
         """Spawn a new tile (2 with 90%, 4 with 10%) in a random empty cell."""
-        empties = [(r, c) for r in range(self.BOARD_SIZE) for c in range(self.BOARD_SIZE) if board[r][c] == 0]
+        empties = [(r, c) for r in range(self.board_size) for c in range(self.board_size) if board[r][c] == 0]
         if not empties: return
         r, c = random.choice(empties)
         board[r][c] = 4 if random.random() < 0.1 else 2
@@ -154,12 +161,12 @@ class Game2048Env(ta.Env):
         if any(0 in row for row in self.state.game_state["board"]):     return "ongoing"
         # Any possible merge?
         board = self.state.game_state["board"]
-        for r in range(self.BOARD_SIZE):
-            for c in range(self.BOARD_SIZE):
+        for r in range(self.board_size):
+            for c in range(self.board_size):
                 v = board[r][c]
                 for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                     nr, nc = r + dr, c + dc
-                    if 0 <= nr < self.BOARD_SIZE and 0 <= nc < self.BOARD_SIZE and board[nr][nc] == v:
+                    if 0 <= nr < self.board_size and 0 <= nc < self.board_size and board[nr][nc] == v:
                         return "ongoing"
         return "lose"
 
