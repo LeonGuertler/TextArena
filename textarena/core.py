@@ -21,6 +21,7 @@ Info = Dict[str, Any]  # additional information about the environment
 
 class State:
     def __init__(self, num_players: int, seed: Optional[int]=None, max_turns: Optional[int]=None):
+        self.seed = seed
         if seed is not None: random.seed(seed) # set the random seed
         self.max_turns = max_turns 
         self.num_players = num_players
