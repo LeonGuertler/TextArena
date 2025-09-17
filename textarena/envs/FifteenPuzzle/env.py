@@ -3,17 +3,14 @@ from typing import Any, Dict, List, Tuple, Optional, Union, Literal
 
 import textarena as ta
 from textarena.envs.FifteenPuzzle.renderer import create_board_str
-from textarena.envs.FifteenPuzzle.player_prompts import player_prompts
 from textarena.envs.FifteenPuzzle.utils import generate_puzzle
 
 class FifteenPuzzleEnv(ta.Env):
     """ Fifteen Puzzle environment """
-    def __init__(self, lang : str = 'en', difficulty: Literal['easy', 'medium', 'hard'] = 'easy'):
+    def __init__(self, difficulty: Literal['easy', 'medium', 'hard'] = 'easy'):
         """ Initialize the Fifteen Puzzle environment """
         super().__init__()
-        if lang not in player_prompts.keys():
-            raise "Language Not Supported"
-        self.lang = lang
+        
         self.difficulty = difficulty
 
     def get_board_str(self):
@@ -37,7 +34,17 @@ class FifteenPuzzleEnv(ta.Env):
         self.state.add_observation(message=msg, observation_type=ta.ObservationType.GAME_BOARD)
 
     def _generate_player_prompt(self, player_id: int, game_state: Dict[int, Any]) -> str:
-        return player_prompts[self.lang].format(player_id=player_id)
+        return (
+            f"You are Player {player_id}. You are playing the 15-Puzzle game.\n"
+            "The objective of the game is to arrange the numbered tiles in ascending order from 1 to 15, with the empty space located in the bottom-right corner.\n"
+            "To make a move, you can slide a tile into the empty space (represented by a double underscore, e.g. __) by using one of the following commands:\n"
+            "- 'up': Move the tile below the empty space up.\n"
+            "- 'down': Move the tile above the empty space down.\n"
+            "- 'left': Move the tile to the right of the empty space left.\n"
+            "- 'right': Move the tile to the left of the empty space right.\n"
+            "To submit your move, type the direction (e.g., 'up', 'down', 'left', or 'right') in square brackets, e.g. [up].\n"
+            "The current board layout is shown below. Use the information to solve the puzzle.\n"
+        )
     
     def _generate_board(self):
         """ Generate a shuffled board configuration """
