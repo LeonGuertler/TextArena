@@ -8,7 +8,6 @@ import textarena as ta
 
 __all__ = ["HumanAgent", "OpenRouterAgent", "GeminiAgent", "OpenAIAgent", "HFLocalAgent", "CerebrasAgent", "AWSBedrockAgent", "AnthropicAgent", "GroqAgent", "OllamaAgent", "LlamaCppAgent"]
 STANDARD_GAME_PROMPT = "You are a competitive game player. Make sure you read the game instructions carefully, and always follow the required format."
-    
 
 class HumanAgent(Agent):
     """ Human agent class that allows the user to input actions manually """
