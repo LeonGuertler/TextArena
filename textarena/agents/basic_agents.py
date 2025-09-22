@@ -1,6 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
-import os, time
+import os, time, threading
 from typing import Optional, Tuple
 
 from textarena.core import Agent
@@ -8,6 +8,29 @@ import textarena as ta
 
 __all__ = ["HumanAgent", "OpenRouterAgent", "GeminiAgent", "OpenAIAgent", "HFLocalAgent", "CerebrasAgent", "AWSBedrockAgent", "AnthropicAgent", "GroqAgent", "OllamaAgent", "LlamaCppAgent"]
 STANDARD_GAME_PROMPT = "You are a competitive game player. Make sure you read the game instructions carefully, and always follow the required format."
+
+# --- global token tracker (thread-safe) ---
+TOTAL_TOKENS_USED = 0
+TOTAL_TOKENS_LOCK = threading.Lock()
+
+def increment_tokens(count: int):
+    """Thread-safe increment of the global token counter."""
+    global TOTAL_TOKENS_USED
+    with TOTAL_TOKENS_LOCK:
+        TOTAL_TOKENS_USED += count
+
+def get_total_tokens_used():
+    """Return cumulative tokens used by all OpenRouterAgent calls."""
+    global TOTAL_TOKENS_USED
+    with TOTAL_TOKENS_LOCK:
+        return TOTAL_TOKENS_USED
+
+def reset_total_tokens_used():
+    """Reset the global token counter to zero."""
+    global TOTAL_TOKENS_USED
+    with TOTAL_TOKENS_LOCK:
+        TOTAL_TOKENS_USED = 0
+# -----------------------------------------
 
 class HumanAgent(Agent):
     """ Human agent class that allows the user to input actions manually """
@@ -30,57 +53,43 @@ class HumanAgent(Agent):
 
 class OpenRouterAgent(Agent):
     """ Agent class using the OpenRouter API to generate responses. """
-    def __init__(self, model_name: str, system_prompt: Optional[str] = STANDARD_GAME_PROMPT, verbose: bool = False, **kwargs):
-        """
-        Args:
-            model_name (str): The name of the model.
-            system_prompt (Optional[str]): The system prompt to use (default: STANDARD_GAME_PROMPT)
-            verbose (bool): If True, additional debug info will be printed.
-            **kwargs: Additional keyword arguments to pass to the OpenAI API call.
-        """
+    def __init__(self, model_name: str, system_prompt: Optional[str] = STANDARD_GAME_PROMPT, verbose: bool = False, track_tokens: bool = True, **kwargs):
         super().__init__()
         self.model_name = model_name 
         self.verbose = verbose 
         self.system_prompt = system_prompt
         self.kwargs = kwargs
+        self.track_tokens = track_tokens
 
         try:
             from openai import OpenAI
-            from openai._exceptions import OpenAIError
         except ImportError:
             raise ImportError("OpenAI package is required for OpenRouterAgent. Install it with: pip install openai")
         
-        api_key = os.getenv("OPENROUTER_API_KEY") # Set the open router api key from an environment variable
+        api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             raise ValueError("OpenRouter API key not found. Please set the OPENROUTER_API_KEY environment variable.")
         self.client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
 
-    def _make_request(self, observation: str) -> str:
-        """ Make a single API request to OpenRouter and return the generated message. """
-        messages = [{"role": "system", "content": self.system_prompt}, {"role": "user", "content": observation}]
-        response = self.client.chat.completions.create(model=self.model_name, messages=messages, n=1, stop=None, **self.kwargs)
-        return response.choices[0].message.content.strip()
+    def _make_request(self, observation: str):
+        """Make a single API request to OpenRouter and return the raw response."""
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": observation}
+        ]
+        return self.client.chat.completions.create(
+            model=self.model_name, messages=messages, n=1, stop=None, **self.kwargs
+        )
 
-    def _retry_request(self, observation: str, retries: int = 3, delay: int = 5) -> str:
-        """
-        Attempt to make an API request with retries.
-
-        Args:
-            observation (str): The input to process.
-            retries (int): The number of attempts to try.
-            delay (int): Seconds to wait between attempts.
-
-        Raises:
-            Exception: The last exception caught if all retries fail.
-        """
+    def _retry_request(self, observation: str, retries: int = 3, delay: int = 5):
+        """Attempt to make an API request with retries."""
         last_exception = None
         for attempt in range(1, retries + 1):
             try:
                 response = self._make_request(observation)
                 if self.verbose:
-                    print(f"\nObservation: {observation}\nResponse: {response}")
+                    print(f"\nObservation: {observation}\nResponse: {response.choices[0].message.content}")
                 return response
-
             except Exception as e:
                 last_exception = e
                 print(f"Attempt {attempt} failed with error: {e}")
@@ -88,19 +97,21 @@ class OpenRouterAgent(Agent):
                     time.sleep(delay)
         raise last_exception
 
-    def __call__(self, observation: str) -> str:
-        """
-        Process the observation using the OpenRouter API and return the action.
-
-        Args:
-            observation (str): The input string to process.
-
-        Returns:
-            str: The generated response.
-        """
+    def __call__(self, observation: str, track_tokens: Optional[bool] = None) -> str:
         if not isinstance(observation, str):
             raise ValueError(f"Observation must be a string. Received type: {type(observation)}")
-        return self._retry_request(observation)
+
+        response = self._retry_request(observation)
+        text = response.choices[0].message.content.strip()
+
+        # Decide if logging should happen (per-call overrides init)
+        use_tracking = self.track_tokens if track_tokens is None else track_tokens
+
+        if use_tracking and hasattr(response, "usage"):
+            completion_tokens = getattr(response.usage, "completion_tokens", 0)
+            increment_tokens(completion_tokens)
+
+        return text
 
 
 class GeminiAgent(Agent):
