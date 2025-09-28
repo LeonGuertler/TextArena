@@ -1,9 +1,8 @@
 import textarena as ta
 from textarena.core import ObservationWrapper, Env, Observations
 from textarena.agents import OpenRouterAgent
-from google.cloud import translate_v2 as translate
 from typing import Dict, Any, List, Tuple, Optional
-from utils import TRANSLATION_PROMPT
+from .utils import TRANSLATION_PROMPT
 import re
 
 __all__ = ["GoogleTranslationWrapper", "OpenRouterTranslationWrapper"]
@@ -18,11 +17,13 @@ class GoogleTranslationWrapper(ObservationWrapper):
 
         Args:
             env (Env): The TextArena environment to wrap.
-            target_lang (str): The language to translate observations into (e.g., 'fr', 'es').
+            target_lang (str): The name of language to translate observations into (e.g., 'french', 'spanish').
             client (any): An initialized translation client instance.
         """
+        from google.cloud import translate_v2 as translate
+
         super().__init__(env)  
-        self.client = translate.Client()
+        self.client = client
         self.target_lang = target_lang
         self.full_observations: Dict[int, List[Tuple[int, str]]] = {}
 
@@ -45,7 +46,7 @@ class GoogleTranslationWrapper(ObservationWrapper):
             sender = obs[0]
             msg = "" if obs[1] is None else str(obs[1])
             try:
-                res = self.client.translate(msg, target_language=self.target_lang)
+                res = self.client.translate(msg, target=self.target_lang, format='text')
                 msg_tr = res.get("translatedText", msg)
             except Exception: msg_tr = msg  # on failure, keep original
             rest = tuple(obs[2:]) if len(obs) > 2 else ()
@@ -63,18 +64,20 @@ class OpenRouterTranslationWrapper(ObservationWrapper):
 
         Args:
             env (Env): The TextArena environment to wrap.
-            target_lang (str): The language to translate observations into (e.g., 'fr', 'es').
+            target_lang (str): The name of language to translate observations into (e.g., 'french', 'spanish').
             model (str): The LLM to use via OpenRouter for translation
         """
         super().__init__(env)  
         self.target_lang = target_lang
         self.model = model
         self.translation_agent = OpenRouterAgent(model, TRANSLATION_PROMPT.format(language=target_lang))
+        self.full_observations: Dict[int, List[Tuple[int, str]]] = {}
 
 
     def _convert_obs_to_str(self, player_id: int) -> Observations:
         str_observation = ""
         if player_id in self.full_observations:
+            
             for sender_id, message, _ in self.full_observations[player_id]:
                 if sender_id == ta.GAME_ID: sender_name = "GAME"
                 else:                       sender_name = self.env.state.role_mapping.get(sender_id, f"Player {sender_id}")
@@ -92,7 +95,7 @@ class OpenRouterTranslationWrapper(ObservationWrapper):
             msg = "" if obs[1] is None else str(obs[1])
             
             extracted_text = None
-            res = self.translation_agent(observation)
+            res = self.translation_agent(msg)
             match = re.search(r'<translation>(.*?)</translation>', res, re.DOTALL)
             if match:
                 extracted_text = match.group(1).strip()
