@@ -563,6 +563,14 @@ register(id="BabyAiText-v0", entry_point="textarena.envs.BabyAiText.env:BabyAiTe
 # New Recruit
 register_with_versions(id="NewRecruit-v0", entry_point="textarena.envs.NewRecruit.env:NewRecruitEnv", wrappers={"default": DEFAULT_WRAPPERS, "-train": DEFAULT_WRAPPERS})
 
+# Vending Machine (2 players, simple)
+from textarena.envs.VendingMachine.wrapper import VendingMachineObservationWrapper
+register_with_versions(
+    id="VendingMachine-v0",
+    entry_point="textarena.envs.VendingMachine.env:VendingMachineEnv",
+    wrappers={"default": [VendingMachineObservationWrapper, ActionFormattingWrapper], "-train": [VendingMachineObservationWrapper, ActionFormattingWrapper]},
+)
+
 # ScorableGames [2-15 Players] - Multi-issue negotiation based on LLM-Deliberation
 register_with_versions(id="ScorableGames-v0", 
     entry_point="textarena.envs.ScorableGames.env:ScorableGamesEnv", 

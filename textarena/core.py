@@ -130,8 +130,7 @@ class Env(ABC):
         return self.state.current_player_id, self.state.get_current_player_observation()
 
     def close(self):
-        rewards = self.state.close()
-        return rewards
+        return self.state.close()
 
 class Wrapper(Env):
     """ Base class for environment wrappers. """
