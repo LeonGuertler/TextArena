@@ -18,8 +18,8 @@ class TicTacToeEnv(ta.Env):
     def reset(self, num_players: int, seed: Optional[int]=None):
         self.state = ta.TwoPlayerState(num_players=num_players, seed=seed, error_allowance=self.error_allowance)
         self.state.reset(game_state={"board": [['' for _ in range(3)] for _ in range(3)]}, player_prompt_function=self._prompt)
-        self.state.game_state["move_scores"] = []
-        self.state.game_state["turn_summaries"] = []
+        # self.state.game_state["move_scores"] = []
+        # self.state.game_state["turn_summaries"] = []
         self._observer_current_state()
 
     def _prompt(self, player_id:int, game_state:Dict[str,Any])-> str:
@@ -40,7 +40,7 @@ class TicTacToeEnv(ta.Env):
         self.current_player = 'X' if self.state.current_player_id == 1 else 'O'
         self.state.add_observation(from_id=self.state.current_player_id, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
 
-        self._score_current_state()
+        # self._score_current_state()
 
         submitted_cell = None
         applied_cell = None
@@ -74,19 +74,19 @@ class TicTacToeEnv(ta.Env):
         action_level = level_by_idx.get(applied_cell) if valid else None
         action_score = self._last_eval["scores"].get(applied_cell) if (valid and self._last_eval) else None
 
-        self.state.game_state["turn_summaries"].append({
-            "player_id": self.state.current_player_id,
-            "mark": self.current_player,
-            "submitted": submitted_cell,
-            "applied": applied_cell,
-            "valid": valid,
-            "ranked": self._last_eval["ranked"] if self._last_eval else [],
-            "scores": self._last_eval["scores"] if self._last_eval else {},
-            "level_by_idx": level_by_idx,
-            "action_level": action_level, 
-            "action_score": action_score,  
-        })
-        self.save_action_levels_json(self.summary_output_path)
+        # self.state.game_state["turn_summaries"].append({
+        #     "player_id": self.state.current_player_id,
+        #     "mark": self.current_player,
+        #     "submitted": submitted_cell,
+        #     "applied": applied_cell,
+        #     "valid": valid,
+        #     "ranked": self._last_eval["ranked"] if self._last_eval else [],
+        #     "scores": self._last_eval["scores"] if self._last_eval else {},
+        #     "level_by_idx": level_by_idx,
+        #     "action_level": action_level, 
+        #     "action_score": action_score,  
+        # })
+        # self.save_action_levels_json(self.summary_output_path)
 
         self._observer_current_state()
         
