@@ -20,6 +20,7 @@ A suite of 100+ {single,two,multi}-Player texted based games for benchmarking an
 </div>
 
 ## Updates
+* **02/10/2025** Enhanced **VendingMachine** environment with multi-item inventory management, lead times, holding costs, and dynamic news events for complex economic simulations.
 * **31/07/2025** We added **SettlersOfCatan** to TextArena!
 * **14/07/2025** Announcing **MindGames** a NeurIPS2025 competition for training LLMs on various TextArena games that require theory of mind.
 * **01/07/2025** Release of v0.6.9 with **100** games and simplified states, new observation wrappers for training and default wrappers for environments. 
@@ -43,8 +44,10 @@ pip install textarena
 ```
 
 ### Offline Play
-The only requirement __Agents__ need to fulfill is having a __call__ function that accepts string observations and returns string action. We have implemented a number of basic agents that you can find [here](https://github.com/LeonGuertler/TextArena/blob/main/textarena/agents/basic_agents.py). In this example, we show how you can let **GPT-4o-mini** play against **anthropic/claude-3.5-haiku** in a game of __TicTacToe__.
+The only requirement __Agents__ need to fulfill is having a __call__ function that accepts string observations and returns string action. We have implemented a number of basic agents that you can find [here](https://github.com/LeonGuertler/TextArena/blob/main/textarena/agents/basic_agents.py). 
 
+#### Example 1: TicTacToe
+In this example, we show how you can let **GPT-4o-mini** play against **anthropic/claude-3.5-haiku** in a game of __TicTacToe__.
 
 We will be using the OpenRouterAgent, so first you need to set you OpenRouter API key:
 ```bash
@@ -78,6 +81,54 @@ while not done:
 
 rewards, game_info = env.close()
 ```
+
+#### Example 2: Multi-Item Vending Machine
+TextArena also includes complex economic simulation games. Here's an example of the **VendingMachine** environment with multiple items, lead times, and dynamic news events:
+
+```python
+import textarena as ta
+import os
+
+# Set your OpenAI API key
+os.environ["OPENAI_API_KEY"] = "your-openai-key-here"
+
+# Initialize agents
+agents = {
+    0: ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt="You are a VM controller..."),
+    1: ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt="You are a customer..."),
+}
+
+# Initialize the multi-item vending machine
+env = ta.make(env_id="VendingMachine-v0")
+
+# Configure multiple items with different economics
+env.add_item(item_id="cola", description="Cola", lead_time=1, price=7, cost=4, holding_cost=0.5)
+env.add_item(item_id="chips", description="Chips", lead_time=2, price=5, cost=3, holding_cost=0.3)
+env.add_item(item_id="water", description="Water", lead_time=0, price=3, cost=2, holding_cost=0.2)
+
+# Add dynamic news events that affect demand
+env.add_news(day=2, news="Weekend Sale: Expect 30% higher demand for all items")
+env.add_news(day=6, news="Baseball game: Expect 50% higher demand for popcorn")
+
+env.reset(num_players=2)
+
+# Game loop with custom observation wrapper for context management
+done = False
+while not done:
+    player_id, observation = env.get_observation()
+    action = agents[player_id](observation)
+    done, _ = env.step(action=action)
+
+rewards, game_info = env.close()
+print(f"VM Total Reward: ${rewards[0]:.2f}")
+```
+
+**Key Features of VendingMachine:**
+- **Multi-item inventory management** with different lead times and costs
+- **Dynamic news events** that agents can anticipate and plan for
+- **Economic complexity** with holding costs, profit margins, and procurement planning
+- **Custom observation wrapper** providing complete context history and role-specific visibility
+- **Realistic supply chain mechanics** with order pipelines and delivery delays
 
 
 

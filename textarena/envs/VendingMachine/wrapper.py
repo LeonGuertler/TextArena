@@ -4,9 +4,11 @@ VendingMachine-specific observation wrapper.
 This wrapper provides comprehensive context management for the VendingMachine environment,
 maintaining complete historical information while providing role-specific visibility
 (VM sees inventory, Demand doesn't).
+
+Supports multi-item vending machine with lead time and inventory pipeline.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import textarena as ta
 from textarena.core import ObservationWrapper, Env, ObservationType
 
@@ -17,9 +19,10 @@ class VendingMachineObservationWrapper(ObservationWrapper):
     
     Features:
     - Maintains complete game history for both players
-    - Role-specific information visibility (VM sees inventory, Demand doesn't)
+    - Role-specific information visibility (VM sees inventory pipeline, Demand doesn't)
     - Detailed descriptive format for historical events
     - Automatic context accumulation and formatting
+    - Multi-item support with lead time tracking
     """
     
     def __init__(self, env: Env):
@@ -27,17 +30,25 @@ class VendingMachineObservationWrapper(ObservationWrapper):
         # Store complete observations for each player
         self.full_observations: Dict[int, List[Tuple[int, str, ObservationType]]] = {}
         # Cache parsed game state information
-        self.game_history: List[Dict] = []
+        self.game_history: List[Dict[str, Any]] = []
+        self.current_day = 1
+    
+    def reset(self, num_players: int, seed: Optional[int] = None):
+        """Reset the wrapper state along with the environment."""
+        # Clear wrapper state
+        self.full_observations = {}
+        self.game_history = []
         self.current_day = 1
         
-    def _extract_game_info_from_observations(self, player_id: int) -> Dict:
-        """Extract current game state from observations."""
+        # Call parent's reset (which calls env.reset)
+        return super().reset(num_players=num_players, seed=seed)
+        
+    def _extract_game_info_from_observations(self, player_id: int) -> Dict[str, Any]:
+        """Extract current game state from observations for multi-item environment."""
         game_info = {
             'day': 1,
-            'inventory': 0,
-            'price': 7,
-            'cost': 5,
-            'max_days': 10
+            'max_days': 3,
+            'items': {}
         }
         
         if player_id not in self.full_observations:
@@ -57,29 +68,11 @@ class VendingMachineObservationWrapper(ObservationWrapper):
                                 game_info['max_days'] = int(parts[1].strip())
                             except:
                                 pass
-                    elif 'Price=$' in line:
-                        try:
-                            price_part = line.split('Price=$')[1].split(',')[0].strip()
-                            game_info['price'] = int(price_part)
-                        except:
-                            pass
-                    elif 'Cost=$' in line:
-                        try:
-                            cost_part = line.split('Cost=$')[1].strip()
-                            game_info['cost'] = int(cost_part)
-                        except:
-                            pass
-                    elif 'Inventory (visible to VM):' in line and player_id == 0:
-                        try:
-                            inventory_part = line.split('Inventory (visible to VM):')[1].strip()
-                            game_info['inventory'] = int(inventory_part)
-                        except:
-                            pass
         
         return game_info
     
     def _extract_daily_events(self, player_id: int) -> List[str]:
-        """Extract and format daily events from game action descriptions."""
+        """Extract and format daily events from game action descriptions (multi-item)."""
         daily_events = []
         
         if player_id not in self.full_observations:
@@ -87,32 +80,18 @@ class VendingMachineObservationWrapper(ObservationWrapper):
             
         for sender_id, message, obs_type in self.full_observations[player_id]:
             if obs_type == ObservationType.GAME_ACTION_DESCRIPTION and sender_id == ta.GAME_ID:
-                if 'concluded:' in message:
-                    # Parse day conclusion message
-                    # Format: "Day X concluded: restock=Y, requested=Z, sold=W, stock_end=V."
-                    try:
-                        day_part = message.split('Day ')[1].split(' concluded:')[0]
-                        details_part = message.split('concluded: ')[1].rstrip('.')
-                        
-                        # Parse the details
-                        details = {}
-                        for item in details_part.split(', '):
-                            key, value = item.split('=')
-                            details[key] = int(value)
-                        
-                        # Format as detailed description
-                        event = (f"Day {day_part}: VM restocked {details['restock']} units, "
-                                f"Demand requested {details['requested']} units, "
-                                f"sold {details['sold']} units, ending stock: {details['stock_end']}")
-                        daily_events.append(event)
-                    except:
-                        # Fallback to original message if parsing fails
+                # VM orders: only visible to VM (player_id == 0)
+                if 'VM ordered:' in message:
+                    if player_id == 0:  # Only VM can see its orders
                         daily_events.append(message)
+                # Capture day conclusions: visible to both players
+                elif 'concluded' in message:
+                    daily_events.append(message)
         
         return daily_events
     
     def _format_observation_for_player(self, player_id: int) -> str:
-        """Format the complete observation string for a specific player."""
+        """Format the complete observation string for a specific player (multi-item)."""
         if player_id not in self.full_observations:
             return ""
             
@@ -123,8 +102,12 @@ class VendingMachineObservationWrapper(ObservationWrapper):
                 prompt = message
                 break
         
-        # Get current game info
-        game_info = self._extract_game_info_from_observations(player_id)
+        # Get the latest game board (env already provides complete item info)
+        latest_game_board = ""
+        for sender_id, message, obs_type in reversed(self.full_observations[player_id]):
+            if obs_type == ObservationType.GAME_BOARD:
+                latest_game_board = message
+                break
         
         # Get historical events
         daily_events = self._extract_daily_events(player_id)
@@ -132,30 +115,19 @@ class VendingMachineObservationWrapper(ObservationWrapper):
         # Build the formatted observation
         observation_parts = []
         
-        # Add the initial prompt
+        # Add the initial prompt if exists
         if prompt:
             observation_parts.append(prompt)
         
-        # Add current game status
-        status_lines = [
-            f"=== CURRENT STATUS ===",
-            f"Day {game_info['day']} of {game_info['max_days']}",
-            f"Price: ${game_info['price']} per unit, Restock cost: ${game_info['cost']} per unit"
-        ]
-        
-        # Add inventory info for VM only
-        if player_id == 0:  # VM player
-            status_lines.append(f"Current inventory: {game_info['inventory']} units")
-        else:  # Demand player
-            status_lines.append("Current inventory: Hidden from Demand")
-        
-        observation_parts.append('\n'.join(status_lines))
+        # Add current game board (already formatted by env)
+        if latest_game_board:
+            observation_parts.append("=== CURRENT STATUS ===")
+            observation_parts.append(latest_game_board)
         
         # Add game history if any
         if daily_events:
-            observation_parts.append("=== GAME HISTORY ===")
+            observation_parts.append("\n=== GAME HISTORY ===")
             observation_parts.extend(daily_events)
-        
         
         return '\n\n'.join(observation_parts)
     
