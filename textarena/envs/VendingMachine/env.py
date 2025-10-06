@@ -10,7 +10,7 @@ Players
 Episode Rules
 - Horizon: NUM_DAYS days. Each day has two turns: VM first, then Demand.
 - Start inventory: 10 units per item (on-hand).
-- Multiple items: Each item has description, lead_time, price, cost, holding_cost.
+- Multiple items: Each item has description, lead_time, profit, holding_cost.
 - Order: VM orders items at start of each day. Orders arrive after lead_time days.
 - Buy: Demand purchases from on-hand inventory only.
 - Visibility: Demand does NOT see current inventory; sees prices and historical aggregates only.
@@ -35,7 +35,7 @@ Observations
 
 Rewards
 - Daily reward: R_t = p_t · y_t - h_t · I_t
-  where p_t·y_t is profit from sales (price-cost)*sold and h_t·I_t is holding cost
+  where p_t·y_t is profit from sales (profit*sold) and h_t·I_t is holding cost
 - Total reward: sum of all daily rewards R_t over the episode
 - Final rewards: {0: total_reward, 1: 0}
 """
@@ -60,7 +60,7 @@ class VendingMachineEnv(ta.Env):
         self.state: TwoPlayerState
         self.current_day = 1
         
-        # Item definitions: {item_id: {description, lead_time, price, cost}}
+        # Item definitions: {item_id: {description, lead_time, profit, holding_cost}}
         self.items: Dict[str, Dict[str, Any]] = {}
         
         # Inventory pipeline: {item_id: [I(j,0), I(j,1), ..., I(j,L)]}
@@ -79,7 +79,7 @@ class VendingMachineEnv(ta.Env):
         self.total_sold: Dict[str, int] = {}     # Total sold per item
         self.daily_logs: List[Dict[str, Any]] = []  # Daily records
 
-    def add_item(self, item_id: str, description: str, lead_time: int, price: float, cost: float, holding_cost: float):
+    def add_item(self, item_id: str, description: str, lead_time: int, profit: float, holding_cost: float):
         """
         Add an item to the vending machine.
         
@@ -87,8 +87,7 @@ class VendingMachineEnv(ta.Env):
             item_id: Unique identifier for the item
             description: Human-readable description
             lead_time: Number of days for order to arrive (L_t(j))
-            price: Selling price per unit
-            cost: Procurement cost per unit
+            profit: Profit per unit sold (previously price - cost)
             holding_cost: Cost per unit per day for holding inventory (h_t(j))
         """
         if item_id in self.items:
@@ -97,8 +96,7 @@ class VendingMachineEnv(ta.Env):
         self.items[item_id] = {
             'description': description,
             'lead_time': lead_time,
-            'price': price,
-            'cost': cost,
+            'profit': profit,
             'holding_cost': holding_cost
         }
         
@@ -178,8 +176,7 @@ class VendingMachineEnv(ta.Env):
         
         for item_id, item_info in self.items.items():
             desc = item_info['description']
-            price = item_info['price']
-            cost = item_info['cost']
+            profit = item_info['profit']
             lead_time = item_info['lead_time']
             holding_cost = item_info['holding_cost']
             
@@ -188,12 +185,12 @@ class VendingMachineEnv(ta.Env):
                 pipeline_str = ", ".join(str(self.inventory_pipeline[item_id][i]) 
                                         for i in range(1, len(self.inventory_pipeline[item_id])))
                 board_lines.append(
-                    f"{item_id} ({desc}): Price=${price}, Cost=${cost}, Holding=${holding_cost}/unit/day, Lead={lead_time}d"
+                    f"{item_id} ({desc}): Profit=${profit}/unit, Holding=${holding_cost}/unit/day, Lead={lead_time}d"
                 )
                 board_lines.append(f"  On-hand: {on_hand}, Pipeline: [{pipeline_str}]")
-            else:  # Demand player - hide inventory and cost info
+            else:  # Demand player - hide profit and inventory
                 board_lines.append(
-                    f"{item_id} ({desc}): Price=${price}, Lead={lead_time}d"
+                    f"{item_id} ({desc}): Lead={lead_time}d"
                 )
 
         board = "\n".join(board_lines)
@@ -213,11 +210,13 @@ class VendingMachineEnv(ta.Env):
         )
 
         if current_pid == 0:
-            # VM turn: expect [Order] item_1:qty=5, item_2:qty=10
-            orders = self._parse_multi_item_action(action, token="Order")
-            if orders is None:
-                self.state.set_invalid_move("Invalid VM action. Use '[Order] item_id:qty=N, ...'")
+            # VM turn: expect JSON with action and optional rationale
+            parsed = self._parse_json_action(action)
+            if parsed is None:
+                self.state.set_invalid_move('Invalid VM action. Use JSON format: {"action": {"item_id": qty, ...}, "rationale": "..."}')
                 return self.state.step(rotate_player=False)
+            
+            orders, rationale = parsed
 
             # Validate all items exist
             for item_id in orders:
@@ -238,12 +237,14 @@ class VendingMachineEnv(ta.Env):
                     self.inventory_pipeline[item_id][lead_time] += qty
                     self.total_ordered[item_id] += qty
 
-            # Announce orders
-            order_str = ", ".join(f"{item_id}:qty={qty}" for item_id, qty in orders.items())
+            # Announce orders (without rationale in game history)
+            order_str = ", ".join(f"{item_id}:{qty}" for item_id, qty in orders.items())
+            message = f"VM ordered: {order_str}"
+            
             self.state.add_observation(
                 from_id=ta.GAME_ID,
                 to_id=-1,
-                message=f"VM ordered: {order_str}",
+                message=message,
                 observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION,
             )
 
@@ -251,11 +252,13 @@ class VendingMachineEnv(ta.Env):
             return self.state.step(rotate_player=True)
 
         else:
-            # Demand turn: expect [Buy] item_1:qty=3, item_2:qty=5
-            purchases = self._parse_multi_item_action(action, token="Buy")
-            if purchases is None:
-                self.state.set_invalid_move("Invalid Demand action. Use '[Buy] item_id:qty=N, ...'")
+            # Demand turn: expect JSON with action
+            parsed = self._parse_json_action(action)
+            if parsed is None:
+                self.state.set_invalid_move('Invalid Demand action. Use JSON format: {"action": {"item_id": qty, ...}}')
                 return self.state.step(rotate_player=False)
+            
+            purchases, _ = parsed  # Demand doesn't need rationale
 
             # Validate all items exist
             for item_id in purchases:
@@ -278,21 +281,20 @@ class VendingMachineEnv(ta.Env):
                 self.total_sold[item_id] += sold
 
             # Calculate daily reward: R_t = p_t · y_t - h_t · I_t
-            # p_t · y_t = sum of (price - cost) * sold for each item
+            # p_t · y_t = sum of profit * sold for each item
             # h_t · I_t = sum of holding_cost * ending_inventory for each item
             daily_profit = 0.0
             daily_holding_cost = 0.0
             
             for item_id in self.items:
-                price = self.items[item_id]['price']
-                cost = self.items[item_id]['cost']
+                profit = self.items[item_id]['profit']
                 holding_cost = self.items[item_id]['holding_cost']
                 
                 sold = actual_sales.get(item_id, 0)
                 ending_inventory = self.inventory_pipeline[item_id][0]
                 
                 # Profit from sales
-                daily_profit += (price - cost) * sold
+                daily_profit += profit * sold
                 
                 # Holding cost on ending inventory
                 daily_holding_cost += holding_cost * ending_inventory
@@ -373,10 +375,49 @@ class VendingMachineEnv(ta.Env):
             # Else continue to next day -> VM's turn next
             return self.state.step(rotate_player=True)
 
+    def _parse_json_action(self, action: str) -> Optional[Tuple[Dict[str, int], Optional[str]]]:
+        """
+        Parse JSON action format: {"action": {"item_id": qty, ...}, "rationale": "..."}
+        Returns (action_dict, rationale) or None if invalid.
+        """
+        try:
+            import json
+            action = action.strip()
+            
+            # Find JSON object in the string
+            json_start = action.find('{')
+            json_end = action.rfind('}') + 1
+            if json_start == -1 or json_end == 0:
+                return None
+            
+            json_str = action[json_start:json_end]
+            data = json.loads(json_str)
+            
+            if 'action' not in data:
+                return None
+            
+            action_dict = data['action']
+            if not isinstance(action_dict, dict):
+                return None
+            
+            # Convert all values to integers
+            result = {}
+            for item_id, qty in action_dict.items():
+                result[str(item_id)] = int(qty)
+            
+            # Extract rationale if present
+            rationale = data.get('rationale', None)
+            
+            return (result, rationale)
+        except Exception as e:
+            print(f"Error parsing JSON action: {e}")
+            return None
+    
     def _parse_multi_item_action(self, action: str, token: str) -> Optional[Dict[str, int]]:
         """
         Parse multi-item action like: '[Order] item_1:qty=5, item_2:qty=10'
         Returns dict {item_id: quantity} or None if invalid.
+        (Legacy format, kept for backward compatibility)
         """
         try:
             action = action.strip()
@@ -436,13 +477,6 @@ class VendingMachineEnv(ta.Env):
         total_sales_profit = sum(day_log['daily_profit'] for day_log in self.daily_logs)
         total_holding_cost = sum(day_log['daily_holding_cost'] for day_log in self.daily_logs)
         
-        # Calculate total procurement cost
-        total_procurement_cost = 0.0
-        for item_id in self.items:
-            cost = self.items[item_id]['cost']
-            ordered = self.total_ordered[item_id]
-            total_procurement_cost += cost * ordered
-
         # Store results in game_info for both players
         for pid in range(2):
             self.state.game_info[pid].update({
@@ -453,7 +487,6 @@ class VendingMachineEnv(ta.Env):
                 "total_reward": total_reward,
                 "total_sales_profit": total_sales_profit,
                 "total_holding_cost": total_holding_cost,
-                "total_procurement_cost": total_procurement_cost,
                 "daily_logs": self.daily_logs,
                 "items": self.items,
             })
