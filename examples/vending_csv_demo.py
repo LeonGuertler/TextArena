@@ -95,7 +95,7 @@ class CSVDemandPlayer:
         return json.dumps(result, indent=2)
 
 
-def make_vm_agent():
+def make_vm_agent(initial_samples: dict = None):
     """Create VM agent with updated prompt for profit-based system."""
     system = (
         "You are the Vending Machine controller (VM). "
@@ -109,6 +109,21 @@ def make_vm_agent():
         "- Holding cost is charged on ending inventory each day\n"
         "- NEWS SCHEDULE: You can see all scheduled news events\n"
         "\n"
+    )
+    
+    # Add historical demand data if provided
+    if initial_samples:
+        system += "HISTORICAL DEMAND DATA (for reference):\n"
+        system += "You have access to the following historical demand samples to help you estimate future demand:\n\n"
+        for item_id, samples in initial_samples.items():
+            mean = sum(samples) / len(samples)
+            system += f"{item_id}:\n"
+            system += f"  Past demands: {samples}\n"
+            #system += f"  Average: {mean:.1f} units/day\n"
+            system += "\n"
+        system += "Use this data to inform your ordering decisions, especially on Day 1.\n\n"
+    
+    system += (
         "Strategy:\n"
         "- Study demand patterns from game history\n"
         "- PAY ATTENTION to news and plan inventory accordingly\n"
@@ -125,7 +140,6 @@ def make_vm_agent():
         "{\n"
         '  "action": {"chips(Regular)": 15, "chips(BBQ)": 10},\n'
         '  "rationale": "Based on the weekend sale news on day 2, I expect 30% higher demand. '
-        'Ordering 15 regular chips (lead time 1) and 10 BBQ chips to meet increased demand while minimizing holding costs."\n'
         "}\n"
         "\n"
         "Do NOT include any other text outside the JSON."
@@ -177,8 +191,14 @@ def main():
     for day, news in news_schedule.items():
         env.add_news(day, news)
     
-    # Create VM agent
-    vm_agent = make_vm_agent()
+    # Initial demand samples (same as OR baseline for fair comparison)
+    initial_samples = {
+        "chips(Regular)": [200, 202, 202, 205, 188, 201, 204, 198, 201, 195],
+        "chips(BBQ)": [142, 155, 126, 115, 166, 176, 127, 131, 155, 164]
+    }
+    
+    # Create VM agent with historical data
+    vm_agent = make_vm_agent(initial_samples)
     
     # Reset environment
     env.reset(num_players=2)
@@ -192,6 +212,7 @@ def main():
         
         if pid == 0:  # VM agent
             action = vm_agent(observation)
+            print(f"Day {current_day} VM Action: {action}")
         else:  # Demand from CSV
             action = csv_player.get_action(current_day)
             print(f"Day {current_day} Demand: {action}")
