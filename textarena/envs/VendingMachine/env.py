@@ -164,13 +164,20 @@ class VendingMachineEnv(ta.Env):
         # Build game board with multi-item information
         board_lines = [f"DAY {self.current_day} / {NUM_DAYS}"]
         
-        # Add news schedule (complete schedule visible to both agents)
+        # Add news - only show today's news and past news (no future news visibility)
         if self.news_schedule:
-            board_lines.append("\n=== NEWS SCHEDULE ===")
-            for day in sorted(self.news_schedule.keys()):
-                news_text = self.news_schedule[day]
-                marker = " <- TODAY" if day == self.current_day else ""
-                board_lines.append(f"Day {day}: {news_text}{marker}")
+            # Today's news (if any)
+            today_news = self.news_schedule.get(self.current_day, None)
+            if today_news:
+                board_lines.append(f"\n=== TODAY'S NEWS (Day {self.current_day}) ===")
+                board_lines.append(f"⚡ {today_news}")
+            
+            # Past news (for learning from history)
+            past_news = {day: news for day, news in self.news_schedule.items() if day < self.current_day}
+            if past_news:
+                board_lines.append("\n=== Past News ===")
+                for day in sorted(past_news.keys()):
+                    board_lines.append(f"Day {day}: {past_news[day]}")
         
         board_lines.append("\n=== ITEMS ===")
         

@@ -264,7 +264,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None):
         "- Orders placed today arrive after the item's lead time\n"
         "- You see on-hand inventory and pipeline for each item\n"
         "- Holding cost is charged on ending inventory each day\n"
-        "- NEWS SCHEDULE: You can see all scheduled news events\n"
+        "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
         "\n"
     )
     
@@ -293,20 +293,32 @@ def make_hybrid_vm_agent(initial_samples: dict = None):
         "\n"
         "Your Strategy:\n"
         "1. Use OR recommendation as your BASELINE for normal days\n"
-        "2. ANALYZE the news schedule carefully\n"
-        "3. ADJUST orders when you anticipate news will affect demand\n"
+        "2. React to TODAY'S NEWS as it happens, considering lead time\n"
+        "3. Learn from past news events to understand their impact on demand\n"
         "4. Balance between data-driven OR approach and news-driven insights\n"
         "\n"
         "Example decision process:\n"
         "- OR recommends: 200 units\n"
-        "- News: Major sports event in 2 days\n"
-        "- Your analysis: Sports events may change demand patterns\n"
-        "- Your decision: Adjust order based on your reasoning\n"
+        "- TODAY'S NEWS: Major sports event finale\n"
+        "- Your analysis: Sports events may increase demand significantly\n"
+        "- Your decision: Adjust order upward based on your reasoning\n"
         "\n"
-        "IMPORTANT: You MUST respond with valid JSON in this exact format:\n"
+        "IMPORTANT: Think step by step, then decide.\n"
+        "You MUST respond with valid JSON in this exact format:\n"
         "{\n"
-        '  "action": {"item_id": quantity, "item_id": quantity, ...},\n'
-        '  "rationale": "Your reasoning for this decision (mention OR recommendation and any adjustments)"\n'
+        '  "rationale": "First, explain your reasoning: review OR algorithm recommendations, '
+        'analyze current inventory and demand patterns, evaluate today\'s news (if any) and learn from past news, '
+        'consider lead time constraints, decide whether to follow OR baseline or adjust based on news, '
+        'and explain your final ordering strategy",\n'
+        '  "action": {"item_id": quantity, "item_id": quantity, ...}\n'
+        "}\n"
+        "\n"
+        "Think through your rationale BEFORE making the final order decision.\n"
+        "\n"
+        "Example format:\n"
+        "{\n"
+        '  "rationale": "[Review OR recommendations] → [Analyze inventory/demand] → [Consider today\'s news] → [Decide: follow OR or adjust],\n'
+        '  "action": {"item_id_1": quantity, "item_id_2": quantity, ...}\n'
         "}\n"
         "\n"
         "Do NOT include any other text outside the JSON."
@@ -407,8 +419,36 @@ def main():
             
             # LLM agent makes final decision
             action = vm_agent(enhanced_observation)
-            print(f"\nDay {current_day} Hybrid Decision: {action}")
+            
+            # Print complete JSON output with proper formatting
+            print(f"\nDay {current_day} Hybrid Decision:")
+            print("="*60)
+            try:
+                # Remove markdown code block markers if present
+                import json
+                import re
+                
+                # Strip markdown code fences (```json or ``` at start/end)
+                cleaned_action = action.strip()
+                # Remove ```json or ``` from the beginning
+                cleaned_action = re.sub(r'^```(?:json)?\s*', '', cleaned_action)
+                # Remove ``` from the end
+                cleaned_action = re.sub(r'\s*```$', '', cleaned_action)
+                
+                # Parse and pretty print
+                action_dict = json.loads(cleaned_action)
+                formatted_json = json.dumps(action_dict, indent=2, ensure_ascii=False)
+                print(formatted_json)
+                # Flush to ensure complete output to file
+                sys.stdout.flush()
+            except Exception as e:
+                # Fallback to raw output if JSON parsing fails
+                print(f"[DEBUG: JSON parsing failed: {e}]")
+                print(action)
+                sys.stdout.flush()
+            print("="*60)
             print(f"  (OR recommended: {or_recommendations})")
+            sys.stdout.flush()
         else:  # Demand from CSV
             action = csv_player.get_action(current_day)
             

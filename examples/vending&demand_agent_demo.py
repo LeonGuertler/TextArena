@@ -25,25 +25,30 @@ def make_vm_agent():
         "- Orders placed today arrive after the item's lead time (e.g., lead=2 means arrives in 2 days)\n"
         "- You see on-hand inventory and pipeline for each item\n"
         "- Holding cost is charged on ending inventory each day (incentive to keep inventory low)\n"
-        "- NEWS SCHEDULE: You can see all scheduled news events (e.g., holidays, promotions) for future days\n"
+        "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
         "\n"
         "Strategy:\n"
         "- Study demand patterns from game history for each item\n"
-        "- PAY ATTENTION to the news schedule and plan inventory accordingly\n"
+        "- React to TODAY'S NEWS as it happens, considering lead time for orders\n"
+        "- Learn from past news events to understand their impact on demand\n"
         "- Order enough to cover demand during lead time + buffer, but minimize holding costs\n"
         "- Consider profit margins and holding costs when prioritizing which items to stock\n"
-        "- Anticipate demand changes based on scheduled news events\n"
         "\n"
-        "IMPORTANT: You MUST respond with valid JSON in this exact format:\n"
+        "IMPORTANT: Think step by step, then decide.\n"
+        "You MUST respond with valid JSON in this exact format:\n"
         "{\n"
-        '  "action": {"item_id": quantity, "item_id": quantity, ...},\n'
-        '  "rationale": "Your reasoning for this decision"\n'
+        '  "rationale": "First, explain your reasoning: analyze current inventory and demand patterns for each item, '
+        'evaluate today\'s news (if any) and learn from past news, consider different lead times, '
+        'and explain your ordering strategy for each item",\n'
+        '  "action": {"item_id": quantity, "item_id": quantity, ...}\n'
         "}\n"
         "\n"
-        "Example:\n"
+        "Think through your rationale BEFORE making the final order decision.\n"
+        "\n"
+        "Example format:\n"
         "{\n"
-        '  "action": {"cola": 15, "chips": 10, "water": 8, "popcorn": 5},\n'
-        '  "rationale": "Based on weekend sale news, expecting 30% higher demand. Ordering 15 cola (lead=1) to arrive tomorrow, 10 chips (lead=2) for day 3, 8 water (lead=0) for immediate stock, and 5 popcorn (lead=3) in advance."\n'
+        '  "rationale": "[Analyze each item\'s inventory/demand] → [Consider news impact by item type] → [Account for different lead times] → [Explain ordering strategy per item]",\n'
+        '  "action": {"item_id_1": quantity, "item_id_2": quantity, ...}\n'
         "}\n"
         "\n"
         "Do NOT include any other text outside the JSON."
@@ -117,6 +122,35 @@ def main():
         
         if pid == 0:  # VM agent
             action = vm_agent(observation)
+            
+            # Print complete JSON output with proper formatting
+            print(f"\nDay {current_day} VM Action:")
+            print("="*60)
+            try:
+                # Remove markdown code block markers if present
+                import json
+                import re
+                
+                # Strip markdown code fences (```json or ``` at start/end)
+                cleaned_action = action.strip()
+                # Remove ```json or ``` from the beginning
+                cleaned_action = re.sub(r'^```(?:json)?\s*', '', cleaned_action)
+                # Remove ``` from the end
+                cleaned_action = re.sub(r'\s*```$', '', cleaned_action)
+                
+                # Parse and pretty print
+                action_dict = json.loads(cleaned_action)
+                formatted_json = json.dumps(action_dict, indent=2, ensure_ascii=False)
+                print(formatted_json)
+                # Flush to ensure complete output to file
+                sys.stdout.flush()
+            except Exception as e:
+                # Fallback to raw output if JSON parsing fails
+                print(f"[DEBUG: JSON parsing failed: {e}]")
+                print(action)
+                sys.stdout.flush()
+            print("="*60)
+            sys.stdout.flush()
         else:  # Demand agent
             action = demand_agent(observation)
             current_day += 1
