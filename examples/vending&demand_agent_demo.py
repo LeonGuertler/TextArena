@@ -53,7 +53,7 @@ def make_vm_agent():
         "\n"
         "Do NOT include any other text outside the JSON."
     )
-    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
 
 
 def make_demand_agent():
@@ -82,7 +82,7 @@ def make_demand_agent():
         "\n"
         "Do NOT include any other text outside the JSON."
     )
-    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
 
 
 def main():

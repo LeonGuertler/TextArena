@@ -323,7 +323,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None):
         "\n"
         "Do NOT include any other text outside the JSON."
     )
-    return ta.agents.OpenAIAgent(model_name="gpt-4o", system_prompt=system)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o", system_prompt=system, temperature=0)
 
 
 def main():
