@@ -95,7 +95,7 @@ class CSVDemandPlayer:
         return json.dumps(result, indent=2)
 
 
-def make_vm_agent(initial_samples: dict = None):
+def make_vm_agent(initial_samples: dict = None, human_feedback_enabled: bool = False, guidance_enabled: bool = False):
     """Create VM agent with updated prompt for profit-based system."""
     system = (
         "You are the Vending Machine controller (VM). "
@@ -110,6 +110,32 @@ def make_vm_agent(initial_samples: dict = None):
         "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
         "\n"
     )
+    
+    # Add human feedback mode explanation if enabled
+    if human_feedback_enabled:
+        system += (
+            "HUMAN-IN-THE-LOOP MODE:\n"
+            "You will interact with a human supervisor in a two-stage process:\n"
+            "  Stage 1: You provide your initial rationale and decision (full JSON with rationale + action)\n"
+            "  Stage 2 (if human provides feedback): You receive the human's feedback and output ONLY the final action (no rationale needed)\n"
+            "\n"
+            "The human supervisor has domain expertise and may:\n"
+            "  - Suggest adjustments based on information you don't have access to\n"
+            "  - Point out considerations you might have missed\n"
+            "  - Provide strategic insights about demand patterns\n"
+            "\n"
+            "When you receive human feedback in Stage 2, incorporate it thoughtfully and output only the action JSON.\n"
+            "\n"
+        )
+    
+    # Add guidance mode explanation if enabled
+    if guidance_enabled:
+        system += (
+            "STRATEGIC GUIDANCE:\n"
+            "You may receive strategic guidance from a human supervisor that should inform your decisions. "
+            "This guidance will appear at the top of your observations and should be followed consistently.\n"
+            "\n"
+        )
     
     # Add historical demand data if provided
     if initial_samples:
@@ -156,6 +182,10 @@ def main():
     parser = argparse.ArgumentParser(description='Run vending machine with CSV demand')
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
+    parser.add_argument('--human-feedback', action='store_true',
+                       help='Enable daily human feedback on agent decisions (Mode 1)')
+    parser.add_argument('--guidance-frequency', type=int, default=0,
+                       help='Collect strategic guidance every N days (Mode 2). 0=disabled')
     args = parser.parse_args()
     
     # Check API key
@@ -203,7 +233,30 @@ def main():
     }
     
     # Create VM agent with historical data
-    vm_agent = make_vm_agent(initial_samples)
+    base_agent = make_vm_agent(
+        initial_samples=initial_samples,
+        human_feedback_enabled=args.human_feedback,
+        guidance_enabled=(args.guidance_frequency > 0)
+    )
+    
+    # Wrap with HumanFeedbackAgent if human-in-the-loop modes are enabled
+    if args.human_feedback or args.guidance_frequency > 0:
+        print("\n" + "="*70)
+        print("HUMAN-IN-THE-LOOP MODE ACTIVATED")
+        print("="*70)
+        if args.human_feedback:
+            print("✓ Mode 1: Daily feedback on agent decisions is ENABLED")
+        if args.guidance_frequency > 0:
+            print(f"✓ Mode 2: Strategic guidance every {args.guidance_frequency} days is ENABLED")
+        print("="*70 + "\n")
+        
+        vm_agent = ta.agents.HumanFeedbackAgent(
+            base_agent=base_agent,
+            enable_daily_feedback=args.human_feedback,
+            guidance_frequency=args.guidance_frequency
+        )
+    else:
+        vm_agent = base_agent
     
     # Reset environment
     env.reset(num_players=2)
