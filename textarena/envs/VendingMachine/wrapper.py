@@ -80,12 +80,9 @@ class VendingMachineObservationWrapper(ObservationWrapper):
             
         for sender_id, message, obs_type in self.full_observations[player_id]:
             if obs_type == ObservationType.GAME_ACTION_DESCRIPTION and sender_id == ta.GAME_ID:
-                # VM orders: only visible to VM (player_id == 0)
-                if 'VM ordered:' in message:
-                    if player_id == 0:  # Only VM can see its orders
-                        daily_events.append(message)
                 # Capture day conclusions: visible to both players
-                elif 'concluded' in message:
+                # Note: "VM ordered" messages are removed as ordering info is now in day conclusion
+                if 'concluded' in message:
                     daily_events.append(message)
         
         return daily_events
