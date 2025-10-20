@@ -213,16 +213,16 @@ class CSVDemandPlayer:
 # Helper Functions for Parsing and Computation
 # ============================================================================
 
-def parse_in_transit(observation: str, item_id: str) -> int:
+def parse_total_inventory(observation: str, item_id: str) -> int:
     """
-    Parse in-transit inventory from observation for a specific item.
+    Parse total inventory (on-hand + in-transit) from observation for a specific item.
     
     Observation format:
       chips(Regular) (...): Profit=$2/unit, Holding=$1/unit/day
         On-hand: 5, In-transit: 20 units
     
     Returns:
-        In-transit inventory count
+        Total inventory across all pipeline stages (on-hand + in-transit)
     """
     try:
         lines = observation.split('\n')
@@ -231,14 +231,24 @@ def parse_in_transit(observation: str, item_id: str) -> int:
                 # Next line should have the inventory info
                 if i + 1 < len(lines):
                     inventory_line = lines[i + 1]
-                    if "In-transit:" in inventory_line:
-                        # Extract in-transit value: "In-transit: 20 units"
-                        match = re.search(r'In-transit:\s*(\d+)', inventory_line)
-                        if match:
-                            return int(match.group(1))
+                    
+                    # Parse: "  On-hand: 5, In-transit: 20 units"
+                    if "On-hand:" in inventory_line and "In-transit:" in inventory_line:
+                        # Extract on-hand value
+                        on_hand_match = re.search(r'On-hand:\s*(\d+)', inventory_line)
+                        # Extract in-transit value
+                        in_transit_match = re.search(r'In-transit:\s*(\d+)', inventory_line)
+                        
+                        if on_hand_match and in_transit_match:
+                            on_hand = int(on_hand_match.group(1))
+                            in_transit = int(in_transit_match.group(1))
+                            total_inventory = on_hand + in_transit
+                            return total_inventory
+        
+        print(f"Warning: Could not parse inventory for {item_id}, assuming 0")
         return 0
     except Exception as e:
-        print(f"Warning: Could not parse in-transit for {item_id}: {e}")
+        print(f"Warning: Could not parse inventory for {item_id}: {e}")
         return 0
 
 
@@ -478,6 +488,7 @@ def validate_parameters_json(params_json: dict, item_ids: List[str], current_con
 # ============================================================================
 
 def make_llm_to_or_agent(initial_samples: dict, current_configs: dict, 
+                         promised_lead_time: int,
                          human_feedback_enabled: bool = False, 
                          guidance_enabled: bool = False):
     """
@@ -486,6 +497,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
     Args:
         initial_samples: Dict of {item_id: [samples]}
         current_configs: Dict of {item_id: config} with current item configurations
+        promised_lead_time: The lead time promised by supplier (shown to LLM)
         human_feedback_enabled: Whether human feedback mode is enabled
         guidance_enabled: Whether guidance mode is enabled
     """
@@ -502,19 +514,12 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
     
     # Add current item configurations (promised lead time, profit, holding cost)
     for item_id, config in current_configs.items():
-        lead_time = config['lead_time']
         profit = config['profit']
         holding_cost = config['holding_cost']
         description = config.get('description', item_id)
         
-        # Format lead time (handle inf)
-        if lead_time == float('inf'):
-            lead_time_str = "inf (no restocking today)"
-        else:
-            lead_time_str = f"{int(lead_time)} days"
-        
         system += f"\n{item_id} ({description}):\n"
-        system += f"  Supplier-promised lead time: {lead_time_str}\n"
+        system += f"  Supplier-promised lead time: {promised_lead_time} days\n"
         system += f"  Profit: ${profit}/unit\n"
         system += f"  Holding cost: ${holding_cost}/unit/day\n"
     
@@ -525,6 +530,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "- Inventory visibility:\n"
         "  * On-hand: Current inventory available for sale today\n"
         "  * In-transit: Total units ordered that haven't arrived yet\n"
+        "  * ⚠️ Initial inventory on Day 1: Each item starts with 5 units on-hand\n"
         "- Holding cost is charged on ending inventory each day\n"
         "- News events may affect future demand\n"
         "\n"
@@ -629,6 +635,8 @@ def main():
     parser = argparse.ArgumentParser(description='Run LLM→OR strategy with CSV demand')
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
+    parser.add_argument('--promised-lead-time', type=int, default=0,
+                       help='Promised lead time to show to LLM (default: 1). This is what supplier promises, not the actual lead time in CSV.')
     parser.add_argument('--human-feedback', action='store_true',
                        help='Enable daily human feedback on agent decisions (Mode 1)')
     parser.add_argument('--guidance-frequency', type=int, default=0,
@@ -662,6 +670,8 @@ def main():
     unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
     initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
     print(f"\nUsing unified initial samples for all items: {unified_samples}")
+    print(f"Promised lead time (shown to LLM): {args.promised_lead_time} days")
+    print(f"Note: Actual lead times in CSV may differ and will be inferred by LLM from arrivals.")
     
     # Set NUM_DAYS based on CSV
     from textarena.envs.VendingMachine import env as vm_env_module
@@ -691,6 +701,7 @@ def main():
     base_agent = make_llm_to_or_agent(
         initial_samples=initial_samples,
         current_configs=current_item_configs,
+        promised_lead_time=args.promised_lead_time,
         human_feedback_enabled=args.human_feedback,
         guidance_enabled=(args.guidance_frequency > 0)
     )
@@ -745,8 +756,9 @@ def main():
             
             # Recreate agent with updated configs (for system prompt)
             base_agent = make_llm_to_or_agent(
-                initial_samples={item_id: [] for item_id in csv_player.get_item_ids()},  # Empty, as we track separately
+                initial_samples=initial_samples,
                 current_configs=current_item_configs,
+                promised_lead_time=args.promised_lead_time,
                 human_feedback_enabled=args.human_feedback,
                 guidance_enabled=(args.guidance_frequency > 0)
             )
@@ -805,7 +817,7 @@ def main():
                         method=item_params["L"]["method"],
                         params=item_params["L"],
                         observed_lead_times=observed_lead_times[item_id],
-                        promised_lead_time=config['lead_time']
+                        promised_lead_time=args.promised_lead_time
                     )
                     print(f"  L method: {item_params['L']['method']}, computed L = {L:.2f}")
                     
@@ -827,9 +839,9 @@ def main():
                     )
                     print(f"  sigma_hat method: {item_params['sigma_hat']['method']}, computed sigma_hat = {sigma_hat:.2f}")
                     
-                    # Get pipeline inventory
-                    pipeline = parse_in_transit(observation, item_id)
-                    print(f"  Pipeline inventory: {pipeline}")
+                    # Get total inventory (on-hand + in-transit)
+                    total_inventory = parse_total_inventory(observation, item_id)
+                    print(f"  Total inventory (on-hand + in-transit): {total_inventory}")
                     
                     # Compute critical fractile
                     p = config['profit']
@@ -840,7 +852,7 @@ def main():
                     
                     # Compute order using OR formula
                     base_stock = mu_hat + z_star * sigma_hat
-                    order = max(int(np.ceil(base_stock - pipeline)), 0)
+                    order = max(int(np.ceil(base_stock - total_inventory)), 0)
                     print(f"  Base stock = {base_stock:.2f}")
                     print(f"  Computed order: {order}")
                     

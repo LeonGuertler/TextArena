@@ -253,11 +253,11 @@ class ORAgent:
         Parse current total inventory (on-hand + in-transit) from observation.
         
         Observation format:
-          chips(Regular) (...): Profit=$2.5/unit, Holding=$0.1/unit/day, Lead=2d
-            On-hand: 5, Pipeline: [10, 0]
+          chips(Regular) (...): Profit=$2/unit, Holding=$1/unit/day
+            On-hand: 5, In-transit: 10 units
         
         Returns:
-            Total inventory across all pipeline stages (on-hand + sum of pipeline)
+            Total inventory across all pipeline stages (on-hand + in-transit)
         """
         try:
             lines = observation.split('\n')
@@ -268,23 +268,23 @@ class ORAgent:
                     if i + 1 < len(lines):
                         inventory_line = lines[i + 1]
                         
-                        # Parse on-hand: "  On-hand: 5, Pipeline: [10, 0]"
-                        if "On-hand:" in inventory_line and "Pipeline:" in inventory_line:
+                        # Parse: "  On-hand: 5, In-transit: 10 units"
+                        if "On-hand:" in inventory_line and "In-transit:" in inventory_line:
                             # Extract on-hand value
                             on_hand_start = inventory_line.find("On-hand:") + len("On-hand:")
                             on_hand_end = inventory_line.find(",", on_hand_start)
                             on_hand = int(inventory_line[on_hand_start:on_hand_end].strip())
                             
-                            # Extract pipeline array
-                            pipeline_start = inventory_line.find("[")
-                            pipeline_end = inventory_line.find("]") + 1
-                            if pipeline_start != -1 and pipeline_end > pipeline_start:
-                                pipeline_str = inventory_line[pipeline_start:pipeline_end]
-                                pipeline = json.loads(pipeline_str)
-                                in_transit = sum(pipeline)
-                                
-                                total_inventory = on_hand + in_transit
-                                return total_inventory
+                            # Extract in-transit value: "In-transit: 10 units"
+                            in_transit_start = inventory_line.find("In-transit:") + len("In-transit:")
+                            # Find the end - look for "units" or end of line
+                            in_transit_str = inventory_line[in_transit_start:].strip()
+                            # Remove "units" if present
+                            in_transit_str = in_transit_str.replace("units", "").strip()
+                            in_transit = int(in_transit_str)
+                            
+                            total_inventory = on_hand + in_transit
+                            return total_inventory
             
             # If not found, return 0 (shouldn't happen in normal operation)
             print(f"Warning: Could not parse inventory for {item_id}, assuming 0")
@@ -370,7 +370,8 @@ class ORAgent:
         return recommendations
 
 
-def make_hybrid_vm_agent(initial_samples: dict = None, human_feedback_enabled: bool = False, guidance_enabled: bool = False):
+def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
+                         human_feedback_enabled: bool = False, guidance_enabled: bool = False):
     """Create hybrid VM agent that considers both OR recommendations and news."""
     system = (
         "You are the Vending Machine controller (VM). "
@@ -379,15 +380,18 @@ def make_hybrid_vm_agent(initial_samples: dict = None, human_feedback_enabled: b
         "Daily reward: R_t = Profit × Sold - HoldingCost × EndingInventory. "
         "\n\n"
         "Key mechanics:\n"
+        f"- Supplier-promised lead time: {promised_lead_time} days\n"
         "- Orders placed today arrive after a LEAD TIME (number of days until delivery)\n"
-        "- ⚠️ IMPORTANT: Lead time is NOT directly revealed to you. You must INFER it from arrival records.\n"
+        "- ⚠️ IMPORTANT: Actual lead time may differ from promised and may change over time!\n"
+        "- Lead time is NOT directly revealed. You must INFER it from arrival records.\n"
         "- When goods arrive, you'll see: 'arrived=X units (ordered on Day Y, lead_time was Z days)'\n"
-        "- Lead time MAY CHANGE over time - don't assume it stays constant!\n"
+        "- Use this information to track actual lead time and adjust your strategy\n"
         "\n"
         "Inventory visibility:\n"
         "- On-hand: Current inventory available for sale today\n"
         "- In-transit: Total units you ordered that haven't arrived yet (but you don't know WHEN they'll arrive)\n"
         "- You must track your own orders and infer when they'll arrive based on inferred lead_time\n"
+        "- ⚠️ Initial inventory on Day 1: Each item starts with 5 units on-hand\n"
         "\n"
         "- Holding cost is charged on ending inventory each day\n"
         "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
@@ -435,22 +439,26 @@ def make_hybrid_vm_agent(initial_samples: dict = None, human_feedback_enabled: b
         "You will receive recommendations from an Operations Research (OR) algorithm each day.\n"
         "The OR algorithm uses a base-stock policy based on statistical analysis:\n"
         "- It calculates optimal orders using historical demand patterns\n"
-        "- Uses lead time, profit, and holding cost in its calculations\n"
+        f"- ⚠️ IMPORTANT: OR uses the PROMISED lead time ({promised_lead_time} days) in its calculations\n"
+        "- Uses profit and holding cost in its calculations\n"
         "- Aims to balance service level (meeting demand) vs holding costs\n"
         "- Works well for NORMAL, STABLE demand patterns\n"
         "\n"
-        "⚠️ IMPORTANT LIMITATION:\n"
-        "The OR algorithm CANNOT react to news events. It only looks at historical data.\n"
+        "⚠️ IMPORTANT LIMITATIONS:\n"
+        "1. The OR algorithm CANNOT react to news events. It only looks at historical data.\n"
+        "2. The OR algorithm uses PROMISED lead time, not actual lead time.\n"
         "This is where YOU come in!\n"
         "\n"
         "Your Strategy:\n"
-        "1. INFER lead time from arrival records in game history (look for 'lead_time was X days')\n"
-        "2. Track your own orders and when they should arrive based on inferred lead_time\n"
-        "3. Use 'In-transit' to see total goods coming, but remember you must infer WHEN they arrive\n"
-        "4. Use OR recommendation as your BASELINE for normal days (OR uses statistical analysis)\n"
-        "5. React to TODAY'S NEWS as it happens, considering inferred lead time\n"
-        "6. Learn from past news events to understand their impact on demand\n"
-        "7. Balance between data-driven OR approach and news-driven insights\n"
+        "1. INFER actual lead time from arrival records in game history (look for 'lead_time was X days')\n"
+        "2. Compare inferred actual lead time with promised lead time to detect discrepancies\n"
+        "3. Track your own orders and when they should arrive based on inferred actual lead_time\n"
+        "4. Use 'In-transit' to see total goods coming, but remember you must infer WHEN they arrive\n"
+        "5. Use OR recommendation as your BASELINE for normal days (OR uses statistical analysis)\n"
+        "6. Adjust OR recommendations if actual lead time differs from promised lead time\n"
+        "7. React to TODAY'S NEWS as it happens, considering inferred actual lead time\n"
+        "8. Learn from past news events to understand their impact on demand\n"
+        "9. Balance between data-driven OR approach and news-driven/lead-time-adjusted insights\n"
         "\n"
         "Example decision process:\n"
         "- Step 1: Check recent arrivals to infer current lead_time (e.g., 'lead_time was 2 days')\n"
@@ -489,6 +497,8 @@ def main():
     parser = argparse.ArgumentParser(description='Run hybrid strategy (LLM + OR) with CSV demand')
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
+    parser.add_argument('--promised-lead-time', type=int, default=0,
+                       help='Promised lead time used by OR and shown to LLM (default: 0). Actual lead time in CSV may differ.')
     parser.add_argument('--human-feedback', action='store_true',
                        help='Enable daily human feedback on agent decisions (Mode 1)')
     parser.add_argument('--guidance-frequency', type=int, default=0,
@@ -523,6 +533,9 @@ def main():
     unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
     initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
     print(f"\nUsing unified initial samples for all items: {unified_samples}")
+    print(f"Promised lead time (used by OR, shown to LLM): {args.promised_lead_time} days")
+    print(f"Note: OR uses promised lead time for recommendations. Actual lead times in CSV may differ.")
+    print(f"      LLM must infer actual lead time from arrivals and adjust OR recommendations accordingly.")
     
     # Set NUM_DAYS based on CSV
     from textarena.envs.VendingMachine import env as vm_env_module
@@ -535,10 +548,10 @@ def main():
     for day, news in news_schedule.items():
         env.add_news(day, news)
     
-    # Create OR agent (for recommendations only)
+    # Create OR agent (for recommendations only - uses promised lead time)
     or_items_config = {
         config['item_id']: {
-            'lead_time': config['lead_time'],
+            'lead_time': args.promised_lead_time,  # Use promised value instead of CSV value
             'profit': config['profit'],
             'holding_cost': config['holding_cost']
         }
@@ -549,6 +562,7 @@ def main():
     # Create hybrid VM agent
     base_agent = make_hybrid_vm_agent(
         initial_samples=initial_samples,
+        promised_lead_time=args.promised_lead_time,
         human_feedback_enabled=args.human_feedback,
         guidance_enabled=(args.guidance_frequency > 0)
     )

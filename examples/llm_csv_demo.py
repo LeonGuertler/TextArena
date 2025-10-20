@@ -207,7 +207,8 @@ class CSVDemandPlayer:
         return json.dumps(result, indent=2)
 
 
-def make_vm_agent(initial_samples: dict = None, human_feedback_enabled: bool = False, guidance_enabled: bool = False):
+def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0, 
+                  human_feedback_enabled: bool = False, guidance_enabled: bool = False):
     """Create VM agent with updated prompt for profit-based system."""
     system = (
         "You are the Vending Machine controller (VM). "
@@ -216,15 +217,18 @@ def make_vm_agent(initial_samples: dict = None, human_feedback_enabled: bool = F
         "Daily reward: R_t = Profit × Sold - HoldingCost × EndingInventory. "
         "\n\n"
         "Key mechanics:\n"
+        f"- Supplier-promised lead time: {promised_lead_time} days\n"
         "- Orders placed today arrive after a LEAD TIME (number of days until delivery)\n"
-        "- ⚠️ IMPORTANT: Lead time is NOT directly revealed to you. You must INFER it from arrival records.\n"
+        "- ⚠️ IMPORTANT: Actual lead time may differ from promised and may change over time!\n"
+        "- Lead time is NOT directly revealed. You must INFER it from arrival records.\n"
         "- When goods arrive, you'll see: 'arrived=X units (ordered on Day Y, lead_time was Z days)'\n"
-        "- Lead time MAY CHANGE over time - don't assume it stays constant!\n"
+        "- Use this information to track actual lead time and adjust your strategy\n"
         "\n"
         "Inventory visibility:\n"
         "- On-hand: Current inventory available for sale today\n"
         "- In-transit: Total units you ordered that haven't arrived yet (but you don't know WHEN they'll arrive)\n"
         "- You must track your own orders and infer when they'll arrive based on inferred lead_time\n"
+        "- ⚠️ Initial inventory on Day 1: Each item starts with 5 units on-hand\n"
         "\n"
         "- Holding cost is charged on ending inventory each day\n"
         "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
@@ -307,6 +311,8 @@ def main():
     parser = argparse.ArgumentParser(description='Run vending machine with CSV demand')
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
+    parser.add_argument('--promised-lead-time', type=int, default=0,
+                       help='Promised lead time shown to LLM (default: 0). Actual lead time in CSV may differ.')
     parser.add_argument('--human-feedback', action='store_true',
                        help='Enable daily human feedback on agent decisions (Mode 1)')
     parser.add_argument('--guidance-frequency', type=int, default=0,
@@ -341,6 +347,8 @@ def main():
     unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
     initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
     print(f"\nUsing unified initial samples for all items: {unified_samples}")
+    print(f"Promised lead time (shown to LLM): {args.promised_lead_time} days")
+    print(f"Note: Actual lead times in CSV may differ. LLM must infer actual lead time from arrivals.")
     
     # Set NUM_DAYS based on CSV
     from textarena.envs.VendingMachine import env as vm_env_module
@@ -356,6 +364,7 @@ def main():
     # Create VM agent with historical data
     base_agent = make_vm_agent(
         initial_samples=initial_samples,
+        promised_lead_time=args.promised_lead_time,
         human_feedback_enabled=args.human_feedback,
         guidance_enabled=(args.guidance_frequency > 0)
     )

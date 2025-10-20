@@ -63,15 +63,14 @@ class VendingMachineEnv(ta.Env):
         # Item definitions: {item_id: {description, lead_time, profit, holding_cost}}
         self.items: Dict[str, Dict[str, Any]] = {}
         
-        # Inventory pipeline: {item_id: [I(j,0), I(j,1), ..., I(j,L)]}
-        # Position 0 = on-hand inventory (ready to sell)
-        # Position k = arrives in k days
-        self.inventory_pipeline: Dict[str, List[int]] = {}
+        # On-hand inventory: {item_id: quantity}
+        # This is inventory available for sale NOW
+        self.on_hand_inventory: Dict[str, int] = {}
         
-        # Order tracking: Track which day each order was placed
-        # {item_id: [[orders at pos 0], [orders at pos 1], ...]}
-        # Each order: (quantity, order_day)
-        self.order_tracking: Dict[str, List[List[Tuple[int, int]]]] = {}
+        # Pending orders: List of all orders that haven't arrived yet
+        # Each order: {item_id, quantity, order_day, arrival_day, original_lead_time}
+        # arrival_day = order_day + lead_time at time of ordering
+        self.pending_orders: List[Dict[str, Any]] = []
         
         # News schedule: {day: news_text} revealed to both agents at start
         self.news_schedule: Dict[int, str] = {}
@@ -106,18 +105,8 @@ class VendingMachineEnv(ta.Env):
             'holding_cost': holding_cost
         }
         
-        # Initialize pipeline: [on-hand, +1 day, +2 days, ..., +lead_time days]
-        # Pipeline length = lead_time + 1 (positions 0 to lead_time)
-        # If lead_time is inf, use minimal pipeline (only on-hand position)
-        if lead_time == float('inf'):
-            pipeline_size = 1  # Only on-hand inventory, no pipeline
-        else:
-            pipeline_size = lead_time + 1
-        
-        self.inventory_pipeline[item_id] = [0] * pipeline_size
-        
-        # Initialize order tracking for this item
-        self.order_tracking[item_id] = [[] for _ in range(pipeline_size)]
+        # Initialize on-hand inventory (will be set to INITIAL_INVENTORY_PER_ITEM in reset)
+        self.on_hand_inventory[item_id] = 0
         
         self.total_ordered[item_id] = 0
         self.total_sold[item_id] = 0
@@ -150,19 +139,11 @@ class VendingMachineEnv(ta.Env):
         self.current_day_orders = {}
         self.current_day_arrivals = {}
         self.daily_logs = []
+        self.pending_orders = []
         
-        # Initialize inventory pipeline: Set position 0 (on-hand) to initial inventory
+        # Initialize on-hand inventory to INITIAL_INVENTORY_PER_ITEM for each item
         for item_id in self.items:
-            lead_time = self.items[item_id]['lead_time']
-            
-            # If lead_time is inf, use minimal pipeline (only on-hand position)
-            if lead_time == float('inf'):
-                pipeline_size = 1
-            else:
-                pipeline_size = lead_time + 1
-            
-            self.inventory_pipeline[item_id] = [INITIAL_INVENTORY_PER_ITEM] + [0] * (pipeline_size - 1)
-            self.order_tracking[item_id] = [[] for _ in range(pipeline_size)]
+            self.on_hand_inventory[item_id] = INITIAL_INVENTORY_PER_ITEM
             self.total_ordered[item_id] = 0
             self.total_sold[item_id] = 0
 
@@ -170,7 +151,8 @@ class VendingMachineEnv(ta.Env):
         game_state: Dict[str, Any] = {
             "day": self.current_day,
             "items": self.items,
-            "inventory_pipeline": self.inventory_pipeline,
+            "on_hand_inventory": self.on_hand_inventory,
+            "pending_orders": self.pending_orders,
             "daily_logs": self.daily_logs,
         }
 
@@ -185,9 +167,12 @@ class VendingMachineEnv(ta.Env):
         """
         Update item configuration dynamically (supports changing parameters per day).
         
+        IMPORTANT: lead_time changes only affect NEW orders placed after the change.
+        Existing orders in transit maintain their original arrival_day (as in real logistics).
+        
         Args:
             item_id: Item identifier
-            lead_time: New lead time (if None, unchanged)
+            lead_time: New lead time for future orders (if None, unchanged)
             profit: New profit (if None, unchanged)
             holding_cost: New holding cost (if None, unchanged)
             description: New description (if None, unchanged)
@@ -195,25 +180,10 @@ class VendingMachineEnv(ta.Env):
         if item_id not in self.items:
             raise ValueError(f"Unknown item: {item_id}")
         
+        # Update lead_time for future orders only
+        # Existing orders in self.pending_orders keep their original arrival_day
         if lead_time is not None:
-            old_lead_time = self.items[item_id]['lead_time']
             self.items[item_id]['lead_time'] = lead_time
-            
-            # Resize pipeline if lead_time changed (unless inf)
-            if lead_time != old_lead_time and lead_time != float('inf') and old_lead_time != float('inf'):
-                old_pipeline = self.inventory_pipeline[item_id]
-                old_tracking = self.order_tracking[item_id]
-                
-                new_pipeline = [0] * (int(lead_time) + 1)
-                new_tracking = [[] for _ in range(int(lead_time) + 1)]
-                
-                # Copy existing data (truncate or extend as needed)
-                for i in range(min(len(old_pipeline), len(new_pipeline))):
-                    new_pipeline[i] = old_pipeline[i]
-                    new_tracking[i] = old_tracking[i]
-                
-                self.inventory_pipeline[item_id] = new_pipeline
-                self.order_tracking[item_id] = new_tracking
         
         if profit is not None:
             self.items[item_id]['profit'] = profit
@@ -255,10 +225,12 @@ class VendingMachineEnv(ta.Env):
             holding_cost = item_info['holding_cost']
             
             if pid == 0:  # VM player - show profit/holding_cost and inventory (but NOT lead_time)
-                on_hand = self.inventory_pipeline[item_id][0]
-                # Calculate total in-transit (sum of pipeline positions 1 to end)
-                in_transit = sum(self.inventory_pipeline[item_id][i] 
-                                for i in range(1, len(self.inventory_pipeline[item_id])))
+                on_hand = self.on_hand_inventory[item_id]
+                # Calculate total in-transit from pending_orders
+                # Include ALL orders that haven't arrived yet (arrival_day >= current_day)
+                in_transit = sum(order['quantity'] for order in self.pending_orders 
+                                if order['item_id'] == item_id 
+                                and self.current_day <= order['arrival_day'] < float('inf'))
                 board_lines.append(
                     f"{item_id} ({desc}): Profit=${profit}/unit, Holding=${holding_cost}/unit/day"
                 )
@@ -305,7 +277,7 @@ class VendingMachineEnv(ta.Env):
             # Store orders for this turn (will be modified if lead_time=inf)
             self.current_day_orders = {}
             
-            # Add orders to pipeline at position lead_time and track them
+            # Add orders to pending_orders with calculated arrival_day
             # Force order=0 if lead_time=inf (cannot restock)
             for item_id, qty in orders.items():
                 lead_time = self.items[item_id]['lead_time']
@@ -318,9 +290,18 @@ class VendingMachineEnv(ta.Env):
                 else:
                     self.current_day_orders[item_id] = qty
                     if qty > 0:
-                        lead_time_idx = int(lead_time)  # Convert to int for indexing
-                        self.inventory_pipeline[item_id][lead_time_idx] += qty
-                        self.order_tracking[item_id][lead_time_idx].append((qty, self.current_day))
+                        # Calculate arrival_day = order_day + lead_time
+                        arrival_day = self.current_day + lead_time
+                        
+                        # Add to pending_orders
+                        self.pending_orders.append({
+                            'item_id': item_id,
+                            'quantity': qty,
+                            'order_day': self.current_day,
+                            'arrival_day': arrival_day,
+                            'original_lead_time': lead_time
+                        })
+                        
                         self.total_ordered[item_id] += qty
 
             # Advance to Demand
@@ -344,46 +325,48 @@ class VendingMachineEnv(ta.Env):
                     self.state.set_invalid_move(f"Negative quantity for {item_id}")
                     return self.state.step(rotate_player=False)
 
-            # Calculate arrivals for today (before processing sales)
-            # Arrivals = goods from pipeline[1] (will arrive after advance) + goods ordered today with lead_time=0
+            # Find orders that arrive TODAY (arrival_day == current_day)
+            # These orders will be moved from pending_orders to on_hand_inventory
             arrivals = {}
             for item_id in self.items:
                 arrivals[item_id] = []
+            
+            # Process arrivals: find all orders with arrival_day == current_day
+            arrived_orders = [order for order in self.pending_orders 
+                             if order['arrival_day'] == self.current_day]
+            
+            # Group arrivals by item_id and add to on_hand_inventory
+            for order in arrived_orders:
+                item_id = order['item_id']
+                qty = order['quantity']
+                order_day = order['order_day']
                 
-                # Goods from pipeline[1] (these will move to position 0 after advance_pipeline)
-                if len(self.inventory_pipeline[item_id]) > 1:
-                    pipeline_arrivals = self.order_tracking[item_id][1].copy()
-                    arrivals[item_id].extend(pipeline_arrivals)
+                # Add to arrivals tracking
+                arrivals[item_id].append((qty, order_day))
                 
-                # Goods ordered today with lead_time=0 (already in pipeline[0])
-                if item_id in self.current_day_orders and self.current_day_orders[item_id] > 0:
-                    lead_time = self.items[item_id]['lead_time']
-                    if lead_time == 0:
-                        # These orders are in pipeline[0] and available today
-                        today_immediate_orders = [(qty, day) for qty, day in self.order_tracking[item_id][0] 
-                                                 if day == self.current_day]
-                        arrivals[item_id].extend(today_immediate_orders)
+                # Move to on_hand_inventory
+                self.on_hand_inventory[item_id] += qty
+            
+            # Remove arrived orders from pending_orders
+            self.pending_orders = [order for order in self.pending_orders 
+                                  if order['arrival_day'] != self.current_day]
             
             self.current_day_arrivals = arrivals
             
-            # Record starting on-hand inventory (before sales, after arrivals)
-            # Note: arrivals from pipeline[1] haven't physically moved yet (that happens in advance_pipeline)
-            # but we conceptually count them as "arrived" for this day
+            # Record starting on-hand inventory (after arrivals, before sales)
             starting_inventory = {}
             for item_id in self.items:
-                # Starting inventory = current on-hand + incoming from pipeline[1]
-                incoming_qty = self.inventory_pipeline[item_id][1] if len(self.inventory_pipeline[item_id]) > 1 else 0
-                starting_inventory[item_id] = self.inventory_pipeline[item_id][0] + incoming_qty
+                starting_inventory[item_id] = self.on_hand_inventory[item_id]
             
-            # Process sales: sell from on-hand inventory only (position 0)
+            # Process sales: sell from on-hand inventory only
             actual_sales = {}
             for item_id, requested_qty in purchases.items():
-                on_hand = self.inventory_pipeline[item_id][0]
+                on_hand = self.on_hand_inventory[item_id]
                 sold = min(requested_qty, on_hand)
                 actual_sales[item_id] = sold
                 
                 # Reduce on-hand inventory
-                self.inventory_pipeline[item_id][0] -= sold
+                self.on_hand_inventory[item_id] -= sold
                 self.total_sold[item_id] += sold
 
             # Calculate daily reward: R_t = p_t · y_t - h_t · I_t
@@ -397,7 +380,7 @@ class VendingMachineEnv(ta.Env):
                 holding_cost = self.items[item_id]['holding_cost']
                 
                 sold = actual_sales.get(item_id, 0)
-                ending_inventory = self.inventory_pipeline[item_id][0]
+                ending_inventory = self.on_hand_inventory[item_id]
                 
                 # Profit from sales
                 daily_profit += profit * sold
@@ -416,7 +399,7 @@ class VendingMachineEnv(ta.Env):
                 "starting_inventory": starting_inventory.copy(),
                 "requests": purchases.copy(),
                 "sales": actual_sales.copy(),
-                "ending_inventory": {item_id: self.inventory_pipeline[item_id][0] 
+                "ending_inventory": {item_id: self.on_hand_inventory[item_id] 
                                      for item_id in self.items},
                 "daily_profit": daily_profit,
                 "daily_holding_cost": daily_holding_cost,
@@ -424,22 +407,30 @@ class VendingMachineEnv(ta.Env):
             }
             self.daily_logs.append(day_log)
 
-            # Print daily summary (console output)
+            # Print daily summary (console output) - unified format with LLM observation
             print(f"\n=== Day {self.current_day} Summary ===")
             if self.current_day in self.news_schedule:
                 print(f"NEWS: {self.news_schedule[self.current_day]}")
             for item_id in self.items:
                 ordered = self.current_day_orders.get(item_id, 0)
+                arrival_list = arrivals[item_id]
+                start_inv = starting_inventory[item_id]
                 demand = purchases.get(item_id, 0)
                 sold = actual_sales.get(item_id, 0)
-                ending_stock = self.inventory_pipeline[item_id][0]
-                arrival_list = arrivals[item_id]
+                ending_inv = self.on_hand_inventory[item_id]
+                
+                # Format arrival information with lead_time calculation
                 arrival_str = ""
                 if arrival_list:
-                    total_arrived = sum(qty for qty, _ in arrival_list)
-                    arrival_details = ", ".join(f"{qty} (Day {day})" for qty, day in arrival_list)
-                    arrival_str = f", arrived={total_arrived} [{arrival_details}]"
-                print(f"{item_id}: ordered={ordered}{arrival_str}, demand={demand}, sold={sold}, ending_stock={ending_stock}")
+                    arrival_parts = []
+                    for qty, order_day in arrival_list:
+                        actual_lead_time = self.current_day - order_day
+                        arrival_parts.append(f"{qty} units (ordered on Day {order_day}, lead_time was {actual_lead_time} days)")
+                    arrival_str = f", arrived={', '.join(arrival_parts)}"
+                else:
+                    arrival_str = ", arrived=0"
+                
+                print(f"{item_id}: ordered={ordered}{arrival_str}, starting on-hand inventory={start_inv}, demand={demand}, sold={sold}, ending on-hand inventory={ending_inv}")
             print(f"Daily Profit: ${daily_profit:.2f}, Daily Holding Cost: ${daily_holding_cost:.2f}")
             print(f"Daily Reward (R_t): ${daily_reward:.2f}")
 
@@ -452,7 +443,7 @@ class VendingMachineEnv(ta.Env):
                 start_inv = starting_inventory[item_id]
                 demand = purchases.get(item_id, 0)
                 sold = actual_sales.get(item_id, 0)
-                ending_inv = self.inventory_pipeline[item_id][0]
+                ending_inv = self.on_hand_inventory[item_id]
                 
                 item_line = f"  {item_id}: ordered={ordered}"
                 
@@ -491,9 +482,6 @@ class VendingMachineEnv(ta.Env):
                 message="\n".join(demand_summary_lines),
                 observation_type=ta.ObservationType.GAME_ACTION_DESCRIPTION,
             )
-
-            # Advance pipeline: shift everything left by 1 position
-            self._advance_pipeline()
 
             # Next day setup
             self.current_day += 1
@@ -581,33 +569,6 @@ class VendingMachineEnv(ta.Env):
         except Exception:
             return None
 
-    def _advance_pipeline(self):
-        """
-        Advance the inventory pipeline by 1 day.
-        Shift all positions left: position k becomes position k-1.
-        Position lead_time becomes 0 (new items added to pipeline in next step).
-        Also advance order tracking correspondingly.
-        """
-        for item_id in self.items:
-            pipeline = self.inventory_pipeline[item_id]
-            tracking = self.order_tracking[item_id]
-            
-            # Shift left: [on-hand, +1, +2, ..., +L] -> [on-hand + old_+1, old_+2, ..., 0]
-            for i in range(len(pipeline) - 1):
-                if i == 0:
-                    # On-hand inventory receives items from position 1
-                    pipeline[0] += pipeline[1]
-                    # Merge order tracking from position 1 into position 0
-                    tracking[0].extend(tracking[1])
-                else:
-                    # Each position receives from next position
-                    pipeline[i] = pipeline[i + 1]
-                    tracking[i] = tracking[i + 1].copy()
-            
-            # Last position becomes 0 (no new orders yet)
-            pipeline[-1] = 0
-            tracking[-1] = []
-
     def _finalize_and_end(self):
         """Sum up all daily rewards and finalize the episode."""
         # Sum all daily rewards R_t = sum(p_t · y_t - h_t · I_t) over all days
@@ -622,8 +583,9 @@ class VendingMachineEnv(ta.Env):
             self.state.game_info[pid].update({
                 "total_ordered": self.total_ordered,
                 "total_sold": self.total_sold,
-                "ending_inventory": {item_id: self.inventory_pipeline[item_id][0] 
+                "ending_inventory": {item_id: self.on_hand_inventory[item_id] 
                                      for item_id in self.items},
+                "pending_orders": self.pending_orders,
                 "total_reward": total_reward,
                 "total_sales_profit": total_sales_profit,
                 "total_holding_cost": total_holding_cost,

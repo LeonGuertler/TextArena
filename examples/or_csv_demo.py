@@ -256,11 +256,11 @@ class ORAgent:
         Parse current total inventory (on-hand + in-transit) from observation.
         
         Observation format:
-          chips(Regular) (...): Profit=$2.5/unit, Holding=$0.1/unit/day, Lead=2d
-            On-hand: 5, Pipeline: [10, 0]
+          chips(Regular) (...): Profit=$2/unit, Holding=$1/unit/day
+            On-hand: 5, In-transit: 10 units
         
         Returns:
-            Total inventory across all pipeline stages (on-hand + sum of pipeline)
+            Total inventory across all pipeline stages (on-hand + in-transit)
         """
         try:
             lines = observation.split('\n')
@@ -271,23 +271,23 @@ class ORAgent:
                     if i + 1 < len(lines):
                         inventory_line = lines[i + 1]
                         
-                        # Parse on-hand: "  On-hand: 5, Pipeline: [10, 0]"
-                        if "On-hand:" in inventory_line and "Pipeline:" in inventory_line:
+                        # Parse: "  On-hand: 5, In-transit: 10 units"
+                        if "On-hand:" in inventory_line and "In-transit:" in inventory_line:
                             # Extract on-hand value
                             on_hand_start = inventory_line.find("On-hand:") + len("On-hand:")
                             on_hand_end = inventory_line.find(",", on_hand_start)
                             on_hand = int(inventory_line[on_hand_start:on_hand_end].strip())
                             
-                            # Extract pipeline array
-                            pipeline_start = inventory_line.find("[")
-                            pipeline_end = inventory_line.find("]") + 1
-                            if pipeline_start != -1 and pipeline_end > pipeline_start:
-                                pipeline_str = inventory_line[pipeline_start:pipeline_end]
-                                pipeline = json.loads(pipeline_str)
-                                in_transit = sum(pipeline)
-                                
-                                total_inventory = on_hand + in_transit
-                                return total_inventory
+                            # Extract in-transit value: "In-transit: 10 units"
+                            in_transit_start = inventory_line.find("In-transit:") + len("In-transit:")
+                            # Find the end - look for "units" or end of line
+                            in_transit_str = inventory_line[in_transit_start:].strip()
+                            # Remove "units" if present
+                            in_transit_str = in_transit_str.replace("units", "").strip()
+                            in_transit = int(in_transit_str)
+                            
+                            total_inventory = on_hand + in_transit
+                            return total_inventory
             
             # If not found, return 0 (shouldn't happen in normal operation)
             print(f"Warning: Could not parse inventory for {item_id}, assuming 0")
@@ -408,6 +408,8 @@ def main():
     parser = argparse.ArgumentParser(description='Run OR algorithm baseline with CSV demand')
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
+    parser.add_argument('--promised-lead-time', type=int, default=0,
+                       help='Promised lead time used by OR algorithm (default: 0). Actual lead time in CSV may differ.')
     args = parser.parse_args()
     
     # Create environment
@@ -432,6 +434,8 @@ def main():
     unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
     initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
     print(f"\nUsing unified initial samples for all items: {unified_samples}")
+    print(f"Promised lead time (used by OR algorithm): {args.promised_lead_time} days")
+    print(f"Note: Actual lead times in CSV may differ, creating a test scenario for OR robustness.")
     
     # Set NUM_DAYS based on CSV
     from textarena.envs.VendingMachine import env as vm_env_module
@@ -444,10 +448,10 @@ def main():
     for day, news in news_schedule.items():
         env.add_news(day, news)
     
-    # Create OR agent
+    # Create OR agent (uses promised lead time, not actual CSV lead time)
     or_items_config = {
         config['item_id']: {
-            'lead_time': config['lead_time'],
+            'lead_time': args.promised_lead_time,  # Use promised value instead of CSV value
             'profit': config['profit'],
             'holding_cost': config['holding_cost']
         }
