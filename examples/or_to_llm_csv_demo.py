@@ -114,6 +114,9 @@ class CSVDemandPlayer:
             lead_time_val = first_row[f'lead_time_{item_id}']
             if isinstance(lead_time_val, str) and lead_time_val.lower() == 'inf':
                 lead_time = float('inf')
+            elif isinstance(lead_time_val, float) and lead_time_val == float('inf'):
+                # pandas reads "inf" as numpy.float64 inf
+                lead_time = float('inf')
             else:
                 lead_time = int(lead_time_val)
             
@@ -150,6 +153,9 @@ class CSVDemandPlayer:
         # Handle lead_time - could be int or "inf"
         lead_time_val = row[f'lead_time_{item_id}']
         if isinstance(lead_time_val, str) and lead_time_val.lower() == 'inf':
+            lead_time = float('inf')
+        elif isinstance(lead_time_val, float) and lead_time_val == float('inf'):
+            # pandas reads "inf" as numpy.float64 inf
             lead_time = float('inf')
         else:
             lead_time = int(lead_time_val)
@@ -382,7 +388,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "Key mechanics:\n"
         f"- Supplier-promised lead time: {promised_lead_time} days\n"
         "- Orders placed today arrive after a LEAD TIME (number of days until delivery)\n"
-        "- ⚠️ IMPORTANT: Actual lead time may differ from promised and may change over time!\n"
+        "- IMPORTANT: Actual lead time may differ from promised and may change over time!\n"
         "- Lead time is NOT directly revealed. You must INFER it from arrival records.\n"
         "- When goods arrive, you'll see: 'arrived=X units (ordered on Day Y, lead_time was Z days)'\n"
         "- Use this information to track actual lead time and adjust your strategy\n"
@@ -391,7 +397,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "- On-hand: Current inventory available for sale today\n"
         "- In-transit: Total units you ordered that haven't arrived yet (but you don't know WHEN they'll arrive)\n"
         "- You must track your own orders and infer when they'll arrive based on inferred lead_time\n"
-        "- ⚠️ Initial inventory on Day 1: Each item starts with 5 units on-hand\n"
+        "- IMPORTANT: Initial inventory on Day 1: Each item starts with 5 units on-hand\n"
         "\n"
         "- Holding cost is charged on ending inventory each day\n"
         "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
@@ -435,16 +441,16 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         system += "Use this data to inform your ordering decisions, especially on Day 1.\n\n"
     
     system += (
-        "🔍 OR ALGORITHM ASSISTANCE:\n"
+        "OR ALGORITHM ASSISTANCE:\n"
         "You will receive recommendations from an Operations Research (OR) algorithm each day.\n"
         "The OR algorithm uses a base-stock policy based on statistical analysis:\n"
         "- It calculates optimal orders using historical demand patterns\n"
-        f"- ⚠️ IMPORTANT: OR uses the PROMISED lead time ({promised_lead_time} days) in its calculations\n"
+        f"- IMPORTANT: OR uses the PROMISED lead time ({promised_lead_time} days) in its calculations\n"
         "- Uses profit and holding cost in its calculations\n"
         "- Aims to balance service level (meeting demand) vs holding costs\n"
         "- Works well for NORMAL, STABLE demand patterns\n"
         "\n"
-        "⚠️ IMPORTANT LIMITATIONS:\n"
+        "IMPORTANT LIMITATIONS:\n"
         "1. The OR algorithm CANNOT react to news events. It only looks at historical data.\n"
         "2. The OR algorithm uses PROMISED lead time, not actual lead time.\n"
         "This is where YOU come in!\n"
@@ -490,7 +496,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "\n"
         "Do NOT include any other text outside the JSON."
     )
-    return ta.agents.OpenAIAgent(model_name="gpt-4o", system_prompt=system, temperature=0)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
 
 
 def main():
@@ -599,6 +605,7 @@ def main():
         
         if pid == 0:  # VM agent (Hybrid: LLM + OR)
             # Update item configurations for current day (supports dynamic changes)
+            has_inf_lead_time = False
             for item_id in csv_player.get_item_ids():
                 config = csv_player.get_day_item_config(current_day, item_id)
                 env.update_item_config(
@@ -608,13 +615,34 @@ def main():
                     holding_cost=config['holding_cost'],
                     description=config['description']
                 )
+                # Check if any item has lead_time=inf (supplier unavailable)
+                if config['lead_time'] == float('inf'):
+                    has_inf_lead_time = True
+            
+            # If supplier unavailable (lead_time=inf), skip LLM+OR decision
+            if has_inf_lead_time:
+                # Create action with order=0 for all items
+                zero_orders = {item_id: 0 for item_id in csv_player.get_item_ids()}
+                action = json.dumps({"action": zero_orders}, indent=2)
+                
+                print(f"\nWARNING Day {current_day}: Supplier unavailable (lead_time=inf)")
+                print("VM did not place order (automatically set to 0)")
+                print("\nDay {current_day} Hybrid Decision:")
+                print("="*60)
+                print(action)
+                print("="*60)
+                sys.stdout.flush()
+                
+                # Skip to demand turn
+                done, _ = env.step(action=action)
+                continue
             
             # Get OR recommendations
             or_recommendations = or_agent.get_recommendation(observation)
             
             # Format OR recommendations for display
             or_text = "\n" + "="*60 + "\n"
-            or_text += "📊 OR ALGORITHM RECOMMENDATIONS (for your reference):\n"
+            or_text += "OR ALGORITHM RECOMMENDATIONS (for your reference):\n"
             for item_id, rec_qty in or_recommendations.items():
                 or_text += f"  {item_id}: {rec_qty} units\n"
             or_text += "\nNote: OR algorithm uses statistical base-stock policy based on historical demand.\n"

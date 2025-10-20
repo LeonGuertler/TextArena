@@ -117,6 +117,9 @@ class CSVDemandPlayer:
             lead_time_val = first_row[f'lead_time_{item_id}']
             if isinstance(lead_time_val, str) and lead_time_val.lower() == 'inf':
                 lead_time = float('inf')
+            elif isinstance(lead_time_val, float) and lead_time_val == float('inf'):
+                # pandas reads "inf" as numpy.float64 inf
+                lead_time = float('inf')
             else:
                 lead_time = int(lead_time_val)
             
@@ -153,6 +156,9 @@ class CSVDemandPlayer:
         # Handle lead_time - could be int or "inf"
         lead_time_val = row[f'lead_time_{item_id}']
         if isinstance(lead_time_val, str) and lead_time_val.lower() == 'inf':
+            lead_time = float('inf')
+        elif isinstance(lead_time_val, float) and lead_time_val == float('inf'):
+            # pandas reads "inf" as numpy.float64 inf
             lead_time = float('inf')
         else:
             lead_time = int(lead_time_val)
@@ -624,7 +630,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "- Think carefully about your parameter choices\n"
     )
     
-    return ta.agents.OpenAIAgent(model_name="gpt-4o", system_prompt=system, temperature=0)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
 
 
 # ============================================================================
@@ -712,9 +718,9 @@ def main():
         print("HUMAN-IN-THE-LOOP MODE ACTIVATED")
         print("="*70)
         if args.human_feedback:
-            print("✓ Mode 1: Daily feedback on agent decisions is ENABLED")
+            print("Mode 1: Daily feedback on agent decisions is ENABLED")
         if args.guidance_frequency > 0:
-            print(f"✓ Mode 2: Strategic guidance every {args.guidance_frequency} days is ENABLED")
+            print(f"Mode 2: Strategic guidance every {args.guidance_frequency} days is ENABLED")
         print("="*70 + "\n")
         
         vm_agent = ta.agents.HumanFeedbackAgent(
@@ -737,6 +743,7 @@ def main():
         
         if pid == 0:  # VM agent (LLM→OR)
             # Update item configurations for current day (supports dynamic changes)
+            has_inf_lead_time = False
             for item_id in csv_player.get_item_ids():
                 config = csv_player.get_day_item_config(current_day, item_id)
                 env.update_item_config(
@@ -748,6 +755,27 @@ def main():
                 )
                 # Update tracking
                 current_item_configs[item_id] = config
+                # Check if any item has lead_time=inf (supplier unavailable)
+                if config['lead_time'] == float('inf'):
+                    has_inf_lead_time = True
+            
+            # If supplier unavailable (lead_time=inf), skip LLM→OR decision
+            if has_inf_lead_time:
+                # Create action with order=0 for all items
+                zero_orders = {item_id: 0 for item_id in csv_player.get_item_ids()}
+                action = json.dumps({"action": zero_orders}, indent=2)
+                
+                print(f"\nWARNING Day {current_day}: Supplier unavailable (lead_time=inf)")
+                print("VM did not place order (automatically set to 0)")
+                print("\n" + "="*70)
+                print("Final Order Action:")
+                print(action)
+                print("="*70)
+                sys.stdout.flush()
+                
+                # Skip to demand turn
+                done, _ = env.step(action=action)
+                continue
             
             # Parse observed lead times from arrivals in history
             new_lead_times = parse_arrivals_from_history(observation)
@@ -794,11 +822,11 @@ def main():
                 print("\n" + "="*70)
                 
             except json.JSONDecodeError as e:
-                print(f"\n❌ ERROR: Failed to parse LLM output as JSON: {e}")
+                print(f"\nERROR: Failed to parse LLM output as JSON: {e}")
                 print(f"Raw output:\n{llm_response}")
                 sys.exit(1)
             except ValueError as e:
-                print(f"\n❌ ERROR: Invalid parameter specification: {e}")
+                print(f"\nERROR: Invalid parameter specification: {e}")
                 print(f"Raw output:\n{llm_response}")
                 sys.exit(1)
             
@@ -859,7 +887,7 @@ def main():
                     orders[item_id] = order
                     
                 except ValueError as e:
-                    print(f"  ❌ ERROR computing order: {e}")
+                    print(f"  ERROR computing order: {e}")
                     sys.exit(1)
             
             # Create action JSON

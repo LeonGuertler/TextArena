@@ -19,7 +19,7 @@ def test_wrapper_creation():
     # Create a base agent (using a mock if OpenAI key not available)
     try:
         base_agent = ta.agents.OpenAIAgent(
-            model_name="gpt-4o",
+            model_name="gpt-4o-mini",
             system_prompt="You are a test agent."
         )
         print("[OK] Base OpenAIAgent created")
