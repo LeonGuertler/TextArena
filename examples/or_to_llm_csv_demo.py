@@ -379,12 +379,20 @@ class ORAgent:
 def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
                          human_feedback_enabled: bool = False, guidance_enabled: bool = False):
     """Create hybrid VM agent that considers both OR recommendations and news."""
+    
+    # Extract item IDs to show in prompt
+    available_items = list(initial_samples.keys()) if initial_samples else []
+    items_str = ", ".join([f'"{item}"' for item in available_items])
+    
     system = (
         "You are the Vending Machine controller (VM). "
         "You manage multiple items, each with unit profit and holding costs. "
         "Objective: Maximize total reward = sum of daily rewards R_t. "
         "Daily reward: R_t = Profit × Sold - HoldingCost × EndingInventory. "
         "\n\n"
+        f"AVAILABLE ITEMS: {items_str}\n"
+        "⚠️ CRITICAL: You MUST use these EXACT item IDs (with parentheses and all special characters) in your action!\n"
+        "\n"
         "Key mechanics:\n"
         f"- Supplier-promised lead time: {promised_lead_time} days\n"
         "- Orders placed today arrive after a LEAD TIME (number of days until delivery)\n"
@@ -473,6 +481,17 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "- Step 4: Your analysis: Sports events may increase demand significantly in 2 days (lead_time!)\n"
         "- Step 5: Your decision: Adjust order upward based on your reasoning\n"
         "\n"
+    )
+    
+    # Create example format with actual item IDs
+    if available_items:
+        example_action = ", ".join([f'"{item}": 100' for item in available_items[:2]])  # Show up to 2 items
+        if len(available_items) > 2:
+            example_action += ", ..."
+    else:
+        example_action = '"item_id": quantity, ...'
+    
+    system += (
         "IMPORTANT: Think step by step, then decide.\n"
         "You MUST respond with valid JSON in this exact format:\n"
         "{\n"
@@ -483,17 +502,12 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         '(5) consider lead_time when adjusting OR recommendations (goods arrive after lead_time!), '
         '(6) decide: follow OR baseline or adjust based on news/analysis, '
         '(7) explain your final ordering strategy",\n'
-        '  "action": {"item_id": quantity, "item_id": quantity, ...}\n'
+        f'  "action": {{{example_action}}}\n'
         "}\n"
+        "\n"
+        f"⚠️ REMEMBER: Use EXACT item IDs: {items_str}\n"
         "\n"
         "Think through your rationale BEFORE making the final order decision.\n"
-        "\n"
-        "Example format:\n"
-        "{\n"
-        '  "rationale": "[Infer lead_time] → [Review OR] → [Analyze inventory/demand] → [Consider news] → [Account for lead_time] → [Decide: follow OR or adjust]",\n'
-        '  "action": {"item_id_1": quantity, "item_id_2": quantity, ...}\n'
-        "}\n"
-        "\n"
         "Do NOT include any other text outside the JSON."
     )
     return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)

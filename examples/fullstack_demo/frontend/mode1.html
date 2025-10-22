@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mode 1 - Daily Feedback</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/config.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
+    header { background: #667eea; color: white; padding: 16px; text-align: center; }
+    main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    h1, h2 { margin-top: 0; }
+    section { background: #fff; padding: 20px; margin-bottom: 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    label { display: block; margin-bottom: 8px; font-weight: 500; }
+    input, textarea, button, select { width: 100%; padding: 10px; margin-bottom: 12px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; }
+    textarea { min-height: 80px; font-family: inherit; }
+    button { background: #667eea; color: white; border: none; cursor: pointer; font-weight: 600; transition: background 0.3s; }
+    button:hover { background: #5568d3; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    #transcript { max-height: 400px; overflow-y: auto; background: #1e1e1e; color: #0f0; padding: 16px; font-family: 'Courier New', monospace; border-radius: 6px; font-size: 13px; white-space: pre-wrap; }
+    #chat-history { max-height: 300px; overflow-y: auto; background: #f9f9f9; padding: 12px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 12px; }
+    .chat-message { margin-bottom: 12px; padding: 10px; border-radius: 6px; }
+    .chat-message.user { background: #e3f2fd; border-left: 4px solid #2196f3; }
+    .chat-message.assistant { background: #f1f8e9; border-left: 4px solid #8bc34a; }
+    .chat-message .role { font-weight: bold; margin-bottom: 4px; }
+    .chat-message .content { white-space: pre-wrap; }
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; }
+    .error { color: #e74c3c; margin-top: 8px; }
+    .status { font-weight: bold; color: #667eea; margin-bottom: 12px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎮 Mode 1: Daily Feedback (Human Decision)</h1>
+    <p style="margin: 0; opacity: 0.9;">Chat with AI advisor • You make the final decision</p>
+  </header>
+
+  <main>
+    <section id="setup-section">
+      <h2>Game Setup</h2>
+      <label>Promised Lead Time (days)
+        <input id="promised-lead-time" type="number" min="0" value="4" />
+      </label>
+      <button id="start-btn">Start Game</button>
+      <div id="start-error" class="error"></div>
+    </section>
+
+    <section id="game-section" class="hidden">
+      <div class="status" id="status">Loading...</div>
+      
+      <h3>🤖 AI Advisor Chat</h3>
+      <div id="chat-history"></div>
+      
+      <label>Your Message to AI Advisor
+        <textarea id="user-message" placeholder="Ask questions, provide context, or discuss strategy with the AI..."></textarea>
+      </label>
+      <button id="send-message-btn">Send Message</button>
+      <div id="chat-error" class="error"></div>
+
+      <hr style="margin: 24px 0; border: none; border-top: 2px solid #eee;">
+
+      <h3>📊 Your Final Decision</h3>
+      <p style="color: #666; font-size: 14px;">Enter the quantities you want to order (this will be executed):</p>
+      <div class="row">
+        <div>
+          <label>Regular Chips Quantity
+            <input id="regular-chips" type="number" min="0" placeholder="0" />
+          </label>
+        </div>
+        <div>
+          <label>BBQ Chips Quantity
+            <input id="bbq-chips" type="number" min="0" placeholder="0" />
+          </label>
+        </div>
+      </div>
+      <button id="submit-decision-btn">Submit Final Decision & Proceed</button>
+      <div id="decision-error" class="error"></div>
+
+      <hr style="margin: 24px 0; border: none; border-top: 2px solid #eee;">
+
+      <h3>📜 Game Transcript</h3>
+      <div id="transcript">Waiting for game to start...</div>
+    </section>
+  </main>
+
+  <script>
+    const supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    let currentRunId = null;
+    let pollTimer = null;
+
+    const setupSection = document.getElementById("setup-section");
+    const gameSection = document.getElementById("game-section");
+    const statusEl = document.getElementById("status");
+    const chatHistoryEl = document.getElementById("chat-history");
+    const transcriptEl = document.getElementById("transcript");
+    const startError = document.getElementById("start-error");
+    const chatError = document.getElementById("chat-error");
+    const decisionError = document.getElementById("decision-error");
+
+    // Check authentication
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        window.location.href = '/';
+      }
+    });
+
+    document.getElementById("start-btn").addEventListener("click", async () => {
+      startError.textContent = "";
+      const promisedLeadTime = parseInt(document.getElementById("promised-lead-time").value, 10);
+      
+      try {
+        const response = await apiRequest("/runs", {
+          method: "POST",
+          body: JSON.stringify({
+            mode: "mode1",
+            promised_lead_time: promisedLeadTime || 4,
+          }),
+        });
+        currentRunId = response.run_id;
+        setupSection.classList.add("hidden");
+        gameSection.classList.remove("hidden");
+        updateUI(response);
+      } catch (err) {
+        startError.textContent = err.message || "Failed to start game";
+      }
+    });
+
+    document.getElementById("send-message-btn").addEventListener("click", async () => {
+      chatError.textContent = "";
+      const message = document.getElementById("user-message").value.trim();
+      if (!message) {
+        chatError.textContent = "Please enter a message";
+        return;
+      }
+
+      try {
+        const response = await apiRequest(`/runs/${currentRunId}/messages`, {
+          method: "POST",
+          body: JSON.stringify({ message }),
+        });
+        document.getElementById("user-message").value = "";
+        updateUI(response);
+      } catch (err) {
+        chatError.textContent = err.message || "Failed to send message";
+      }
+    });
+
+    document.getElementById("submit-decision-btn").addEventListener("click", async () => {
+      decisionError.textContent = "";
+      
+      const regularChips = document.getElementById("regular-chips").value.trim();
+      const bbqChips = document.getElementById("bbq-chips").value.trim();
+      
+      if (!regularChips || !bbqChips) {
+        decisionError.textContent = "Please enter quantities for both chip types";
+        return;
+      }
+      
+      const regularQty = parseInt(regularChips, 10);
+      const bbqQty = parseInt(bbqChips, 10);
+      
+      if (isNaN(regularQty) || isNaN(bbqQty) || regularQty < 0 || bbqQty < 0) {
+        decisionError.textContent = "Please enter valid numbers (0 or greater)";
+        return;
+      }
+      
+      const actionJson = JSON.stringify({
+        "chips(Regular)": regularQty,
+        "chips(BBQ)": bbqQty
+      });
+      
+      try {
+        const response = await apiRequest(`/runs/${currentRunId}/final-action`, {
+          method: "POST",
+          body: JSON.stringify({ action_json: actionJson }),
+        });
+        document.getElementById("regular-chips").value = "";
+        document.getElementById("bbq-chips").value = "";
+        updateUI(response);
+      } catch (err) {
+        decisionError.textContent = err.message || "Failed to submit decision";
+      }
+    });
+
+    function updateUI(state) {
+      if (!state) return;
+
+      // Update status
+      if (state.completed) {
+        statusEl.textContent = `✅ Game Complete! Final Reward: $${state.final_reward?.toFixed(2) || '0.00'}`;
+        statusEl.style.color = '#27ae60';
+        document.getElementById("send-message-btn").disabled = true;
+        document.getElementById("submit-decision-btn").disabled = true;
+        if (pollTimer) clearInterval(pollTimer);
+      } else {
+        statusEl.textContent = `📅 Day ${state.current_day || 1} - ${state.waiting_for_final_action ? 'Waiting for your final decision' : 'Ready for chat'}`;
+        statusEl.style.color = '#667eea';
+      }
+
+      // Update chat history
+      if (state.conversation && state.conversation.length > 0) {
+        chatHistoryEl.innerHTML = state.conversation.map(msg => {
+          const roleClass = msg.role === 'human' ? 'user' : 'assistant';
+          const roleLabel = msg.role === 'human' ? '👤 You' : '🤖 AI Advisor';
+          let content = msg.content;
+          
+          // Try to parse and format JSON nicely
+          try {
+            const parsed = JSON.parse(content);
+            if (parsed.rationale && parsed.action) {
+              content = `Rationale: ${parsed.rationale}\n\nProposed Action: ${JSON.stringify(parsed.action, null, 2)}`;
+            }
+          } catch (e) {
+            // Not JSON, use as is
+          }
+          
+          return `<div class="chat-message ${roleClass}">
+            <div class="role">${roleLabel}</div>
+            <div class="content">${content}</div>
+          </div>`;
+        }).join('');
+        chatHistoryEl.scrollTop = chatHistoryEl.scrollHeight;
+      }
+
+      // Update transcript
+      if (state.transcript && state.transcript.length > 0) {
+        const lines = state.transcript.map(evt => `[${evt.kind.toUpperCase()}]\n${JSON.stringify(evt.payload, null, 2)}`);
+        transcriptEl.textContent = lines.join('\n\n');
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      }
+    }
+
+    async function apiRequest(path, options = {}) {
+      const session = await supabaseClient.auth.getSession();
+      if (!session.data.session) {
+        window.location.href = '/';
+        throw new Error("Not authenticated");
+      }
+      const token = session.data.session.access_token;
+      const resp = await fetch(`http://localhost:8000${path}`, {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        ...options,
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || resp.statusText);
+      }
+      return resp.json();
+    }
+  </script>
+</body>
+</html>
+

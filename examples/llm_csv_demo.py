@@ -217,12 +217,20 @@ class CSVDemandPlayer:
 def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0, 
                   human_feedback_enabled: bool = False, guidance_enabled: bool = False):
     """Create VM agent with updated prompt for profit-based system."""
+    
+    # Extract item IDs to show in prompt
+    available_items = list(initial_samples.keys()) if initial_samples else []
+    items_str = ", ".join([f'"{item}"' for item in available_items])
+    
     system = (
         "You are the Vending Machine controller (VM). "
         "You manage multiple items, each with unit profit and holding costs. "
         "Objective: Maximize total reward = sum of daily rewards R_t. "
         "Daily reward: R_t = Profit × Sold - HoldingCost × EndingInventory. "
         "\n\n"
+        f"AVAILABLE ITEMS: {items_str}\n"
+        "⚠️ CRITICAL: You MUST use these EXACT item IDs (with parentheses and all special characters) in your action!\n"
+        "\n"
         "Key mechanics:\n"
         f"- Supplier-promised lead time: {promised_lead_time} days\n"
         "- Orders placed today arrive after a LEAD TIME (number of days until delivery)\n"
@@ -280,6 +288,14 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
             system += "\n"
         system += "Use this data to inform your ordering decisions, especially on Day 1.\n\n"
     
+    # Create example format with actual item IDs
+    if available_items:
+        example_action = ", ".join([f'"{item}": 100' for item in available_items[:2]])  # Show up to 2 items
+        if len(available_items) > 2:
+            example_action += ", ..."
+    else:
+        example_action = '"item_id": quantity, ...'
+    
     system += (
         "Strategy:\n"
         "- INFER lead time from arrival records in game history (look for 'lead_time was X days')\n"
@@ -298,17 +314,12 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         '(3) evaluate today\'s news and learn from past events, '
         '(4) consider lead_time when placing orders (goods won\'t arrive immediately!), '
         '(5) explain your ordering strategy",\n'
-        '  "action": {"item_id": quantity, "item_id": quantity, ...}\n'
+        f'  "action": {{{example_action}}}\n'
         "}\n"
+        "\n"
+        f"⚠️ REMEMBER: Use EXACT item IDs: {items_str}\n"
         "\n"
         "Think through your rationale BEFORE making the final order decision.\n"
-        "\n"
-        "Example format:\n"
-        "{\n"
-        '  "rationale": "[Infer lead_time from history] → [Analyze inventory/demand] → [Consider news] → [Account for lead_time] → [State orders]",\n'
-        '  "action": {"item_id_1": quantity, "item_id_2": quantity, ...}\n'
-        "}\n"
-        "\n"
         "Do NOT include any other text outside the JSON."
     )
     return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)

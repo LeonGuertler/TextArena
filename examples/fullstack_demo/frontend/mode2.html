@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mode 2 - Periodic Guidance</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/config.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
+    header { background: #764ba2; color: white; padding: 16px; text-align: center; }
+    main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    h1, h2 { margin-top: 0; }
+    section { background: #fff; padding: 20px; margin-bottom: 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    label { display: block; margin-bottom: 8px; font-weight: 500; }
+    input, textarea, button { width: 100%; padding: 10px; margin-bottom: 12px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; }
+    textarea { min-height: 100px; font-family: inherit; }
+    button { background: #764ba2; color: white; border: none; cursor: pointer; font-weight: 600; transition: background 0.3s; }
+    button:hover { background: #6a3f8f; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    #transcript { max-height: 500px; overflow-y: auto; background: #1e1e1e; color: #0f0; padding: 16px; font-family: 'Courier New', monospace; border-radius: 6px; font-size: 13px; white-space: pre-wrap; }
+    .error { color: #e74c3c; margin-top: 8px; }
+    .status { font-weight: bold; color: #764ba2; margin-bottom: 12px; font-size: 16px; }
+    .hidden { display: none; }
+    .info-box { background: #fff3cd; border: 1px solid #ffc107; padding: 12px; border-radius: 4px; margin-bottom: 16px; color: #856404; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🤖 Mode 2: Periodic Guidance (AI Auto-Play)</h1>
+    <p style="margin: 0; opacity: 0.9;">AI runs automatically • You provide strategic guidance periodically</p>
+  </header>
+
+  <main>
+    <section id="setup-section">
+      <h2>Game Setup</h2>
+      <label>Promised Lead Time (days)
+        <input id="promised-lead-time" type="number" min="0" value="4" />
+      </label>
+      <label>Guidance Frequency (days)
+        <input id="guidance-frequency" type="number" min="1" value="5" />
+      </label>
+      <p style="color: #666; font-size: 14px;">The AI will pause every N days to ask for your strategic guidance</p>
+      <button id="start-btn">Start Game</button>
+      <div id="start-error" class="error"></div>
+    </section>
+
+    <section id="game-section" class="hidden">
+      <div class="status" id="status">Loading...</div>
+      
+      <div id="guidance-box" class="hidden">
+        <div class="info-box">
+          ⚠️ The AI is waiting for your strategic guidance. Provide high-level direction for the next phase of the game.
+        </div>
+        <label>Your Strategic Guidance
+          <textarea id="guidance-text" placeholder="Example: 'Focus on maintaining higher inventory levels' or 'Be more conservative with orders'"></textarea>
+        </label>
+        <button id="submit-guidance-btn">Submit Guidance</button>
+        <div id="guidance-error" class="error"></div>
+      </div>
+
+      <h3>📜 Game Transcript</h3>
+      <div id="transcript">Waiting for game to start...</div>
+    </section>
+  </main>
+
+  <script>
+    const supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    let currentRunId = null;
+    let pollTimer = null;
+
+    const setupSection = document.getElementById("setup-section");
+    const gameSection = document.getElementById("game-section");
+    const statusEl = document.getElementById("status");
+    const guidanceBox = document.getElementById("guidance-box");
+    const transcriptEl = document.getElementById("transcript");
+    const startError = document.getElementById("start-error");
+    const guidanceError = document.getElementById("guidance-error");
+
+    // Check authentication
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        window.location.href = '/';
+      }
+    });
+
+    document.getElementById("start-btn").addEventListener("click", async () => {
+      startError.textContent = "";
+      const promisedLeadTime = parseInt(document.getElementById("promised-lead-time").value, 10);
+      const guidanceFrequency = parseInt(document.getElementById("guidance-frequency").value, 10);
+      
+      if (!guidanceFrequency || guidanceFrequency < 1) {
+        startError.textContent = "Guidance frequency must be at least 1 day";
+        return;
+      }
+
+      try {
+        const response = await apiRequest("/runs", {
+          method: "POST",
+          body: JSON.stringify({
+            mode: "mode2",
+            promised_lead_time: promisedLeadTime || 4,
+            guidance_frequency: guidanceFrequency,
+          }),
+        });
+        currentRunId = response.run_id;
+        setupSection.classList.add("hidden");
+        gameSection.classList.remove("hidden");
+        updateUI(response);
+        startPolling();
+      } catch (err) {
+        startError.textContent = err.message || "Failed to start game";
+      }
+    });
+
+    document.getElementById("submit-guidance-btn").addEventListener("click", async () => {
+      guidanceError.textContent = "";
+      const guidance = document.getElementById("guidance-text").value.trim();
+      
+      if (!guidance) {
+        guidanceError.textContent = "Please enter guidance text";
+        return;
+      }
+
+      try {
+        const response = await apiRequest(`/runs/${currentRunId}/messages`, {
+          method: "POST",
+          body: JSON.stringify({ message: guidance }),
+        });
+        document.getElementById("guidance-text").value = "";
+        updateUI(response);
+        
+        if (!response.completed) {
+          startPolling();
+        }
+      } catch (err) {
+        guidanceError.textContent = err.message || "Failed to submit guidance";
+      }
+    });
+
+    function updateUI(state) {
+      if (!state) return;
+
+      // Update status
+      if (state.completed) {
+        statusEl.textContent = `✅ Game Complete! Final Reward: $${state.final_reward?.toFixed(2) || '0.00'}`;
+        statusEl.style.color = '#27ae60';
+        guidanceBox.classList.add("hidden");
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      } else if (state.waiting_for_guidance) {
+        statusEl.textContent = `⏸️ Day ${state.current_day || 1} - Waiting for your guidance`;
+        statusEl.style.color = '#f39c12';
+        guidanceBox.classList.remove("hidden");
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      } else {
+        statusEl.textContent = `🔄 Day ${state.current_day || 1} - AI is running...`;
+        statusEl.style.color = '#764ba2';
+        guidanceBox.classList.add("hidden");
+      }
+
+      // Update transcript
+      if (state.transcript && state.transcript.length > 0) {
+        const lines = state.transcript.map(evt => `[${evt.kind.toUpperCase()}]\n${JSON.stringify(evt.payload, null, 2)}`);
+        transcriptEl.textContent = lines.join('\n\n');
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      }
+    }
+
+    function startPolling() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        try {
+          const state = await apiRequest(`/runs/${currentRunId}`, { method: "GET" });
+          updateUI(state);
+          
+          if (state.completed || state.waiting_for_guidance) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+        } catch (err) {
+          console.error("Polling error:", err);
+        }
+      }, 2000);
+    }
+
+    async function apiRequest(path, options = {}) {
+      const session = await supabaseClient.auth.getSession();
+      if (!session.data.session) {
+        window.location.href = '/';
+        throw new Error("Not authenticated");
+      }
+      const token = session.data.session.access_token;
+      const resp = await fetch(`http://localhost:8000${path}`, {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        ...options,
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || resp.statusText);
+      }
+      return resp.json();
+    }
+  </script>
+</body>
+</html>
+
