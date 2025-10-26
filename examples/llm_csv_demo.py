@@ -18,8 +18,36 @@ import os
 import sys
 import argparse
 import json
+import re
 import pandas as pd
 import textarena as ta
+
+
+DAY_CONCLUDED_PATTERN = re.compile(r'^(\s*Day\s+(\d+)\s+concluded:)(.*)$')
+
+
+def inject_carry_over_insights(observation: str, insights) -> str:
+    """Insert prior carry-over insights into matching day summaries."""
+    if not insights:
+        return observation
+
+    lines = observation.splitlines()
+    augmented = []
+
+    for line in lines:
+        match = DAY_CONCLUDED_PATTERN.match(line)
+        if match:
+            day_num = int(match.group(2))
+            memo = insights.get(day_num)
+            if memo:
+                if "Insight:" in match.group(3):
+                    augmented.append(line)
+                else:
+                    augmented.append(f"{match.group(1)}{match.group(3)} | Insight: {memo}")
+                continue
+        augmented.append(line)
+
+    return "\n".join(augmented)
 
 
 class CSVDemandPlayer:
@@ -243,7 +271,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- On-hand: Current inventory available for sale today\n"
         "- In-transit: Total units you ordered that haven't arrived yet (but you don't know WHEN they'll arrive)\n"
         "- You must track your own orders and infer when they'll arrive based on inferred lead_time\n"
-        "- IMPORTANT: Initial inventory on Day 1: Each item starts with 5 units on-hand\n"
+        "- IMPORTANT: Initial inventory on Day 1: Each item starts with 0 units on-hand\n"
         "\n"
         "- Holding cost is charged on ending inventory each day\n"
         "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
@@ -305,6 +333,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- React to TODAY'S NEWS as it happens, accounting for inferred lead time\n"
         "- Learn from past news events to understand their impact on demand\n"
         "- Balance profit vs holding cost (don't overstock)\n"
+        "- carry_over_insight: Use this sparingly—leave it as \"\" unless you detect a clear, sustained shift or structural change worth remembering\n"
         "\n"
         "IMPORTANT: Think step by step, then decide.\n"
         "You MUST respond with valid JSON in this exact format:\n"
@@ -314,6 +343,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         '(3) evaluate today\'s news and learn from past events, '
         '(4) consider lead_time when placing orders (goods won\'t arrive immediately!), '
         '(5) explain your ordering strategy",\n'
+        '  "carry_over_insight": "Short memo for future days (\"\" if nothing new—only fill this when a durable change is evident)",\n'
         f'  "action": {{{example_action}}}\n'
         "}\n"
         "\n"
@@ -322,7 +352,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "Think through your rationale BEFORE making the final order decision.\n"
         "Do NOT include any other text outside the JSON."
     )
-    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o", system_prompt=system, temperature=0)
 
 
 def main():
@@ -371,6 +401,8 @@ def main():
     # Set NUM_DAYS based on CSV
     from textarena.envs.VendingMachine import env as vm_env_module
     original_num_days = vm_env_module.NUM_DAYS
+    original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
+    vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
     vm_env_module.NUM_DAYS = csv_player.get_num_days()
     print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} based on CSV")
     
@@ -412,11 +444,13 @@ def main():
     # Run game
     done = False
     current_day = 1
+    carry_over_insights = {}
     
     while not done:
         pid, observation = env.get_observation()
         
         if pid == 0:  # VM agent
+            observation = inject_carry_over_insights(observation, carry_over_insights)
             # Update item configurations for current day (supports dynamic changes)
             has_inf_lead_time = False
             for item_id in csv_player.get_item_ids():
@@ -447,8 +481,6 @@ def main():
             print("="*60)
             try:
                 # Remove markdown code block markers if present
-                import re
-                
                 # Strip markdown code fences (```json or ``` at start/end)
                 cleaned_action = action.strip()
                 # Remove ```json or ``` from the beginning
@@ -458,6 +490,17 @@ def main():
                 
                 # Parse and pretty print
                 action_dict = json.loads(cleaned_action)
+                
+                carry_memo = action_dict.get("carry_over_insight")
+                if isinstance(carry_memo, str):
+                    carry_memo = carry_memo.strip()
+                else:
+                    carry_memo = None
+                if carry_memo:
+                    carry_over_insights[current_day] = carry_memo
+                elif current_day in carry_over_insights:
+                    del carry_over_insights[current_day]
+                
                 formatted_json = json.dumps(action_dict, indent=2, ensure_ascii=False)
                 print(formatted_json)
                 # Flush to ensure complete output to file
@@ -534,8 +577,8 @@ def main():
     
     # Restore original NUM_DAYS
     vm_env_module.NUM_DAYS = original_num_days
+    vm_env_module.INITIAL_INVENTORY_PER_ITEM = original_initial_inventory
 
 
 if __name__ == "__main__":
     main()
-

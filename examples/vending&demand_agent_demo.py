@@ -10,7 +10,36 @@ Both agents are powered by LLMs and interact strategically.
 
 import os
 import sys
+import json
+import re
 import textarena as ta
+
+
+DAY_CONCLUDED_PATTERN = re.compile(r'^(\s*Day\s+(\d+)\s+concluded:)(.*)$')
+
+
+def inject_carry_over_insights(observation: str, insights) -> str:
+    """Insert prior carry-over insights into the day summaries of the observation."""
+    if not insights:
+        return observation
+
+    lines = observation.splitlines()
+    augmented = []
+
+    for line in lines:
+        match = DAY_CONCLUDED_PATTERN.match(line)
+        if match:
+            day_num = int(match.group(2))
+            memo = insights.get(day_num)
+            if memo:
+                if "Insight:" in match.group(3):
+                    augmented.append(line)
+                else:
+                    augmented.append(f"{match.group(1)}{match.group(3)} | Insight: {memo}")
+                continue
+        augmented.append(line)
+
+    return "\n".join(augmented)
 
 
 def make_vm_agent():
@@ -33,6 +62,7 @@ def make_vm_agent():
         "- Learn from past news events to understand their impact on demand\n"
         "- Order enough to cover demand during lead time + buffer, but minimize holding costs\n"
         "- Consider profit margins and holding costs when prioritizing which items to stock\n"
+        "- When you spot patterns future days should remember, summarize them in 'carry_over_insight' (keep it \"\" unless the shift is clearly persistent)\n"
         "\n"
         "IMPORTANT: Think step by step, then decide.\n"
         "You MUST respond with valid JSON in this exact format:\n"
@@ -40,6 +70,7 @@ def make_vm_agent():
         '  "rationale": "First, explain your reasoning: analyze current inventory and demand patterns for each item, '
         'evaluate today\'s news (if any) and learn from past news, consider different lead times, '
         'and explain your ordering strategy for each item",\n'
+        '  "carry_over_insight": "Short memo for future days (\"\" when there is no meaningful change)",\n'
         '  "action": {"item_id": quantity, "item_id": quantity, ...}\n'
         "}\n"
         "\n"
@@ -94,6 +125,9 @@ def main():
     
     # Create environment
     env = ta.make(env_id="VendingMachine-v0")
+    from textarena.envs.VendingMachine import env as vm_env_module
+    original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
+    vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
     
     # Define items with lead times, profits, and holding costs
     env.add_item(item_id="cola", description="Coca-Cola 12oz Can", lead_time=1, profit=1.5, holding_cost=0.05)
@@ -116,11 +150,13 @@ def main():
     # Run game
     done = False
     current_day = 1
+    carry_over_insights = {}
     
     while not done:
         pid, observation = env.get_observation()
         
         if pid == 0:  # VM agent
+            observation = inject_carry_over_insights(observation, carry_over_insights)
             action = vm_agent(observation)
             
             # Print complete JSON output with proper formatting
@@ -128,9 +164,6 @@ def main():
             print("="*60)
             try:
                 # Remove markdown code block markers if present
-                import json
-                import re
-                
                 # Strip markdown code fences (```json or ``` at start/end)
                 cleaned_action = action.strip()
                 # Remove ```json or ``` from the beginning
@@ -140,6 +173,16 @@ def main():
                 
                 # Parse and pretty print
                 action_dict = json.loads(cleaned_action)
+                carry_memo = action_dict.get("carry_over_insight")
+                if isinstance(carry_memo, str):
+                    carry_memo = carry_memo.strip()
+                else:
+                    carry_memo = None
+                if carry_memo:
+                    carry_over_insights[current_day] = carry_memo
+                elif current_day in carry_over_insights:
+                    del carry_over_insights[current_day]
+
                 formatted_json = json.dumps(action_dict, indent=2, ensure_ascii=False)
                 print(formatted_json)
                 # Flush to ensure complete output to file
@@ -212,8 +255,9 @@ def main():
     print(f"\n>>> Total Reward (Profit - Holding): ${total_reward:.2f} <<<")
     print(f"VM Final Reward: {rewards.get(0, 0):.2f}")
     print("="*60)
+    
+    vm_env_module.INITIAL_INVENTORY_PER_ITEM = original_initial_inventory
 
 
 if __name__ == "__main__":
     main()
-

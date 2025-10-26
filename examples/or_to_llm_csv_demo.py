@@ -16,10 +16,38 @@ import os
 import sys
 import argparse
 import json
+import re
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
 import textarena as ta
+
+
+DAY_CONCLUDED_PATTERN = re.compile(r'^(\s*Day\s+(\d+)\s+concluded:)(.*)$')
+
+
+def inject_carry_over_insights(observation: str, insights) -> str:
+    """Insert previously recorded carry-over insights into day summaries."""
+    if not insights:
+        return observation
+
+    lines = observation.splitlines()
+    augmented = []
+
+    for line in lines:
+        match = DAY_CONCLUDED_PATTERN.match(line)
+        if match:
+            day_num = int(match.group(2))
+            memo = insights.get(day_num)
+            if memo:
+                if "Insight:" in match.group(3):
+                    augmented.append(line)
+                else:
+                    augmented.append(f"{match.group(1)}{match.group(3)} | Insight: {memo}")
+                continue
+        augmented.append(line)
+
+    return "\n".join(augmented)
 
 
 class CSVDemandPlayer:
@@ -215,13 +243,13 @@ class CSVDemandPlayer:
 class ORAgent:
     """
     OR algorithm baseline agent using base-stock policy.
-    
+
     Policy: order_quantity = max(base_stock - current_inventory, 0)
-    where base_stock = μ̂ + z*σ̂
-    
-    μ̂ = (1+L) × empirical_mean
-    σ̂ = sqrt(1+L) × empirical_std
-    z* = Φ^(-1)(q), where q = profit/(profit + holding_cost)
+    where base_stock = mu_hat + z * sigma_hat
+
+    mu_hat = (1+L) * empirical_mean
+    sigma_hat = sqrt(1+L) * empirical_std
+    z* = Phi^(-1)(q), where q = profit / (profit + holding_cost)
     """
     
     def __init__(self, items_config: dict, initial_samples: dict = None):
@@ -327,7 +355,7 @@ class ORAgent:
         empirical_mean = np.mean(all_samples)
         empirical_std = np.std(all_samples, ddof=1) if len(all_samples) > 1 else 0
         
-        # Calculate μ̂ and σ̂ for lead time + review period
+# Calculate mu_hat and sigma_hat for lead time + review period
         mu_hat = (1 + L) * empirical_mean
         sigma_hat = np.sqrt(1 + L) * empirical_std
         
@@ -388,10 +416,10 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "You are the Vending Machine controller (VM). "
         "You manage multiple items, each with unit profit and holding costs. "
         "Objective: Maximize total reward = sum of daily rewards R_t. "
-        "Daily reward: R_t = Profit × Sold - HoldingCost × EndingInventory. "
+        "Daily reward: R_t = Profit * Sold - HoldingCost * EndingInventory. "
         "\n\n"
         f"AVAILABLE ITEMS: {items_str}\n"
-        "⚠️ CRITICAL: You MUST use these EXACT item IDs (with parentheses and all special characters) in your action!\n"
+        "WARNING: You MUST use these EXACT item IDs (with parentheses and all special characters) in your action!\n"
         "\n"
         "Key mechanics:\n"
         f"- Supplier-promised lead time: {promised_lead_time} days\n"
@@ -405,7 +433,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "- On-hand: Current inventory available for sale today\n"
         "- In-transit: Total units you ordered that haven't arrived yet (but you don't know WHEN they'll arrive)\n"
         "- You must track your own orders and infer when they'll arrive based on inferred lead_time\n"
-        "- IMPORTANT: Initial inventory on Day 1: Each item starts with 5 units on-hand\n"
+        "- IMPORTANT: Initial inventory on Day 1: Each item starts with 0 units on-hand\n"
         "\n"
         "- Holding cost is charged on ending inventory each day\n"
         "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
@@ -473,6 +501,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "7. React to TODAY'S NEWS as it happens, considering inferred actual lead time\n"
         "8. Learn from past news events to understand their impact on demand\n"
         "9. Balance between data-driven OR approach and news-driven/lead-time-adjusted insights\n"
+        "10. Use carry_over_insight only when a persistent, meaningful shift is observed; otherwise leave it empty.\n"
         "\n"
         "Example decision process:\n"
         "- Step 1: Check recent arrivals to infer current lead_time (e.g., 'lead_time was 2 days')\n"
@@ -502,15 +531,16 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         '(5) consider lead_time when adjusting OR recommendations (goods arrive after lead_time!), '
         '(6) decide: follow OR baseline or adjust based on news/analysis, '
         '(7) explain your final ordering strategy",\n'
+        '  "carry_over_insight": "Short memo for future days (\"\" when there is no meaningful change)",\n'
         f'  "action": {{{example_action}}}\n'
         "}\n"
         "\n"
-        f"⚠️ REMEMBER: Use EXACT item IDs: {items_str}\n"
+        f"REMEMBER: Use EXACT item IDs: {items_str}\n"
         "\n"
         "Think through your rationale BEFORE making the final order decision.\n"
         "Do NOT include any other text outside the JSON."
     )
-    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o", system_prompt=system, temperature=0)
 
 
 def main():
@@ -560,6 +590,8 @@ def main():
     # Set NUM_DAYS based on CSV
     from textarena.envs.VendingMachine import env as vm_env_module
     original_num_days = vm_env_module.NUM_DAYS
+    original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
+    vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
     vm_env_module.NUM_DAYS = csv_player.get_num_days()
     print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} based on CSV")
     
@@ -593,9 +625,9 @@ def main():
         print("HUMAN-IN-THE-LOOP MODE ACTIVATED")
         print("="*70)
         if args.human_feedback:
-            print("✓ Mode 1: Daily feedback on agent decisions is ENABLED")
+            print("Mode 1: Daily feedback on agent decisions is ENABLED")
         if args.guidance_frequency > 0:
-            print(f"✓ Mode 2: Strategic guidance every {args.guidance_frequency} days is ENABLED")
+            print(f"Mode 2: Strategic guidance every {args.guidance_frequency} days is ENABLED")
         print("="*70 + "\n")
         
         vm_agent = ta.agents.HumanFeedbackAgent(
@@ -613,11 +645,13 @@ def main():
     done = False
     current_day = 1
     last_demand = {}  # Track demand to update OR agent
+    carry_over_insights = {}
     
     while not done:
         pid, observation = env.get_observation()
         
         if pid == 0:  # VM agent (Hybrid: LLM + OR)
+            observation = inject_carry_over_insights(observation, carry_over_insights)
             # Update item configurations for current day (supports dynamic changes)
             has_inf_lead_time = False
             for item_id in csv_player.get_item_ids():
@@ -674,9 +708,6 @@ def main():
             print("="*60)
             try:
                 # Remove markdown code block markers if present
-                import json
-                import re
-                
                 # Strip markdown code fences (```json or ``` at start/end)
                 cleaned_action = action.strip()
                 # Remove ```json or ``` from the beginning
@@ -686,6 +717,17 @@ def main():
                 
                 # Parse and pretty print
                 action_dict = json.loads(cleaned_action)
+                
+                carry_memo = action_dict.get("carry_over_insight")
+                if isinstance(carry_memo, str):
+                    carry_memo = carry_memo.strip()
+                else:
+                    carry_memo = None
+                if carry_memo:
+                    carry_over_insights[current_day] = carry_memo
+                elif current_day in carry_over_insights:
+                    del carry_over_insights[current_day]
+                
                 formatted_json = json.dumps(action_dict, indent=2, ensure_ascii=False)
                 print(formatted_json)
                 # Flush to ensure complete output to file
@@ -773,9 +815,18 @@ def main():
     
     # Restore original NUM_DAYS
     vm_env_module.NUM_DAYS = original_num_days
+    vm_env_module.INITIAL_INVENTORY_PER_ITEM = original_initial_inventory
 
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
 
 

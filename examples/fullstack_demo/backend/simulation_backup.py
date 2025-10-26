@@ -183,7 +183,7 @@ def _make_mode1_agent(initial_samples: dict, promised_lead_time: int):
         "- Orders arrive after a LEAD TIME (actual may differ from promised)\n"
         "- You must INFER actual lead time from arrival records\n"
         "- Daily reward: R_t = Profit × Sold - HoldingCost × EndingInventory\n"
-        "- Initial inventory: 5 units per item on Day 1\n\n"
+        "- Initial inventory: 0 units per item on Day 1\n\n"
         
         "Multi-Turn Conversation Mode:\n"
         "- You will have multiple exchanges with the human before they make their final decision\n"
@@ -252,7 +252,7 @@ def _make_mode2_agent(initial_samples: dict, promised_lead_time: int):
         "- On-hand: Current inventory available for sale today\n"
         "- In-transit: Total units you ordered that haven't arrived yet (but you don't know WHEN they'll arrive)\n"
         "- You must track your own orders and infer when they'll arrive based on inferred lead_time\n"
-        "- IMPORTANT: Initial inventory on Day 1: Each item starts with 5 units on-hand\n"
+        "- IMPORTANT: Initial inventory on Day 1: Each item starts with 0 units on-hand\n"
         "\n"
         "- Holding cost is charged on ending inventory each day\n"
         "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
@@ -333,8 +333,12 @@ class Mode1Session:
         for day, news in news_schedule.items():
             self.env.add_news(day, news)
         
-        # Set NUM_DAYS
+        # Set NUM_DAYS and initial inventory
         from textarena.envs.VendingMachine import env as vm_env_module
+        self._vm_env_module = vm_env_module
+        self._original_num_days = vm_env_module.NUM_DAYS
+        self._original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
+        vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
         vm_env_module.NUM_DAYS = min(config.max_days, self.csv_player.get_num_days())
         
         # Create AI advisor
@@ -545,6 +549,8 @@ class Mode1Session:
             "final_reward": self.final_reward,
             "game_info": game_info[0] if game_info else {}
         })
+        self._vm_env_module.NUM_DAYS = self._original_num_days
+        self._vm_env_module.INITIAL_INVENTORY_PER_ITEM = self._original_initial_inventory
     
     def _clean_json(self, text: str) -> str:
         """Remove markdown fences from LLM output."""
@@ -589,8 +595,12 @@ class Mode2Session:
         for day, news in news_schedule.items():
             self.env.add_news(day, news)
         
-        # Set NUM_DAYS
+        # Set NUM_DAYS and initial inventory
         from textarena.envs.VendingMachine import env as vm_env_module
+        self._vm_env_module = vm_env_module
+        self._original_num_days = vm_env_module.NUM_DAYS
+        self._original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
+        vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
         vm_env_module.NUM_DAYS = min(config.max_days, self.csv_player.get_num_days())
         
         # Create AI agent
@@ -767,6 +777,8 @@ class Mode2Session:
             "final_reward": self.final_reward,
             "game_info": game_info[0] if game_info else {}
         })
+        self._vm_env_module.NUM_DAYS = self._original_num_days
+        self._vm_env_module.INITIAL_INVENTORY_PER_ITEM = self._original_initial_inventory
     
     def serialize_state(self) -> Dict[str, Any]:
         """Serialize current state for API responses."""

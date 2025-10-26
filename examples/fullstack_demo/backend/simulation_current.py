@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
@@ -136,6 +137,32 @@ def _default_initial_samples(item_ids: Iterable[str]) -> Dict[str, List[int]]:
     return {item_id: historical.copy() for item_id in item_ids}
 
 
+DAY_CONCLUDED_PATTERN = re.compile(r'^(\s*Day\s+(\d+)\s+concluded:)(.*)$')
+
+
+def _inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> str:
+    if not insights:
+        return observation
+
+    lines = observation.splitlines()
+    augmented: List[str] = []
+
+    for line in lines:
+        match = DAY_CONCLUDED_PATTERN.match(line)
+        if match:
+            day_num = int(match.group(2))
+            memo = insights.get(day_num)
+            if memo:
+                if "Insight:" in match.group(3):
+                    augmented.append(line)
+                else:
+                    augmented.append(f"{match.group(1)}{match.group(3)} | Insight: {memo}")
+                continue
+        augmented.append(line)
+
+    return "\n".join(augmented)
+
+
 def _make_base_agent(*, promised_lead_time: int, guidance_enabled: bool) -> ta.agents.OpenAIAgent:
     items_placeholder = "Use listed item IDs"
     system = (
@@ -143,7 +170,8 @@ def _make_base_agent(*, promised_lead_time: int, guidance_enabled: bool) -> ta.a
         "Objective: maximize total reward = Σ (profit · sold - holding_cost · ending_inventory).\n"
         f"Supplier-promised lead time: {promised_lead_time} days.\n"
         "Actual lead time may differ; infer from arrivals.\n"
-        "Provide JSON only: {\"rationale\": \"...\", \"action\": {\"item\": qty, ...}}\n"
+        "Provide JSON only: {\"rationale\": \"...\", \"carry_over_insight\": \"...\", \"action\": {\"item\": qty, ...}}\n"
+        "If no new insight, set carry_over_insight to \"\"—only populate it when you detect a meaningful, lasting shift.\n"
     )
     if guidance_enabled:
         system += (
@@ -166,6 +194,7 @@ class SimulationSession:
         self._guidance_messages: Dict[int, str] = {}
         self._guidance_history: List[Tuple[int, str]] = []
         self._pending_guidance_day: Optional[int] = None
+        self._carry_over_insights: Dict[int, str] = {}
 
         self._agent = _make_base_agent(
             promised_lead_time=config.promised_lead_time,
@@ -177,10 +206,13 @@ class SimulationSession:
 
         self._vm_env_module = vm_env_module
         self._original_num_days = vm_env_module.NUM_DAYS
+        self._original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
+        vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
         vm_env_module.NUM_DAYS = self.csv_player.get_num_days()
 
         self._setup_environment()
-        self._pid, self._observation = self._env.get_observation()
+        self._pid, initial_observation = self._env.get_observation()
+        self._observation = _inject_carry_over_insights(initial_observation, self._carry_over_insights)
         if self._pid != 0:
             raise RuntimeError("VM should act first")
 
@@ -224,7 +256,8 @@ class SimulationSession:
             raise RuntimeError("Final action only available in Mode 1")
         if self._pid != 0:
             raise RuntimeError("Not waiting for VM turn")
-        action_dict = self._parse_action_json(action_json)
+        action_dict, carry_memo = self._parse_action_json(action_json)
+        self._store_carry_over_insight(self.current_day, carry_memo)
         payload = json.dumps({"action": action_dict})
         self.transcript.append(
             "final_action",
@@ -280,6 +313,7 @@ class SimulationSession:
             data = json.loads(cleaned)
         except json.JSONDecodeError:
             data = {"rationale": cleaned, "action": {}}
+        self._store_carry_over_insight(self.current_day, data.get("carry_over_insight"))
         self._conversation.append({"role": "agent", "content": cleaned})
         self.transcript.append(
             "agent_proposal", {"day": self.current_day, "content": data}
@@ -297,12 +331,23 @@ class SimulationSession:
         lines.append("Provide your next JSON proposal.")
         return "\n".join(lines)
 
+    def _store_carry_over_insight(self, day: int, memo_value) -> None:
+        if isinstance(memo_value, str):
+            memo = memo_value.strip()
+        else:
+            memo = None
+        if memo:
+            self._carry_over_insights[day] = memo
+        elif day in self._carry_over_insights:
+            del self._carry_over_insights[day]
+
     def _advance_with_vm_action(self, action: str) -> Dict[str, Any]:
         done, _ = self._env.step(action=action)
         if done:
             return self._finalize_session()
 
-        self._pid, self._observation = self._env.get_observation()
+        self._pid, next_observation = self._env.get_observation()
+        self._observation = _inject_carry_over_insights(next_observation, self._carry_over_insights)
         if self._pid != 1:
             raise RuntimeError("Expected demand turn after VM action")
 
@@ -315,7 +360,8 @@ class SimulationSession:
             return self._finalize_session()
 
         self.current_day += 1
-        self._pid, self._observation = self._env.get_observation()
+        self._pid, next_observation = self._env.get_observation()
+        self._observation = _inject_carry_over_insights(next_observation, self._carry_over_insights)
         self.transcript.append(
             "observation", {"day": self.current_day, "content": self._observation}
         )
@@ -342,6 +388,7 @@ class SimulationSession:
                 data = json.loads(cleaned)
             except json.JSONDecodeError:
                 data = {"rationale": cleaned, "action": {}}
+            self._store_carry_over_insight(self.current_day, data.get("carry_over_insight"))
             self.transcript.append(
                 "agent_proposal", {"day": self.current_day, "content": data}
             )
@@ -380,9 +427,14 @@ class SimulationSession:
             cleaned = cleaned.strip("`")
         return cleaned.strip()
 
-    def _parse_action_json(self, action_json: str) -> Dict[str, int]:
+    def _parse_action_json(self, action_json: str) -> Tuple[Dict[str, int], Optional[str]]:
         cleaned = self._clean_json(action_json)
         data = json.loads(cleaned)
+        memo: Optional[str] = None
+        if isinstance(data, dict):
+            memo_val = data.get("carry_over_insight")
+            if isinstance(memo_val, str):
+                memo = memo_val.strip() or None
         if isinstance(data, dict) and "action" in data and isinstance(data["action"], dict):
             action_dict = data["action"]
         elif isinstance(data, dict):
@@ -394,7 +446,7 @@ class SimulationSession:
             if not isinstance(quantity, (int, float)) or quantity < 0:
                 raise ValueError(f"Invalid quantity for {item_id}: {quantity}")
             result[item_id] = int(quantity)
-        return result
+        return result, memo
 
     def _finalize_session(self) -> Dict[str, Any]:
         rewards, game_info = self._env.close()
@@ -414,6 +466,7 @@ class SimulationSession:
             },
         )
         self._vm_env_module.NUM_DAYS = self._original_num_days
+        self._vm_env_module.INITIAL_INVENTORY_PER_ITEM = self._original_initial_inventory
         return {"completed": True, "final_reward": self.transcript.final_reward}
 
 

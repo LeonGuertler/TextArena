@@ -1,25 +1,25 @@
 """
-OR Algorithm baseline demo with CSV-driven demand.
+Clairvoyant OR baseline demo with CSV-driven demand.
 
 This demo uses:
-- VM Agent: OR algorithm baseline (Operations Research heuristic)
+- VM Agent: Clairvoyant OR baseline (knows distribution shift schedule)
 - Demand: Fixed demand patterns loaded from CSV file
 
-The OR algorithm uses a base-stock policy:
-  base_stock = mu_hat + z*sigma_hat
+The clairvoyant OR agent uses a base-stock policy:
+  base_stock = μ_hat + z*sigma_hat
   order = max(base_stock - current_inventory, 0)
 
-where mu_hat and sigma_hat are estimated from historical demand data.
+where μ_hat and σ_hat are provided directly by the clairvoyant schedule.
 
 Usage:
-  python or_csv_demo.py --demand-file path/to/demands.csv
+  python clairvoyant_or_csv.py --demand-file path/to/demands.csv --instance 1
 """
 
 import os
 import sys
 import argparse
 import json
-import numpy as np
+import math
 import pandas as pd
 from scipy.stats import norm
 import textarena as ta
@@ -215,270 +215,252 @@ class CSVDemandPlayer:
         return json.dumps(result, indent=2)
 
 
-class ORAgent:
+def _schedule_instance1(day: int, _item_id: str) -> tuple[float, float]:
+    return 100.0, 25.0
+
+
+def _schedule_instance2(day: int, _item_id: str) -> tuple[float, float]:
+    if day <= 15:
+        return 100.0, 25.0
+    return 200.0, 25.0 * math.sqrt(2.0)
+
+
+def _schedule_instance3(day: int, _item_id: str) -> tuple[float, float]:
+    t = max(day, 1)
+    return 100.0 * t, 25.0 * math.sqrt(float(t))
+
+
+def _schedule_instance4(day: int, _item_id: str) -> tuple[float, float]:
+    if day <= 15:
+        return 100.0, 25.0
+    return 100.0, 50.0
+
+
+def _schedule_instance5(day: int, _item_id: str) -> tuple[float, float]:
+    return 500.0, 25.0 * math.sqrt(5.0)
+
+
+def _schedule_instance6(day: int, _item_id: str) -> tuple[float, float]:
+    return 500.0, 25.0 * math.sqrt(5.0)
+
+
+def _schedule_instance7(day: int, _item_id: str) -> tuple[float, float]:
+    if day <= 15:
+        return 500.0, 25.0 * math.sqrt(5.0)
+    return 700.0, 25.0 * math.sqrt(7.0)
+
+
+def _schedule_instance8(day: int, _item_id: str) -> tuple[float, float]:
+    return 511.0, 25.0 * math.sqrt(5.11)
+
+
+CLAIRVOYANT_SCHEDULES: dict[int, tuple] = {
+    1: (_schedule_instance1, "Instance 1: μ̂=100, σ̂=25 (stationary)."),
+    2: (_schedule_instance2, "Instance 2: μ̂/σ̂ shift at day 16 (100→200, 25→25√2)."),
+    3: (_schedule_instance3, "Instance 3: μ̂=100·t, σ̂=25√t (increasing demand)."),
+    4: (_schedule_instance4, "Instance 4: σ̂ doubles after day 15 (variance increase)."),
+    5: (_schedule_instance5, "Instance 5: μ̂=500, σ̂=25√5 (L=4)."),
+    6: (_schedule_instance6, "Instance 6: μ̂=500, σ̂=25√5 (random lead time)."),
+    7: (_schedule_instance7, "Instance 7: shift to μ̂=700, σ̂=25√7 after day 15."),
+    8: (_schedule_instance8, "Instance 8: μ̂=511, σ̂=25√5.11 (intermittent supplier)."),
+}
+
+
+class ClairvoyantSchedule:
+    """Provides clairvoyant μ̂ and σ̂ values for each instance."""
+
+    def __init__(self, instance_id: int):
+        if instance_id not in CLAIRVOYANT_SCHEDULES:
+            available = ", ".join(str(k) for k in sorted(CLAIRVOYANT_SCHEDULES))
+            raise ValueError(f"Unsupported instance {instance_id}. Available: {available}")
+        self.instance_id = instance_id
+        self.schedule_fn, self.description = CLAIRVOYANT_SCHEDULES[instance_id]
+
+    def describe(self) -> str:
+        return self.description
+
+    def get_params(self, day: int, item_id: str) -> tuple[float, float]:
+        if day < 1:
+            raise ValueError("Day index must be ≥ 1 for clairvoyant schedule.")
+        mu_hat, sigma_hat = self.schedule_fn(day, item_id)
+        return float(mu_hat), float(sigma_hat)
+
+
+class ClairvoyantORAgent:
     """
-    OR algorithm baseline agent using base-stock policy.
+    Clairvoyant OR baseline agent using predetermined μ̂/σ̂ schedules.
     
     Policy: order_quantity = max(base_stock - current_inventory, 0)
-    where base_stock = μ̂ + z*σ̂
-    
-    μ̂ = (1+L) × empirical_mean
-    σ̂ = sqrt(1+L) × empirical_std
-    z* = Φ^(-1)(q), where q = profit/(profit + holding_cost)
+    where base_stock = μ̂ + z*σ̂ and μ̂, σ̂ come from the clairvoyant schedule.
     """
-    
-    def __init__(self, items_config: dict, initial_samples: dict = None):
-        """
-        Args:
-            items_config: Dict of {item_id: {'lead_time': L, 'profit': p, 'holding_cost': h}}
-            initial_samples: Optional dict of {item_id: [list of initial demand samples]}
-                           If None or empty, will use only observed demands
-        """
+
+    def __init__(self, items_config: dict, schedule: ClairvoyantSchedule):
         self.items_config = items_config
-        self.initial_samples = initial_samples if initial_samples else {}
-        
-        # Store observed demands (will be updated each day)
-        # Format: {item_id: [demand_day1, demand_day2, ...]}
+        self.schedule = schedule
+        self.current_day = 1
         self.observed_demands = {item_id: [] for item_id in items_config}
-        
-        print("\n=== OR Agent Initialized ===")
+
+        print("\n=== Clairvoyant OR Agent Initialized ===")
+        print(f"Schedule: {self.schedule.describe()}")
         for item_id, config in items_config.items():
-            L = config['lead_time']
             p = config['profit']
             h = config['holding_cost']
             q = p / (p + h)
             z_star = norm.ppf(q)
-            
-            samples = self.initial_samples.get(item_id, [])
             print(f"{item_id}:")
-            print(f"  Lead time (L): {L}")
             print(f"  Profit (p): {p}, Holding cost (h): {h}")
             print(f"  Critical fractile (q): {q:.4f}")
             print(f"  z* = Φ^(-1)(q): {z_star:.4f}")
-            print(f"  Initial samples: {samples if samples else 'None (will learn from observed demands)'}")
-    
+
+    def set_day(self, day: int):
+        self.current_day = max(1, day)
+
     def _parse_inventory_from_observation(self, observation: str, item_id: str) -> int:
         """
         Parse current total inventory (on-hand + in-transit) from observation.
-        
-        Observation format:
-          chips(Regular) (...): Profit=$2/unit, Holding=$1/unit/day
-            On-hand: 5, In-transit: 10 units
-        
-        Returns:
-            Total inventory across all pipeline stages (on-hand + in-transit)
         """
         try:
             lines = observation.split('\n')
             for i, line in enumerate(lines):
-                # Find the item header line
                 if line.strip().startswith(f"{item_id}"):
-                    # Next line should have the inventory info
                     if i + 1 < len(lines):
                         inventory_line = lines[i + 1]
-                        
-                        # Parse: "  On-hand: 5, In-transit: 10 units"
                         if "On-hand:" in inventory_line and "In-transit:" in inventory_line:
-                            # Extract on-hand value
                             on_hand_start = inventory_line.find("On-hand:") + len("On-hand:")
                             on_hand_end = inventory_line.find(",", on_hand_start)
                             on_hand = int(inventory_line[on_hand_start:on_hand_end].strip())
-                            
-                            # Extract in-transit value: "In-transit: 10 units"
+
                             in_transit_start = inventory_line.find("In-transit:") + len("In-transit:")
-                            # Find the end - look for "units" or end of line
                             in_transit_str = inventory_line[in_transit_start:].strip()
-                            # Remove "units" if present
                             in_transit_str = in_transit_str.replace("units", "").strip()
                             in_transit = int(in_transit_str)
-                            
-                            total_inventory = on_hand + in_transit
-                            return total_inventory
-            
-            # If not found, return 0 (shouldn't happen in normal operation)
+
+                            return on_hand + in_transit
             print(f"Warning: Could not parse inventory for {item_id}, assuming 0")
             return 0
-        except Exception as e:
-            print(f"Error parsing inventory for {item_id}: {e}")
+        except Exception as exc:
+            print(f"Error parsing inventory for {item_id}: {exc}")
             return 0
-    
-    def _calculate_order(self, item_id: str, current_inventory: int) -> int:
+
+    def _calculate_order(
+        self,
+        item_id: str,
+        current_inventory: int,
+    ) -> tuple[int, float, float, float, float]:
         """
-        Calculate order quantity using OR base-stock policy.
-        
-        Args:
-            item_id: Item identifier
-            current_inventory: Current total inventory (on-hand + in-transit)
-            
+        Calculate order quantity using clairvoyant μ̂/σ̂.
+
         Returns:
-            Order quantity (non-negative integer)
+            (order_qty, mu_hat, sigma_hat, z_star, base_stock)
         """
         config = self.items_config[item_id]
-        L = config['lead_time']
         p = config['profit']
         h = config['holding_cost']
-        
-        # Collect all demand samples
-        initial = self.initial_samples.get(item_id, [])
-        all_samples = initial + self.observed_demands[item_id]
-        
-        # If no samples yet, use a conservative default (order 0)
-        if not all_samples:
-            return 0
-        
-        # Calculate empirical statistics
-        empirical_mean = np.mean(all_samples)
-        empirical_std = np.std(all_samples, ddof=1) if len(all_samples) > 1 else 0
-        
-        # Calculate μ̂ and σ̂ for lead time + review period
-        mu_hat = (1 + L) * empirical_mean
-        sigma_hat = np.sqrt(1 + L) * empirical_std
-        
-        # Calculate critical fractile and z*
+        mu_hat, sigma_hat = self.schedule.get_params(self.current_day, item_id)
+
         q = p / (p + h)
         z_star = norm.ppf(q)
-        
-        # Calculate base stock
         base_stock = mu_hat + z_star * sigma_hat
-        
-        # Calculate order quantity
-        order = max(int(np.ceil(base_stock - current_inventory)), 0)
-        
-        return order
-    
+        order = max(int(math.ceil(base_stock - current_inventory)), 0)
+        return order, mu_hat, sigma_hat, z_star, base_stock
+
     def update_demand_observation(self, item_id: str, observed_demand: int):
-        """
-        Update observed demand history for an item.
-        
-        Args:
-            item_id: Item identifier
-            observed_demand: The true demand observed on this day (requested quantity)
-        """
+        """Track observed demand for logging purposes."""
         self.observed_demands[item_id].append(observed_demand)
-    
+
     def get_action(self, observation: str) -> str:
         """
         Generate ordering decision in JSON format.
-        
-        Args:
-            observation: Current game observation
-            
-        Returns:
-            JSON string like '{"action": {"chips(Regular)": 15, "chips(BBQ)": 10}, "rationale": "..."}'
         """
         action_dict = {}
         rationale_parts = []
-        
+
         for item_id in self.items_config:
-            # Parse current inventory from observation
             current_inventory = self._parse_inventory_from_observation(observation, item_id)
-            
-            # Calculate order quantity
-            order = self._calculate_order(item_id, current_inventory)
+            order, mu_hat, sigma_hat, z_star, base_stock = self._calculate_order(item_id, current_inventory)
             action_dict[item_id] = order
-            
-            # Build rationale
-            config = self.items_config[item_id]
-            L = config['lead_time']
-            initial = self.initial_samples.get(item_id, [])
-            all_samples = initial + self.observed_demands[item_id]
-            
-            if not all_samples:
-                rationale_parts.append(f"{item_id}: No samples yet, order=0")
-                continue
-                
-            empirical_mean = np.mean(all_samples)
-            empirical_std = np.std(all_samples, ddof=1) if len(all_samples) > 1 else 0
-            mu_hat = (1 + L) * empirical_mean
-            sigma_hat = np.sqrt(1 + L) * empirical_std
-            q = config['profit'] / (config['profit'] + config['holding_cost'])
-            z_star = norm.ppf(q)
-            base_stock = mu_hat + z_star * sigma_hat
-            
+
             rationale_parts.append(
-                f"{item_id}: base_stock={base_stock:.1f} (μ̂={mu_hat:.1f}, σ̂={sigma_hat:.1f}, z*={z_star:.2f}), "
+                f"{item_id}: base_stock={base_stock:.1f} "
+                f"(μ̂={mu_hat:.1f}, σ̂={sigma_hat:.1f}, z*={z_star:.2f}), "
                 f"current_inv={current_inventory}, order={order}"
             )
-        
-        rationale = "OR base-stock policy: " + "; ".join(rationale_parts)
-        
+
+        rationale = "Clairvoyant OR base-stock policy: " + "; ".join(rationale_parts)
         result = {
             "action": action_dict,
             "rationale": rationale
         }
-        
         return json.dumps(result, indent=2)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run OR algorithm baseline with CSV demand')
+    parser = argparse.ArgumentParser(description='Run Clairvoyant OR baseline with CSV demand')
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
+    parser.add_argument('--instance', type=int, choices=sorted(CLAIRVOYANT_SCHEDULES.keys()), default=1,
+                       help='Clairvoyant benchmark instance (1-8).')
     parser.add_argument('--promised-lead-time', type=int, default=0,
-                       help='Promised lead time used by OR algorithm (default: 0). Actual lead time in CSV may differ.')
+                       help='Promised lead time used by the clairvoyant agent (default: 0).')
     args = parser.parse_args()
-    
+
+    schedule = ClairvoyantSchedule(args.instance)
+    print(f"\nSelected instance {args.instance}: {schedule.describe()}")
+
     # Create environment
     env = ta.make(env_id="VendingMachine-v0")
-    
+
     # Load CSV demand player (auto-detects items)
     try:
         csv_player = CSVDemandPlayer(args.demand_file, initial_samples=None)
     except Exception as e:
         print(f"Error loading CSV: {e}")
         sys.exit(1)
-    
+
     # Get item configurations from CSV
     item_configs = csv_player.get_initial_item_configs()
-    
+
     # Add items to environment
     for config in item_configs:
         env.add_item(**config)
-    
-    # Generate initial demand samples for all items (unified across all products)
-    # Using the same historical samples regardless of item type
-    unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
-    initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
-    print(f"\nUsing unified initial samples for all items: {unified_samples}")
-    print(f"Promised lead time (used by OR algorithm): {args.promised_lead_time} days")
-    print(f"Note: Actual lead times in CSV may differ, creating a test scenario for OR robustness.")
-    
+
+    print(f"\nPromised lead time supplied to clairvoyant agent: {args.promised_lead_time} days")
+    print("Note: Actual lead times follow the CSV and may change dynamically.")
+
     # Set NUM_DAYS based on CSV
     from textarena.envs.VendingMachine import env as vm_env_module
     original_num_days = vm_env_module.NUM_DAYS
-    original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
-    vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
     vm_env_module.NUM_DAYS = csv_player.get_num_days()
     print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} based on CSV")
-    
+
     # Add news from CSV
     news_schedule = csv_player.get_news_schedule()
     for day, news in news_schedule.items():
         env.add_news(day, news)
-    
-    # Create OR agent (uses promised lead time, not actual CSV lead time)
+
+    # Create clairvoyant OR agent (uses promised lead time, not actual CSV lead time)
     or_items_config = {
         config['item_id']: {
-            'lead_time': args.promised_lead_time,  # Use promised value instead of CSV value
+            'lead_time': args.promised_lead_time,
             'profit': config['profit'],
             'holding_cost': config['holding_cost']
         }
         for config in item_configs
     }
-    or_agent = ORAgent(or_items_config, initial_samples)
-    
+    or_agent = ClairvoyantORAgent(or_items_config, schedule)
+
     # Reset environment
     env.reset(num_players=2)
-    
+
     # Run game
     done = False
     current_day = 1
     last_demand = {}  # Track demand to update OR agent
-    
+
     while not done:
         pid, observation = env.get_observation()
-        
-        if pid == 0:  # VM agent (OR algorithm)
+
+        if pid == 0:  # VM agent (clairvoyant OR algorithm)
             # Update item configurations for current day (supports dynamic changes)
             has_inf_lead_time = False
             for item_id in csv_player.get_item_ids():
@@ -490,56 +472,52 @@ def main():
                     holding_cost=config['holding_cost'],
                     description=config['description']
                 )
-                # Check if any item has lead_time=inf (supplier unavailable)
                 if config['lead_time'] == float('inf'):
                     has_inf_lead_time = True
-            
+
             # If supplier unavailable (lead_time=inf), skip OR decision
             if has_inf_lead_time:
-                # Create action with order=0 for all items
                 zero_orders = {item_id: 0 for item_id in csv_player.get_item_ids()}
                 action = json.dumps({"action": zero_orders}, indent=2)
-                
+
                 print(f"\nWARNING Day {current_day}: Supplier unavailable (lead_time=inf)")
                 print(f"Day {current_day} OR Decision: {action} (automatically set to 0)")
-                
-                # Skip to demand turn
+
                 done, _ = env.step(action=action)
                 continue
-            
+
+            or_agent.set_day(current_day)
             action = or_agent.get_action(observation)
             print(f"\nDay {current_day} OR Decision: {action}")
         else:  # Demand from CSV
             action = csv_player.get_action(current_day)
-            
-            # Parse demand to update OR agent's history
+
             demand_data = json.loads(action)
             last_demand = demand_data['action']
-            
+
             print(f"\nDay {current_day} Demand: {action}")
-            
-            # Update OR agent with observed demand
+
             for item_id, qty in last_demand.items():
                 or_agent.update_demand_observation(item_id, qty)
-            
+
             current_day += 1
-        
+
         done, _ = env.step(action=action)
-    
+
     # Display results
     rewards, game_info = env.close()
     vm_info = game_info[0]
-    
+
     print("\n" + "="*60)
-    print("=== Final Results (OR Algorithm Baseline) ===")
+    print("=== Final Results (Clairvoyant OR Baseline) ===")
     print("="*60)
-    
+
     # Per-item statistics
     total_ordered = vm_info.get('total_ordered', {})
     total_sold = vm_info.get('total_sold', {})
     ending_inventory = vm_info.get('ending_inventory', {})
     items = vm_info.get('items', {})
-    
+
     print("\nPer-Item Statistics:")
     for item_id, item_info in items.items():
         ordered = total_ordered.get(item_id, 0)
@@ -547,13 +525,13 @@ def main():
         ending = ending_inventory.get(item_id, 0)
         profit = item_info['profit']
         holding_cost = item_info['holding_cost']
-        
+
         total_profit = profit * sold
         print(f"\n{item_id} ({item_info['description']}):")
         print(f"  Ordered: {ordered}, Sold: {sold}, Ending: {ending}")
         print(f"  Profit/unit: ${profit}, Holding: ${holding_cost}/unit/day")
         print(f"  Total Profit: ${total_profit}")
-    
+
     # Daily breakdown
     print("\n" + "="*60)
     print("Daily Breakdown:")
@@ -564,27 +542,26 @@ def main():
         profit = day_log['daily_profit']
         holding = day_log['daily_holding_cost']
         reward = day_log['daily_reward']
-        
+
         news_str = f" [NEWS: {news}]" if news else ""
         print(f"Day {day}{news_str}: Profit=${profit:.2f}, Holding=${holding:.2f}, Reward=${reward:.2f}")
-    
+
     # Totals
     total_reward = vm_info.get('total_reward', 0)
     total_profit = vm_info.get('total_sales_profit', 0)
     total_holding = vm_info.get('total_holding_cost', 0)
-    
+
     print("\n" + "="*60)
     print("=== TOTAL SUMMARY ===")
     print("="*60)
     print(f"Total Profit from Sales: ${total_profit:.2f}")
     print(f"Total Holding Cost: ${total_holding:.2f}")
-    print(f"\n>>> Total Reward (OR Baseline): ${total_reward:.2f} <<<")
+    print(f"\n>>> Total Reward (Clairvoyant OR Baseline): ${total_reward:.2f} <<<")
     print(f"VM Final Reward: {rewards.get(0, 0):.2f}")
     print("="*60)
-    
+
     # Restore original NUM_DAYS
     vm_env_module.NUM_DAYS = original_num_days
-    vm_env_module.INITIAL_INVENTORY_PER_ITEM = original_initial_inventory
 
 
 if __name__ == "__main__":

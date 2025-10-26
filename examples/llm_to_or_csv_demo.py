@@ -25,6 +25,33 @@ from typing import Dict, List, Tuple
 import textarena as ta
 
 
+DAY_CONCLUDED_PATTERN = re.compile(r'^(\s*Day\s+(\d+)\s+concluded:)(.*)$')
+
+
+def inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> str:
+    """Insert previously recorded insights into matching day summaries."""
+    if not insights:
+        return observation
+
+    lines = observation.splitlines()
+    augmented: List[str] = []
+
+    for line in lines:
+        match = DAY_CONCLUDED_PATTERN.match(line)
+        if match:
+            day_num = int(match.group(2))
+            memo = insights.get(day_num)
+            if memo:
+                if "Insight:" in match.group(3):
+                    augmented.append(line)
+                else:
+                    augmented.append(f"{match.group(1)}{match.group(3)} | Insight: {memo}")
+                continue
+        augmented.append(line)
+
+    return "\n".join(augmented)
+
+
 class CSVDemandPlayer:
     """
     Simulates demand agent by reading from CSV file.
@@ -536,8 +563,9 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "- Inventory visibility:\n"
         "  * On-hand: Current inventory available for sale today\n"
         "  * In-transit: Total units ordered that haven't arrived yet\n"
-        "  * ⚠️ Initial inventory on Day 1: Each item starts with 5 units on-hand\n"
+        "  * ⚠️ Initial inventory on Day 1: Each item starts with 0 units on-hand\n"
         "- Holding cost is charged on ending inventory each day\n"
+        "- carry_over_insight: Reserve this for clear, sustained shifts or structural changes that future days must remember; otherwise output \"\"\n"
         "- News events may affect future demand\n"
         "\n"
     )
@@ -585,6 +613,10 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "   - EWMA_gamma: (1+L) × exponentially weighted moving average (must specify gamma in [0,1])\n"
         "   - explicit: Provide your own prediction\n"
         "   Example: {\"method\": \"recent_N\", \"N\": 5} or {\"method\": \"explicit\", \"value\": 250}\n"
+        "   When you choose recent_N, think about trend strength:\n"
+        "     • Strong, freshly emerging trends or news-driven shifts → favor a smaller N that focuses on only the most recent days.\n"
+        "     • Mild fluctuations or noisy data with no clear trend → favor a larger N to smooth noise.\n"
+        "     • Ensure N does not exceed the number of available samples; if it would, adjust the window or pick another method.\n"
         "\n"
         "3. sigma_hat (standard deviation of demand over lead time period):\n"
         "   - default: sqrt(1+L) × std of all historical samples\n"
@@ -605,12 +637,14 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "   - Use 'default' or 'calculate' for stable conditions\n"
         "   - Use 'recent_N' to react to trend changes\n"
         "   - Use 'explicit' when you have strong predictions (e.g., news impact)\n"
+        "   - When using 'recent_N', justify the window length (trend duration, news horizon, volatility) and remember carry_over_insight stays empty unless that shift truly persists\n"
         "6. Explain your reasoning clearly\n"
         "\n"
         "=== OUTPUT FORMAT ===\n"
         "You MUST respond with valid JSON in this EXACT format:\n"
         "{\n"
         "  \"rationale\": \"Explain your analysis and parameter choices for each item\",\n"
+        "  \"carry_over_insight\": \"Short memo for future days (\"\" when no durable change is present)\",\n"
         "  \"parameters\": {\n"
         "    \"item_id_1\": {\n"
         "      \"L\": {\"method\": \"...\", \"value\": ...},\n"
@@ -630,7 +664,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "- Think carefully about your parameter choices\n"
     )
     
-    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o", system_prompt=system, temperature=0)
 
 
 # ============================================================================
@@ -682,6 +716,8 @@ def main():
     # Set NUM_DAYS based on CSV
     from textarena.envs.VendingMachine import env as vm_env_module
     original_num_days = vm_env_module.NUM_DAYS
+    original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
+    vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
     vm_env_module.NUM_DAYS = csv_player.get_num_days()
     print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} based on CSV")
     
@@ -737,11 +773,13 @@ def main():
     # Run game
     done = False
     current_day = 1
+    carry_over_insights: Dict[int, str] = {}
     
     while not done:
         pid, observation = env.get_observation()
         
         if pid == 0:  # VM agent (LLM→OR)
+            observation = inject_carry_over_insights(observation, carry_over_insights)
             # Update item configurations for current day (supports dynamic changes)
             has_inf_lead_time = False
             for item_id in csv_player.get_item_ids():
@@ -814,6 +852,16 @@ def main():
                 
                 # Validate JSON structure
                 validate_parameters_json(params_json, csv_player.get_item_ids(), current_item_configs)
+                
+                carry_memo = params_json.get("carry_over_insight")
+                if isinstance(carry_memo, str):
+                    carry_memo = carry_memo.strip()
+                else:
+                    carry_memo = None
+                if carry_memo:
+                    carry_over_insights[current_day] = carry_memo
+                elif current_day in carry_over_insights:
+                    del carry_over_insights[current_day]
                 
                 print(f"\nDay {current_day} LLM→OR Decision:")
                 print("="*70)
@@ -971,6 +1019,7 @@ def main():
     
     # Restore original NUM_DAYS
     vm_env_module.NUM_DAYS = original_num_days
+    vm_env_module.INITIAL_INVENTORY_PER_ITEM = original_initial_inventory
 
 
 if __name__ == "__main__":
