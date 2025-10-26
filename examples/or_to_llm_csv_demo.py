@@ -501,7 +501,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "7. React to TODAY'S NEWS as it happens, considering inferred actual lead time\n"
         "8. Learn from past news events to understand their impact on demand\n"
         "9. Balance between data-driven OR approach and news-driven/lead-time-adjusted insights\n"
-        "10. Use carry_over_insight only when a persistent, meaningful shift is observed; otherwise leave it empty.\n"
+        "10. Only fill carry_over_insight when you can cite a clear, sustained change (demand mean/variance shift or news impact). Otherwise leave it empty.\n"
         "\n"
         "Example decision process:\n"
         "- Step 1: Check recent arrivals to infer current lead_time (e.g., 'lead_time was 2 days')\n"
@@ -540,7 +540,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "Think through your rationale BEFORE making the final order decision.\n"
         "Do NOT include any other text outside the JSON."
     )
-    return ta.agents.OpenAIAgent(model_name="gpt-4o", system_prompt=system, temperature=0)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
 
 
 def main():
@@ -718,18 +718,23 @@ def main():
                 # Parse and pretty print
                 action_dict = json.loads(cleaned_action)
                 
+                formatted_json = json.dumps(action_dict, indent=2, ensure_ascii=False)
+                print(formatted_json)
+                
                 carry_memo = action_dict.get("carry_over_insight")
                 if isinstance(carry_memo, str):
                     carry_memo = carry_memo.strip()
                 else:
                     carry_memo = None
+                
                 if carry_memo:
                     carry_over_insights[current_day] = carry_memo
-                elif current_day in carry_over_insights:
-                    del carry_over_insights[current_day]
+                    print(f"Carry-over insight: {carry_memo}")
+                else:
+                    if current_day in carry_over_insights:
+                        del carry_over_insights[current_day]
+                    print("Carry-over insight: (empty)")
                 
-                formatted_json = json.dumps(action_dict, indent=2, ensure_ascii=False)
-                print(formatted_json)
                 # Flush to ensure complete output to file
                 sys.stdout.flush()
             except Exception as e:
@@ -820,6 +825,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

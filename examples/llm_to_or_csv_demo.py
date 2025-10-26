@@ -664,7 +664,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "- Think carefully about your parameter choices\n"
     )
     
-    return ta.agents.OpenAIAgent(model_name="gpt-4o", system_prompt=system, temperature=0)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
 
 
 # ============================================================================
@@ -853,20 +853,25 @@ def main():
                 # Validate JSON structure
                 validate_parameters_json(params_json, csv_player.get_item_ids(), current_item_configs)
                 
+                print(f"\nDay {current_day} LLM→OR Decision:")
+                print("="*70)
+                print("LLM Rationale:")
+                print(params_json.get("rationale", "(no rationale provided)"))
+                
                 carry_memo = params_json.get("carry_over_insight")
                 if isinstance(carry_memo, str):
                     carry_memo = carry_memo.strip()
                 else:
                     carry_memo = None
+                
                 if carry_memo:
                     carry_over_insights[current_day] = carry_memo
-                elif current_day in carry_over_insights:
-                    del carry_over_insights[current_day]
+                    print(f"\nCarry-over insight: {carry_memo}")
+                else:
+                    if current_day in carry_over_insights:
+                        del carry_over_insights[current_day]
+                    print("\nCarry-over insight: (empty)")
                 
-                print(f"\nDay {current_day} LLM→OR Decision:")
-                print("="*70)
-                print("LLM Rationale:")
-                print(params_json.get("rationale", "(no rationale provided)"))
                 print("\n" + "="*70)
                 
             except json.JSONDecodeError as e:

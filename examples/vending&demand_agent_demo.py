@@ -180,11 +180,15 @@ def main():
                     carry_memo = None
                 if carry_memo:
                     carry_over_insights[current_day] = carry_memo
-                elif current_day in carry_over_insights:
-                    del carry_over_insights[current_day]
+                    carry_text = carry_memo
+                else:
+                    if current_day in carry_over_insights:
+                        del carry_over_insights[current_day]
+                    carry_text = "(empty)"
 
                 formatted_json = json.dumps(action_dict, indent=2, ensure_ascii=False)
                 print(formatted_json)
+                print(f"Carry-over insight: {carry_text}")
                 # Flush to ensure complete output to file
                 sys.stdout.flush()
             except Exception as e:

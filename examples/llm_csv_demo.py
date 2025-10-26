@@ -1,4 +1,4 @@
-"""
+﻿"""
 Vending Machine demo with CSV-driven demand.
 
 This demo uses:
@@ -325,7 +325,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         example_action = '"item_id": quantity, ...'
     
     system += (
-        "Strategy:\n"
+        "Strategy:\n\n"
         "- INFER lead time from arrival records in game history (look for 'lead_time was X days')\n"
         "- Track your own orders and when they should arrive based on inferred lead_time\n"
         "- Use 'In-transit' to see total goods coming, but remember you must infer WHEN they arrive\n"
@@ -333,17 +333,17 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- React to TODAY'S NEWS as it happens, accounting for inferred lead time\n"
         "- Learn from past news events to understand their impact on demand\n"
         "- Balance profit vs holding cost (don't overstock)\n"
-        "- carry_over_insight: Use this sparingly—leave it as \"\" unless you detect a clear, sustained shift or structural change worth remembering\n"
-        "\n"
+        "- carry_over_insight: Only fill this when you can cite a clear, sustained change (demand mean/variance shift or news impact). Otherwise return empty string \"\"\n"
+        "- If you do provide carry_over_insight, cite specific evidence (e.g., day numbers, updated averages) and ensure it is new; if it matches any earlier memo, leave it blank.\n"
+        "\n\n"
         "IMPORTANT: Think step by step, then decide.\n"
         "You MUST respond with valid JSON in this exact format:\n"
         "{\n"
         '  "rationale": "First, explain your reasoning: (1) infer current lead_time from recent arrivals, '
         '(2) analyze current inventory (on-hand + in-transit) and demand patterns, '
         '(3) evaluate today\'s news and learn from past events, '
-        '(4) consider lead_time when placing orders (goods won\'t arrive immediately!), '
-        '(5) explain your ordering strategy",\n'
-        '  "carry_over_insight": "Short memo for future days (\"\" if nothing new—only fill this when a durable change is evident)",\n'
+        '(4) consider lead_time when placing orders (goods won\'t arrive immediately!)",\n'
+        '  "carry_over_insight": "Short memo for future days ("" if nothing new—only fill this when a durable change is evident; cite evidence and avoid repeats)",\n'
         f'  "action": {{{example_action}}}\n'
         "}\n"
         "\n"
@@ -352,7 +352,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "Think through your rationale BEFORE making the final order decision.\n"
         "Do NOT include any other text outside the JSON."
     )
-    return ta.agents.OpenAIAgent(model_name="gpt-4o", system_prompt=system, temperature=0)
+    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
 
 
 def main():
@@ -425,9 +425,9 @@ def main():
         print("HUMAN-IN-THE-LOOP MODE ACTIVATED")
         print("="*70)
         if args.human_feedback:
-            print("✓ Mode 1: Daily feedback on agent decisions is ENABLED")
+            print("✅ Mode 1: Daily feedback on agent decisions is ENABLED")
         if args.guidance_frequency > 0:
-            print(f"✓ Mode 2: Strategic guidance every {args.guidance_frequency} days is ENABLED")
+            print(f"✅ Mode 2: Strategic guidance every {args.guidance_frequency} days is ENABLED")
         print("="*70 + "\n")
         
         vm_agent = ta.agents.HumanFeedbackAgent(
@@ -582,3 +582,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
