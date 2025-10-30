@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -9,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
 import pandas as pd
+from openai import OpenAI
 import textarena as ta
 
 
@@ -163,22 +165,155 @@ def _inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> s
     return "\n".join(augmented)
 
 
-def _make_base_agent(*, promised_lead_time: int, guidance_enabled: bool) -> ta.agents.OpenAIAgent:
-    items_placeholder = "Use listed item IDs"
-    system = (
-        "You are the Vending Machine controller (VM).\n"
-        "Objective: maximize total reward = Σ (profit · sold - holding_cost · ending_inventory).\n"
-        f"Supplier-promised lead time: {promised_lead_time} days.\n"
-        "Actual lead time may differ; infer from arrivals.\n"
-        "Provide JSON only: {\"rationale\": \"...\", \"carry_over_insight\": \"...\", \"action\": {\"item\": qty, ...}}\n"
-        "If no new insight, set carry_over_insight to \"\"—only populate it when you detect a meaningful, lasting shift.\n"
-    )
-    if guidance_enabled:
-        system += (
-            "\nYou may receive human strategic guidance. Incorporate ALL guidance faithfully.\n"
+def _make_base_agent(
+    *,
+    item_ids: Iterable[str],
+    initial_samples: Dict[str, List[int]],
+    promised_lead_time: int,
+    human_feedback_enabled: bool,
+    guidance_enabled: bool,
+) -> ta.Agent:
+    available_items = [str(item) for item in item_ids]
+    items_str = ", ".join(f'"{item}"' for item in available_items) or "None"
+
+    system_parts: List[str] = [
+        "You are the Vending Machine controller (VM). You manage multiple items, each with unit profit and holding costs.",
+        "Objective: Maximize total reward = sum of daily rewards R_t, where R_t = Profit\*Sold - HoldingCost\*EndingInventory.",
+        "",
+        f"AVAILABLE ITEMS: {items_str}",
+        "CRITICAL: Use these exact item IDs (including parentheses/punctuation) in your action JSON.",
+        "",
+        "Core mechanics:",
+        f"- Supplier-promised lead time (displayed to you): {promised_lead_time} days.",
+        "- Actual lead time may differ and can change; infer it from arrival records.",
+        "- Arrival log format: 'arrived=X units (ordered on Day Y, lead_time was Z days)'.",
+        "- Track your orders and infer when each shipment will arrive.",
+        "- On-hand inventory is immediately available; In-transit totals goods en route (arrival timing must be inferred).",
+        "- Initial on-hand inventory on Day 1 is 0 for every item.",
+        "- Holding cost applies to ending inventory each day.",
+        "- Daily news is revealed day by day; you cannot see future news.",
+        "- Daily sequence: you submit the order first, previously scheduled shipments arrive next, and customer demand happens last.",
+    ]
+
+    if human_feedback_enabled:
+        system_parts.extend(
+            [
+                "",
+                "HUMAN COLLABORATION:",
+                "- You may exchange messages with a human supervisor before submitting the final action.",
+                "- Provide thorough rationale and proposed orders when prompted.",
+                "- Incorporate any human feedback carefully before your final decision.",
+            ]
         )
-    system += f"\nAvailable items: {items_placeholder}\n"
-    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
+
+    if guidance_enabled:
+        system_parts.extend(
+            [
+                "",
+                "STRATEGIC GUIDANCE:",
+                "- Periodically you will receive strategic guidance from the human supervisor.",
+                "- Treat new guidance as authoritative until superseded; reference it explicitly in your rationale.",
+            ]
+        )
+
+    if initial_samples:
+        system_parts.append("")
+        system_parts.append("HISTORICAL DEMAND SAMPLES (reference):")
+        for item_id, samples in initial_samples.items():
+            system_parts.append(f"- {item_id}: {samples}")
+        system_parts.append("Use these samples to ground early decisions, especially on Day 1.")
+
+    if available_items:
+        example_action = ", ".join(f'"{item}": 100' for item in available_items[:2])
+        if len(available_items) > 2:
+            example_action += ", ..."
+    else:
+        example_action = '"item_id": quantity, ...'
+
+    system_parts.extend(
+        [
+            "",
+            "Strategy checklist:",
+            "- Infer current lead time from recent arrivals and update when evidence changes.",
+            "- Track on-hand plus in-transit inventory against demand patterns.",
+            "- Respond to today's news and remember how similar events affected demand before.",
+            "- Balance profit potential against holding costs; avoid unnecessary overstocking.",
+            "- Maintain carry_over_insight only for NEW, sustained shifts:",
+            "    * Cite concrete evidence (specific days, averages, or news).",
+            "    * If the observation already exists, output an empty string \"\".",
+            "- Keep rationale CONCISE, output only insights that materially affect decision.",
+            "",
+            "RESPONSE FORMAT (valid JSON only):",
+            "{",
+            '  "rationale": "Explain step by step: lead-time inference, inventory & demand analysis, news impact, final strategy.",',
+            '  "carry_over_insight": "New sustained insight with evidence, or empty string \"\".",',
+            f'  "action": {{{example_action}}}',
+            "}",
+            "",
+            f"Remember: use the exact item IDs: {items_str}. Do not output any text outside the JSON.",
+        ]
+    )
+
+    system_prompt = "\n".join(system_parts)
+
+    return GPT5MiniAgent(
+        system_prompt=system_prompt,
+        temperature=0.0,
+        reasoning_effort="minimal",
+        verbosity="low",
+    )
+
+
+class GPT5MiniAgent(ta.Agent):
+    """Wrapper around the OpenAI Responses API for gpt-5-mini."""
+
+    def __init__(
+        self,
+        *,
+        system_prompt: str,
+        temperature: float = 0.0,
+        reasoning_effort: str = "minimal",
+        verbosity: str = "low",
+    ) -> None:
+        super().__init__()
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
+        self._client = OpenAI(api_key=api_key)
+        self._system_prompt = system_prompt
+        self._temperature = temperature
+        self._reasoning_effort = reasoning_effort
+        self._verbosity = verbosity
+
+    def __call__(self, observation: str) -> str:
+        if not isinstance(observation, str):
+            raise ValueError(f"Expected observation to be a string, received {type(observation)}")
+        response = self._client.responses.create(
+            model="gpt-5-mini",
+            input=[
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": self._system_prompt}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": observation}],
+                },
+            ],
+            reasoning={"effort": self._reasoning_effort},
+            text={"verbosity": self._verbosity},
+        )
+        if hasattr(response, "output_text") and response.output_text:
+            return response.output_text.strip()
+        fragments: List[str] = []
+        for block in getattr(response, "output", []) or []:
+            for content in getattr(block, "content", []) or []:
+                text_obj = getattr(content, "text", None)
+                if text_obj and hasattr(text_obj, "value"):
+                    fragments.append(text_obj.value)
+        if fragments:
+            return "\n".join(fragments).strip()
+        raise RuntimeError("gpt-5-mini response did not include text content")
 
 
 class SimulationSession:
@@ -195,20 +330,28 @@ class SimulationSession:
         self._guidance_history: List[Tuple[int, str]] = []
         self._pending_guidance_day: Optional[int] = None
         self._carry_over_insights: Dict[int, str] = {}
+        self._ui_daily_logs: List[Dict[str, Any]] = []
+        self._running_reward: float = 0.0
+        self._initial_samples = _default_initial_samples(self.csv_player.get_item_ids())
 
         self._agent = _make_base_agent(
+            item_ids=self.csv_player.get_item_ids(),
+            initial_samples=self._initial_samples,
             promised_lead_time=config.promised_lead_time,
+            human_feedback_enabled=(config.mode == "mode1"),
             guidance_enabled=(config.mode == "mode2"),
         )
 
         self._env = ta.make(env_id="VendingMachine-v0")
+        self._base_env = self._resolve_base_env(self._env)
         from textarena.envs.VendingMachine import env as vm_env_module
 
         self._vm_env_module = vm_env_module
         self._original_num_days = vm_env_module.NUM_DAYS
         self._original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
         vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
-        vm_env_module.NUM_DAYS = self.csv_player.get_num_days()
+        self._total_days = self.csv_player.get_num_days()
+        vm_env_module.NUM_DAYS = self._total_days
 
         self._setup_environment()
         self._pid, initial_observation = self._env.get_observation()
@@ -236,6 +379,9 @@ class SimulationSession:
             ],
             "completed": self.transcript.completed,
             "final_reward": self.transcript.final_reward,
+            "status_cards": self._build_status_cards(),
+            "daily_logs": copy.deepcopy(self._ui_daily_logs),
+            "news": self._build_news_schedule(),
         }
         if self.config.mode == "mode1":
             state["conversation"] = list(self._conversation)
@@ -288,13 +434,13 @@ class SimulationSession:
         for config in self.csv_player.get_initial_item_configs():
             self._env.add_item(**config)
 
-        unified_samples = _default_initial_samples(self.csv_player.get_item_ids())
-        self.transcript.append("initial_samples", {"samples": unified_samples})
+        self.transcript.append("initial_samples", {"samples": self._initial_samples})
 
         for day, news in self.csv_player.get_news_schedule().items():
             self._env.add_news(day, news)
 
         self._env.reset(num_players=2)
+        self._reset_ui_tracking()
 
     def _bootstrap_mode1(self) -> None:
         self._conversation.clear()
@@ -356,6 +502,7 @@ class SimulationSession:
             "demand_action", {"day": self.current_day, "content": json.loads(demand_action)}
         )
         done, _ = self._env.step(action=demand_action)
+        self._sync_ui_daily_logs()
         if done:
             return self._finalize_session()
 
@@ -449,6 +596,7 @@ class SimulationSession:
         return result, memo
 
     def _finalize_session(self) -> Dict[str, Any]:
+        self._sync_ui_daily_logs()
         rewards, game_info = self._env.close()
         vm_info = game_info[0]
         total_reward = vm_info.get("total_reward", 0.0)
@@ -468,6 +616,112 @@ class SimulationSession:
         self._vm_env_module.NUM_DAYS = self._original_num_days
         self._vm_env_module.INITIAL_INVENTORY_PER_ITEM = self._original_initial_inventory
         return {"completed": True, "final_reward": self.transcript.final_reward}
+
+    @staticmethod
+    def _resolve_base_env(env: Any) -> Any:
+        base = env
+        while hasattr(base, "env"):
+            base = base.env
+        return base
+
+    def _reset_ui_tracking(self) -> None:
+        self._ui_daily_logs.clear()
+        self._running_reward = 0.0
+
+    def _sync_ui_daily_logs(self) -> None:
+        env_logs = getattr(self._base_env, "daily_logs", None)
+        if not env_logs:
+            return
+        start = len(self._ui_daily_logs)
+        if start >= len(env_logs):
+            return
+        for raw_log in env_logs[start:]:
+            reward = float(raw_log.get("daily_reward", 0.0))
+            self._running_reward += reward
+            self._ui_daily_logs.append(self._sanitize_day_log(raw_log))
+
+    @staticmethod
+    def _sanitize_day_log(log: Dict[str, Any]) -> Dict[str, Any]:
+        sanitized: Dict[str, Any] = {
+            "day": int(log.get("day", 0)),
+            "news": log.get("news"),
+            "daily_profit": float(log.get("daily_profit", 0.0)),
+            "daily_holding_cost": float(log.get("daily_holding_cost", 0.0)),
+            "daily_reward": float(log.get("daily_reward", 0.0)),
+        }
+        for field_name in ("orders", "starting_inventory", "requests", "sales", "ending_inventory"):
+            field_val = log.get(field_name, {})
+            sanitized[field_name] = {item: int(value) for item, value in field_val.items()}
+        arrivals = {}
+        for item, entries in log.get("arrivals", {}).items():
+            arrivals[item] = [
+                {"quantity": int(entry[0]), "order_day": int(entry[1])} for entry in entries
+            ]
+        sanitized["arrivals"] = arrivals
+        return sanitized
+
+    def _build_status_cards(self) -> Dict[str, Any]:
+        latest_log = self._ui_daily_logs[-1] if self._ui_daily_logs else None
+        inventory_snapshot = self._build_inventory_snapshot()
+        return {
+            "progress": {
+                "current_day": self.current_day,
+                "total_days": self._total_days,
+                "waiting_for_vm_action": self._pid == 0,
+            },
+            "reward": {
+                "to_date": self._running_reward,
+                "final": self.transcript.final_reward,
+            },
+            "cashflow": {
+                "day": latest_log["day"] if latest_log else None,
+                "profit": latest_log["daily_profit"] if latest_log else 0.0,
+                "holding_cost": latest_log["daily_holding_cost"] if latest_log else 0.0,
+                "reward": latest_log["daily_reward"] if latest_log else 0.0,
+            },
+            "inventory": inventory_snapshot,
+        }
+
+    def _build_inventory_snapshot(self) -> List[Dict[str, Any]]:
+        base_env = self._base_env
+        items = getattr(base_env, "items", {})
+        on_hand = getattr(base_env, "on_hand_inventory", {})
+        pending = getattr(base_env, "pending_orders", [])
+        current = getattr(base_env, "current_day", self.current_day)
+        snapshot: List[Dict[str, Any]] = []
+        for item_id, info in items.items():
+            in_transit = 0
+            for order in pending:
+                if order.get("item_id") != item_id:
+                    continue
+                arrival_day = order.get("arrival_day", float("inf"))
+                if arrival_day >= current:
+                    in_transit += int(order.get("quantity", 0))
+            snapshot.append(
+                {
+                    "item_id": item_id,
+                    "description": info.get("description"),
+                    "profit": float(info.get("profit", 0.0)),
+                    "holding_cost": float(info.get("holding_cost", 0.0)),
+                    "on_hand": int(on_hand.get(item_id, 0)),
+                    "in_transit": in_transit,
+                }
+            )
+        return snapshot
+
+    def _build_news_schedule(self) -> Dict[str, List[Dict[str, Any]]]:
+        schedule = self.csv_player.get_news_schedule()
+        if not schedule:
+            return {"today": [], "upcoming": [], "past": []}
+        today: List[Dict[str, Any]] = []
+        past: List[Dict[str, Any]] = []
+        for day in sorted(schedule.keys()):
+            entry = {"day": day, "content": schedule[day]}
+            if day == self.current_day:
+                today.append(entry)
+            elif day < self.current_day:
+                past.append(entry)
+        return {"today": today, "upcoming": [], "past": past}
 
 
 class Mode1Session(SimulationSession):

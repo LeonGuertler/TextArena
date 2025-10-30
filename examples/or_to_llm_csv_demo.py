@@ -436,6 +436,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "- IMPORTANT: Initial inventory on Day 1: Each item starts with 0 units on-hand\n"
         "\n"
         "- Holding cost is charged on ending inventory each day\n"
+        "- Daily sequence: orders are placed first, previously scheduled shipments arrive next, and demand is realized at the end of the day\n"
         "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
         "\n"
     )
@@ -501,7 +502,11 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "7. React to TODAY'S NEWS as it happens, considering inferred actual lead time\n"
         "8. Learn from past news events to understand their impact on demand\n"
         "9. Balance between data-driven OR approach and news-driven/lead-time-adjusted insights\n"
-        "10. Only fill carry_over_insight when you can cite a clear, sustained change (demand mean/variance shift or news impact). Otherwise leave it empty.\n"
+        "10. carry_over_insight RULES:\n"
+        "    - ONLY write when you observe a NEW, sustained change: demand mean/variance shift OR news impact.\n"
+        "    - MUST cite specific evidence: day numbers, old vs new averages, specific news.\n"
+        "    - IMPORTANT: Check if similar insight already exists in the observations above.\n"
+        "    - If the insight is essentially the SAME as what's already shown, return empty string \"\".\n"
         "\n"
         "Example decision process:\n"
         "- Step 1: Check recent arrivals to infer current lead_time (e.g., 'lead_time was 2 days')\n"
@@ -531,7 +536,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         '(5) consider lead_time when adjusting OR recommendations (goods arrive after lead_time!), '
         '(6) decide: follow OR baseline or adjust based on news/analysis, '
         '(7) explain your final ordering strategy",\n'
-        '  "carry_over_insight": "Short memo for future days (\"\" when there is no meaningful change)",\n'
+        '  "carry_over_insight": "Only if NEW sustained change observed with specific evidence; otherwise \"\" (must check if already exists above)",\n'
         f'  "action": {{{example_action}}}\n'
         "}\n"
         "\n"

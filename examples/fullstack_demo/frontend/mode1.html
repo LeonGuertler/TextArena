@@ -4,43 +4,620 @@
   <meta charset="UTF-8" />
   <title>Mode 1 - Daily Feedback</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <script src="/config.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
-    header { background: #667eea; color: white; padding: 16px; text-align: center; }
-    main { max-width: 1200px; margin: 0 auto; padding: 24px; }
-    h1, h2 { margin-top: 0; }
-    section { background: #fff; padding: 20px; margin-bottom: 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    label { display: block; margin-bottom: 8px; font-weight: 500; }
-    input, textarea, button, select { width: 100%; padding: 10px; margin-bottom: 12px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; }
-    textarea { min-height: 80px; font-family: inherit; }
-    button { background: #667eea; color: white; border: none; cursor: pointer; font-weight: 600; transition: background 0.3s; }
-    button:hover { background: #5568d3; }
-    button:disabled { background: #ccc; cursor: not-allowed; }
-    #transcript { max-height: 400px; overflow-y: auto; background: #1e1e1e; color: #0f0; padding: 16px; font-family: 'Courier New', monospace; border-radius: 6px; font-size: 13px; white-space: pre-wrap; }
-    #chat-history { max-height: 300px; overflow-y: auto; background: #f9f9f9; padding: 12px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 12px; }
-    .chat-message { margin-bottom: 12px; padding: 10px; border-radius: 6px; }
-    .chat-message.user { background: #e3f2fd; border-left: 4px solid #2196f3; }
-    .chat-message.assistant { background: #f1f8e9; border-left: 4px solid #8bc34a; }
-    .chat-message .role { font-weight: bold; margin-bottom: 4px; }
-    .chat-message .content { white-space: pre-wrap; }
-    .row { display: flex; gap: 12px; }
-    .row > div { flex: 1; }
-    .error { color: #e74c3c; margin-top: 8px; }
-    .status { font-weight: bold; color: #667eea; margin-bottom: 12px; }
-    .hidden { display: none; }
+    :root {
+      --primary: #667eea;
+      --primary-dark: #5568d3;
+      --accent: #764ba2;
+      --success: #27ae60;
+      --surface: #ffffff;
+      --surface-muted: #f7f8ff;
+      --border-radius: 10px;
+      --shadow: 0 6px 16px rgba(40, 51, 117, 0.12);
+      --text-muted: #666666;
+      --text-subtle: #9095a7;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(135deg, #eef1ff 0%, #f7e9ff 100%);
+      color: #1f2440;
+    }
+    header {
+      background: var(--primary);
+      color: var(--surface);
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: 0.3px;
+    }
+    header p {
+      margin: 8px 0 0;
+      font-size: 15px;
+      opacity: 0.9;
+    }
+    main {
+      max-width: 1260px;
+      margin: 0 auto;
+      padding: 28px 24px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .panel {
+      background: var(--surface);
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      padding: 22px 24px;
+    }
+    .panel h2,
+    .panel h3,
+    .panel h4 {
+      margin: 0;
+      font-weight: 600;
+    }
+    .panel:not(:last-child) {
+      margin-bottom: 4px;
+    }
+    label {
+      display: block;
+      margin-bottom: 10px;
+      font-weight: 500;
+    }
+    .input-label {
+      font-weight: 600;
+      color: #2f3458;
+    }
+    input,
+    textarea,
+    button,
+    select {
+      width: 100%;
+      padding: 12px;
+      margin-top: 6px;
+      border: 1px solid #d7daf1;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      background: #fbfbff;
+    }
+    input:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+      background: #ffffff;
+    }
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+    button {
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      transition: background 0.25s ease, transform 0.2s ease;
+    }
+    button:hover:not(:disabled) {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+    button:disabled {
+      background: #c8cdea;
+      cursor: not-allowed;
+    }
+    button.ghost {
+      width: auto;
+      padding: 8px 18px;
+      background: transparent;
+      color: var(--primary);
+      border: 1px solid var(--primary);
+      border-radius: 999px;
+      font-size: 13px;
+    }
+    button.ghost:disabled {
+      color: #aeb4d9;
+      border-color: #ccd1f4;
+      background: transparent;
+    }
+    .game-layout {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 24px;
+      align-items: stretch;
+    }
+    .column {
+      flex: 1 1 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      min-width: 320px;
+      min-height: 100%;
+    }
+    .column-left {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .column-right {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .right-bottom-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .status-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      flex: 0 0 auto;
+    }
+    .status-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    }
+    .status-card {
+      background: var(--surface-muted);
+      border-radius: 14px;
+      padding: 16px 18px;
+      border: 1px solid #dfe2ff;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 110px;
+    }
+    .status-card h4 {
+      font-size: 14px;
+      color: #2d3255;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+    }
+    .card-metric {
+      font-size: 22px;
+      font-weight: 700;
+      color: #161937;
+      letter-spacing: 0.3px;
+    }
+    .card-subtext {
+      color: #5f6275;
+      font-size: 13px;
+      margin-top: auto;
+    }
+    .inventory-card {
+      background: #fff7ea;
+      border: 1px solid #ffe0a3;
+    }
+    .inventory-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .inventory-item {
+      background: rgba(255, 255, 255, 0.7);
+      border-radius: 10px;
+      padding: 10px 12px;
+      border: 1px dashed rgba(255, 165, 0, 0.4);
+    }
+    .inventory-item-title {
+      font-weight: 600;
+      color: #8a5a00;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+    .inventory-line {
+      font-size: 13px;
+      color: #5b5f73;
+    }
+    .news-section {
+      background: #f6f7ff;
+      border-radius: 12px;
+      padding: 18px 20px;
+      border: 1px solid #dfe2ff;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      flex: 0 0 230px;
+      max-height: 240px;
+      min-height: 220px;
+      overflow: hidden;
+    }
+    .news-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .news-header h3 {
+      margin: 0;
+      font-size: 18px;
+      color: #2e3460;
+    }
+    .news-header span {
+      font-size: 13px;
+      color: var(--text-subtle);
+    }
+    .news-columns {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      flex: 1 1 auto;
+      align-content: start;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+    .news-column {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .news-column h4 {
+      margin: 0;
+      font-size: 14px;
+      color: #494f78;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+    .news-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex: 1 1 auto;
+    }
+    .news-list .placeholder {
+      padding: 18px 0;
+    }
+    .history-panel {
+      background: #f1f3ff;
+      border-radius: 12px;
+      border: 1px solid #d5daf9;
+      padding: 18px 20px;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+      flex: 0 0 auto;
+      min-height: 260px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .history-panel h3 {
+      margin: 0;
+      font-size: 17px;
+      color: #2b2f53;
+    }
+    .history-list {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      padding-right: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .history-entry {
+      background: rgba(255, 255, 255, 0.75);
+      border-radius: 10px;
+      border: 1px solid rgba(102, 126, 234, 0.25);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .history-entry header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 600;
+      color: #343a6f;
+      font-size: 14px;
+    }
+    .history-entry header span {
+      font-size: 12px;
+      color: #2f3158;
+      font-weight: 500;
+    }
+    .history-body {
+      background: #fff;
+      border-radius: 8px;
+      border: 1px dashed rgba(102, 126, 234, 0.25);
+      padding: 10px 12px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      color: #2f3158;
+      white-space: pre-wrap;
+      line-height: 1.45;
+    }
+    .history-placeholder {
+      color: var(--text-subtle);
+      font-style: italic;
+      font-size: 14px;
+    }
+    .status-banner {
+      padding: 14px 18px;
+      border-radius: 12px;
+      background: #eef0ff;
+      color: #343970;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.25);
+    }
+    .status-banner.completed {
+      background: #eaf9f0;
+      color: var(--success);
+      box-shadow: inset 0 0 0 1px rgba(39, 174, 96, 0.25);
+    }
+    .panel-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .panel-title {
+      font-size: 18px;
+      color: #242949;
+    }
+    .panel-subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin: 6px 0 16px;
+    }
+    .advisor-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      font-size: 14px;
+      color: #2d3152;
+    }
+    .advisor-body.empty {
+      color: var(--text-subtle);
+      font-style: italic;
+    }
+    .proposal-meta {
+      font-size: 13px;
+      color: var(--text-subtle);
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+    }
+    .proposal-text {
+      background: #f4f6ff;
+      border-radius: 8px;
+      padding: 12px;
+      line-height: 1.5;
+    }
+    .proposal-actions {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 8px;
+    }
+    .proposal-actions li {
+      background: #ffffff;
+      border-radius: 8px;
+      padding: 10px 12px;
+      border: 1px solid #e1e6ff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+    }
+    .carry-over {
+      font-size: 13px;
+      color: #5c60a1;
+      background: rgba(102, 126, 234, 0.12);
+      border-left: 3px solid var(--primary);
+      padding: 10px 12px;
+      border-radius: 8px;
+    }
+    .conversation-log {
+      max-height: 260px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-right: 4px;
+    }
+    .conversation-log .message {
+      border-radius: 12px;
+      padding: 12px 14px;
+      line-height: 1.45;
+      background: #eef1ff;
+      border: 1px solid rgba(102, 126, 234, 0.2);
+    }
+    .conversation-log .message.user {
+      background: #e7f4ff;
+      border-color: rgba(66, 165, 245, 0.35);
+    }
+    .conversation-log .message-role {
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #2b3054;
+    }
+    .conversation-log .message-body {
+      font-size: 14px;
+      color: #343652;
+    }
+    .news-card {
+      width: 100%;
+      background: #fef2ff;
+      border-radius: 12px;
+      padding: 14px 16px;
+      border: 1px solid rgba(118, 75, 162, 0.25);
+      box-shadow: 0 3px 10px rgba(118, 75, 162, 0.1);
+    }
+    .news-card.today {
+      background: #fff6eb;
+      border-color: rgba(255, 170, 43, 0.45);
+    }
+    .news-day {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #af58c8;
+      margin-bottom: 6px;
+    }
+    .news-card.today .news-day {
+      color: #d98200;
+    }
+    .news-text {
+      font-size: 14px;
+      color: #3b3052;
+      line-height: 1.45;
+    }
+    .chart-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 18px;
+    }
+    .chart-card {
+      background: var(--surface-muted);
+      border-radius: 14px;
+      padding: 16px;
+      border: 1px solid #dfe2ff;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      position: relative;
+    }
+    .chart-card h4 {
+      margin: 0;
+      font-size: 16px;
+      color: #2c3053;
+    }
+    .chart-card canvas {
+      width: 100% !important;
+      max-width: 100%;
+      height: 220px !important;
+      max-height: 220px;
+    }
+    .decision-panel {
+      padding: 16px 18px;
+      margin-top: auto;
+    }
+    .decision-panel .panel-subtitle {
+      margin-bottom: 12px;
+    }
+    .decision-panel .row {
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .decision-panel button {
+      margin-top: 4px;
+    }
+    .button-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .row > div {
+      flex: 1 1 180px;
+    }
+    .error {
+      color: #e74c3c;
+      font-size: 13px;
+      min-height: 18px;
+    }
+    .placeholder {
+      color: var(--text-subtle);
+      font-style: italic;
+      font-size: 14px;
+    }
+    details.panel {
+      padding: 0 24px 22px;
+    }
+    details.panel summary {
+      padding: 18px 0;
+      font-weight: 600;
+      color: var(--primary);
+      cursor: pointer;
+      list-style: none;
+    }
+    details.panel summary::-webkit-details-marker {
+      display: none;
+    }
+    #transcript {
+      max-height: 420px;
+      overflow-y: auto;
+      background: #1e1e1e;
+      color: #d6f7c4;
+      padding: 18px;
+      border-radius: 8px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    }
+    .hidden {
+      display: none !important;
+    }
+    @media (max-width: 960px) {
+      header h1 {
+        font-size: 24px;
+      }
+      main {
+        padding: 20px 16px 36px;
+      }
+      .game-layout {
+        flex-direction: column;
+      }
+      .column {
+        min-width: 100%;
+      }
+      .status-grid {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>🎮 Mode 1: Daily Feedback (Human Decision)</h1>
-    <p style="margin: 0; opacity: 0.9;">Chat with AI advisor • You make the final decision</p>
+    <p>Chat with the AI advisor — you make the final decision.</p>
   </header>
 
   <main>
-    <section id="setup-section">
+    <section id="setup-section" class="panel">
       <h2>Game Setup</h2>
-      <label>Promised Lead Time (days)
+      <label class="input-label">Promised Lead Time (days)
         <input id="promised-lead-time" type="number" min="0" value="4" />
       </label>
       <button id="start-btn">Start Game</button>
@@ -48,58 +625,169 @@
     </section>
 
     <section id="game-section" class="hidden">
-      <div class="status" id="status">Loading...</div>
-      
-      <h3>🤖 AI Advisor Chat</h3>
-      <div id="chat-history"></div>
-      
-      <label>Your Message to AI Advisor
-        <textarea id="user-message" placeholder="Ask questions, provide context, or discuss strategy with the AI..."></textarea>
-      </label>
-      <button id="send-message-btn">Send Message</button>
-      <div id="chat-error" class="error"></div>
+      <div class="game-layout">
+        <div class="column column-left">
+          <section class="panel status-panel">
+            <div class="panel-title-row">
+              <h3 class="panel-title">Current Status</h3>
+            </div>
+            <div class="status-grid">
+              <article class="status-card" id="progress-card"></article>
+              <article class="status-card" id="reward-card"></article>
+              <article class="status-card" id="cashflow-card"></article>
+            </div>
+            <article class="status-card inventory-card">
+              <h4>Inventory Health</h4>
+              <ul id="inventory-list" class="inventory-list">
+                <li class="placeholder">No inventory data yet.</li>
+              </ul>
+            </article>
+          </section>
 
-      <hr style="margin: 24px 0; border: none; border-top: 2px solid #eee;">
+          <section class="news-section">
+            <div class="news-header">
+              <h3>📰 News Outlook</h3>
+              <span>Only today’s and past headlines are visible to you and the AI.</span>
+            </div>
+            <div class="news-columns">
+              <div class="news-column">
+                <h4>Today</h4>
+                <div class="news-list" id="news-today">
+                  <span class="placeholder">No news for today.</span>
+                </div>
+              </div>
+              <div class="news-column">
+                <h4>History</h4>
+                <div class="news-list history" id="news-past">
+                  <span class="placeholder">No past news yet.</span>
+                </div>
+              </div>
+            </div>
+          </section>
 
-      <h3>📊 Your Final Decision</h3>
-      <p style="color: #666; font-size: 14px;">Enter the quantities you want to order (this will be executed):</p>
-      <div class="row">
-        <div>
-          <label>Regular Chips Quantity
-            <input id="regular-chips" type="number" min="0" placeholder="0" />
-          </label>
+          <section class="history-panel">
+            <h3>📘 Game History</h3>
+            <div id="history-list" class="history-list">
+              <p class="history-placeholder">Game history will appear here once the simulation progresses.</p>
+            </div>
+          </section>
         </div>
-        <div>
-          <label>BBQ Chips Quantity
-            <input id="bbq-chips" type="number" min="0" placeholder="0" />
-          </label>
+
+        <div class="column column-right">
+          <div class="status-banner" id="status">Loading...</div>
+
+          <article class="panel advisor-card" id="advisor-proposal">
+            <div class="panel-title-row">
+              <h3 class="panel-title">🤖 Latest Advisor Proposal</h3>
+              <button id="apply-proposal-btn" class="ghost" disabled>Apply to Form</button>
+            </div>
+            <div id="advisor-proposal-body" class="advisor-body empty">
+              Waiting for AI proposal...
+            </div>
+          </article>
+
+          <div class="right-bottom-wrapper">
+            <section class="panel conversation-panel">
+              <h3 class="panel-title">Chat History</h3>
+              <div id="conversation-log" class="conversation-log">
+                <p class="placeholder">No messages yet.</p>
+              </div>
+              <label class="input-label">Your Message to AI Advisor
+                <textarea id="user-message" placeholder="Ask questions, provide context, or discuss strategy with the AI..."></textarea>
+              </label>
+              <div class="button-row">
+                <button id="send-message-btn">Send Message</button>
+                <span id="chat-error" class="error"></span>
+              </div>
+            </section>
+
+            <section class="panel decision-panel">
+              <h3 class="panel-title">📊 Your Final Decision</h3>
+              <p class="panel-subtitle">Enter the quantities you want to order. This action will execute immediately.</p>
+              <div class="row">
+                <div>
+                  <label class="input-label">Regular Chips Quantity
+                    <input id="regular-chips" type="number" min="0" placeholder="0" />
+                  </label>
+                </div>
+                <div>
+                  <label class="input-label">BBQ Chips Quantity
+                    <input id="bbq-chips" type="number" min="0" placeholder="0" />
+                  </label>
+                </div>
+              </div>
+              <button id="submit-decision-btn">Submit Final Decision & Proceed</button>
+              <div id="decision-error" class="error"></div>
+            </section>
+          </div>
         </div>
       </div>
-      <button id="submit-decision-btn">Submit Final Decision & Proceed</button>
-      <div id="decision-error" class="error"></div>
 
-      <hr style="margin: 24px 0; border: none; border-top: 2px solid #eee;">
+      <section id="charts-panel" class="panel chart-panel hidden">
+        <div class="panel-title-row">
+          <h3 class="panel-title">📈 Performance Trends</h3>
+        </div>
+        <div class="chart-grid">
+          <article class="chart-card">
+            <h4>Historic Daily Demand</h4>
+            <canvas id="demand-chart"></canvas>
+          </article>
+          <article class="chart-card">
+            <h4>Daily Reward</h4>
+            <canvas id="reward-chart"></canvas>
+          </article>
+        </div>
+      </section>
 
-      <h3>📜 Game Transcript</h3>
-      <div id="transcript">Waiting for game to start...</div>
+      <details class="panel transcript-panel">
+        <summary>📜 Detailed Transcript</summary>
+        <div id="transcript">Waiting for game to start...</div>
+      </details>
     </section>
   </main>
 
   <script>
     const supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+
     let currentRunId = null;
     let pollTimer = null;
+    let latestProposalAction = null;
 
     const setupSection = document.getElementById("setup-section");
     const gameSection = document.getElementById("game-section");
-    const statusEl = document.getElementById("status");
-    const chatHistoryEl = document.getElementById("chat-history");
+
+    const statusBanner = document.getElementById("status");
+    const progressCard = document.getElementById("progress-card");
+    const rewardCard = document.getElementById("reward-card");
+    const cashflowCard = document.getElementById("cashflow-card");
+    const inventoryListEl = document.getElementById("inventory-list");
+
+    const newsTodayEl = document.getElementById("news-today");
+    const newsPastEl = document.getElementById("news-past");
+    const historyListEl = document.getElementById("history-list");
+
+    const advisorBodyEl = document.getElementById("advisor-proposal-body");
+    const applyProposalBtn = document.getElementById("apply-proposal-btn");
+
+    const conversationLogEl = document.getElementById("conversation-log");
     const transcriptEl = document.getElementById("transcript");
+    const chartsPanel = document.getElementById("charts-panel");
+    const demandCanvas = document.getElementById("demand-chart");
+    const rewardCanvas = document.getElementById("reward-chart");
+
     const startError = document.getElementById("start-error");
     const chatError = document.getElementById("chat-error");
     const decisionError = document.getElementById("decision-error");
 
-    // Check authentication
+    const sendMessageBtn = document.getElementById("send-message-btn");
+    const submitDecisionBtn = document.getElementById("submit-decision-btn");
+    const regularInput = document.getElementById("regular-chips");
+    const bbqInput = document.getElementById("bbq-chips");
+
+    let demandChartInstance = null;
+    let rewardChartInstance = null;
+
+    // Authentication guard
     supabaseClient.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
         window.location.href = '/';
@@ -109,25 +797,26 @@
     document.getElementById("start-btn").addEventListener("click", async () => {
       startError.textContent = "";
       const promisedLeadTime = parseInt(document.getElementById("promised-lead-time").value, 10);
-      
+
       try {
         const response = await apiRequest("/runs", {
           method: "POST",
           body: JSON.stringify({
             mode: "mode1",
-            promised_lead_time: promisedLeadTime || 4,
+            promised_lead_time: Number.isFinite(promisedLeadTime) ? promisedLeadTime : 4,
           }),
         });
         currentRunId = response.run_id;
         setupSection.classList.add("hidden");
         gameSection.classList.remove("hidden");
         updateUI(response);
+        startPolling();
       } catch (err) {
         startError.textContent = err.message || "Failed to start game";
       }
     });
 
-    document.getElementById("send-message-btn").addEventListener("click", async () => {
+    sendMessageBtn.addEventListener("click", async () => {
       chatError.textContent = "";
       const message = document.getElementById("user-message").value.trim();
       if (!message) {
@@ -142,94 +831,627 @@
         });
         document.getElementById("user-message").value = "";
         updateUI(response);
+        startPolling();
       } catch (err) {
         chatError.textContent = err.message || "Failed to send message";
       }
     });
 
-    document.getElementById("submit-decision-btn").addEventListener("click", async () => {
+    submitDecisionBtn.addEventListener("click", async () => {
       decisionError.textContent = "";
-      
-      const regularChips = document.getElementById("regular-chips").value.trim();
-      const bbqChips = document.getElementById("bbq-chips").value.trim();
-      
-      if (!regularChips || !bbqChips) {
+      const regularChips = regularInput.value.trim();
+      const bbqChips = bbqInput.value.trim();
+
+      if (regularChips === "" || bbqChips === "") {
         decisionError.textContent = "Please enter quantities for both chip types";
         return;
       }
-      
+
       const regularQty = parseInt(regularChips, 10);
       const bbqQty = parseInt(bbqChips, 10);
-      
-      if (isNaN(regularQty) || isNaN(bbqQty) || regularQty < 0 || bbqQty < 0) {
-        decisionError.textContent = "Please enter valid numbers (0 or greater)";
+
+      if (!Number.isInteger(regularQty) || !Number.isInteger(bbqQty) || regularQty < 0 || bbqQty < 0) {
+        decisionError.textContent = "Please enter valid whole numbers (0 or greater)";
         return;
       }
-      
+
       const actionJson = JSON.stringify({
         "chips(Regular)": regularQty,
-        "chips(BBQ)": bbqQty
+        "chips(BBQ)": bbqQty,
       });
-      
+
       try {
         const response = await apiRequest(`/runs/${currentRunId}/final-action`, {
           method: "POST",
           body: JSON.stringify({ action_json: actionJson }),
         });
-        document.getElementById("regular-chips").value = "";
-        document.getElementById("bbq-chips").value = "";
+        regularInput.value = "";
+        bbqInput.value = "";
         updateUI(response);
+        startPolling();
       } catch (err) {
         decisionError.textContent = err.message || "Failed to submit decision";
       }
     });
 
+    applyProposalBtn.addEventListener("click", () => {
+      if (!latestProposalAction || typeof latestProposalAction !== "object") {
+        return;
+      }
+      const entries = Object.entries(latestProposalAction);
+      if (!entries.length) {
+        return;
+      }
+      entries.forEach(([itemId, qty]) => {
+        const value = Number.isFinite(Number(qty)) ? Number(qty) : "";
+        if (/regular/i.test(itemId)) {
+          regularInput.value = value;
+        } else if (/bbq/i.test(itemId)) {
+          bbqInput.value = value;
+        }
+      });
+    });
+
     function updateUI(state) {
       if (!state) return;
 
-      // Update status
+      renderStatusBanner(state);
+      renderStatusCards(state.status_cards || {});
+      renderNews(state.news || {});
+      renderHistory(state.daily_logs || []);
+      renderAdvisorProposal(state.transcript || []);
+      renderConversation(state.conversation || []);
+      renderTranscript(state.transcript || []);
+      renderCharts(state.daily_logs || []);
+
+      const completed = !!state.completed;
+      sendMessageBtn.disabled = completed;
+      submitDecisionBtn.disabled = completed || !state.waiting_for_final_action;
+      if (completed && pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      requestAnimationFrame(syncColumnHeights);
+    }
+
+    function renderStatusBanner(state) {
+      if (!statusBanner) return;
       if (state.completed) {
-        statusEl.textContent = `✅ Game Complete! Final Reward: $${state.final_reward?.toFixed(2) || '0.00'}`;
-        statusEl.style.color = '#27ae60';
-        document.getElementById("send-message-btn").disabled = true;
-        document.getElementById("submit-decision-btn").disabled = true;
-        if (pollTimer) clearInterval(pollTimer);
+        statusBanner.textContent = `🏁 Game complete! Final reward: ${formatCurrency(state.final_reward)}`;
+        statusBanner.classList.add("completed");
       } else {
-        statusEl.textContent = `📅 Day ${state.current_day || 1} - ${state.waiting_for_final_action ? 'Waiting for your final decision' : 'Ready for chat'}`;
-        statusEl.style.color = '#667eea';
+        const day = state.current_day || 1;
+        const message = state.waiting_for_final_action ? "Waiting for your final decision" : "Ready for collaboration";
+        statusBanner.textContent = `📅 Day ${day} · ${message}`;
+        statusBanner.classList.remove("completed");
+      }
+    }
+
+    function renderStatusCards(cards) {
+      const progress = cards.progress || {};
+      const reward = cards.reward || {};
+      const cashflow = cards.cashflow || {};
+      const inventory = Array.isArray(cards.inventory) ? cards.inventory : [];
+
+      if (progressCard) {
+        const turnText = progress.waiting_for_vm_action ? "AI is planning the next move" : "Awaiting your decision";
+        progressCard.innerHTML = `
+          <h4>Progress</h4>
+          <div class="card-metric">Day ${formatNumber(progress.current_day)} / ${formatNumber(progress.total_days)}</div>
+          <div class="card-subtext">${turnText}</div>
+        `;
       }
 
-      // Update chat history
-      if (state.conversation && state.conversation.length > 0) {
-        chatHistoryEl.innerHTML = state.conversation.map(msg => {
-          const roleClass = msg.role === 'human' ? 'user' : 'assistant';
-          const roleLabel = msg.role === 'human' ? '👤 You' : '🤖 AI Advisor';
-          let content = msg.content;
-          
-          // Try to parse and format JSON nicely
-          try {
-            const parsed = JSON.parse(content);
-            if (parsed.rationale && parsed.action) {
-              content = `Rationale: ${parsed.rationale}\n\nProposed Action: ${JSON.stringify(parsed.action, null, 2)}`;
-            }
-          } catch (e) {
-            // Not JSON, use as is
+      if (rewardCard) {
+        const finalReward = Number.isFinite(reward.final) ? formatCurrency(reward.final) : "—";
+        rewardCard.innerHTML = `
+          <h4>Reward</h4>
+          <div class="card-metric">${formatCurrency(reward.to_date)}</div>
+          <div class="card-subtext">Final: ${finalReward}</div>
+        `;
+      }
+
+      if (cashflowCard) {
+        const dayLabel = cashflow.day ? `Day ${formatNumber(cashflow.day)} snapshot` : "Awaiting first demand turn";
+        cashflowCard.innerHTML = `
+          <h4>Cashflow</h4>
+          <div class="card-metric">${formatCurrency(cashflow.reward)}</div>
+          <div class="card-subtext">${dayLabel} · Profit ${formatCurrency(cashflow.profit)} · Holding ${formatCurrency(cashflow.holding_cost)}</div>
+        `;
+      }
+
+      renderInventory(inventory);
+    }
+
+    function renderInventory(inventory) {
+      if (!inventoryListEl) return;
+      if (!inventory.length) {
+        inventoryListEl.innerHTML = `<li class="placeholder">No inventory data yet.</li>`;
+        return;
+      }
+
+      inventoryListEl.innerHTML = inventory.map((item) => {
+        const itemId = escapeHtml(String(item.item_id || ""));
+        const description = escapeHtml(String(item.description || ""));
+        const onHand = formatNumber(item.on_hand);
+        const inTransit = formatNumber(item.in_transit);
+        const profit = formatUnitCurrency(item.profit);
+        const holding = formatUnitCurrency(item.holding_cost);
+
+        return `
+          <li class="inventory-item">
+            <div class="inventory-item-title">${itemId}</div>
+            <div class="inventory-line">${description}</div>
+            <div class="inventory-line">On-hand: <strong>${onHand}</strong> · In-transit: <strong>${inTransit}</strong></div>
+            <div class="inventory-line">Profit ${profit}/unit · Holding ${holding}/unit/day</div>
+          </li>
+        `;
+      }).join("");
+    }
+
+    function renderNews(news) {
+      fillNewsList(newsTodayEl, news.today, "No news for today.", true);
+      fillNewsList(newsPastEl, news.past, "No past news yet.");
+    }
+
+    function fillNewsList(container, items, emptyText, highlightToday = false) {
+      if (!container) return;
+      if (!Array.isArray(items) || !items.length) {
+        container.innerHTML = `<span class="placeholder">${emptyText}</span>`;
+        return;
+      }
+
+      container.innerHTML = items.map((item) => {
+        const day = escapeHtml(String(item.day));
+        const content = escapeHtml(String(item.content || "")).replace(/\n/g, "<br>");
+        const todayClass = highlightToday ? "today" : "";
+        return `
+          <article class="news-card ${todayClass}">
+            <div class="news-day">Day ${day}</div>
+            <div class="news-text">${content}</div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function renderHistory(dailyLogs) {
+      if (!historyListEl) return;
+      if (!Array.isArray(dailyLogs) || !dailyLogs.length) {
+        historyListEl.innerHTML = `<p class="history-placeholder">Game history will appear here once the simulation progresses.</p>`;
+        return;
+      }
+
+      const entries = dailyLogs
+        .slice()
+        .sort((a, b) => Number(a.day || 0) - Number(b.day || 0))
+        .map((log) => createHistoryEntry(log))
+        .join("");
+
+      historyListEl.innerHTML = entries;
+      historyListEl.scrollTop = historyListEl.scrollHeight;
+      requestAnimationFrame(syncColumnHeights);
+    }
+
+    function createHistoryEntry(log) {
+      const day = formatNumber(log.day);
+      const reward = formatCurrency(log.daily_reward);
+      const lines = buildHistoryLines(log);
+      const body = escapeHtml(lines.join("\n"));
+      return `
+        <article class="history-entry">
+          <header>
+            <div>Day ${day}</div>
+            <span>Reward ${reward}</span>
+          </header>
+          <div class="history-body">${body.replace(/\n/g, "<br>")}</div>
+        </article>
+      `;
+    }
+
+    function buildHistoryLines(log) {
+      const lines = [`Day ${formatNumber(log.day)} concluded:`];
+      const items = Object.keys({
+        ...log.orders,
+        ...log.ending_inventory,
+        ...log.starting_inventory,
+      });
+      items.sort();
+      items.forEach((itemId) => {
+        const ordered = Number((log.orders || {})[itemId] ?? 0);
+        const starting = Number((log.starting_inventory || {})[itemId] ?? 0);
+        const demand = Number((log.requests || {})[itemId] ?? 0);
+        const sold = Number((log.sales || {})[itemId] ?? 0);
+        const ending = Number((log.ending_inventory || {})[itemId] ?? 0);
+        const arrivals = (log.arrivals && log.arrivals[itemId]) || [];
+        const arrivalText =
+          arrivals.length === 0
+            ? "0"
+            : arrivals
+                .map((entry) => {
+                  const qty = Number(entry.quantity ?? 0);
+                  const orderDay = formatNumber(entry.order_day);
+                  return `${qty} (ordered Day ${orderDay})`;
+                })
+                .join(", ");
+        lines.push(
+          `${itemId}: ordered=${ordered}, arrived=${arrivalText}, starting on-hand inventory=${starting}, demand=${demand}, sold=${sold}, ending on-hand inventory=${ending}`
+        );
+      });
+      return lines;
+    }
+
+    function syncColumnHeights() {
+      const leftCol = document.querySelector(".column-left");
+      const rightCol = document.querySelector(".column-right");
+      const historyPanelEl = document.querySelector(".history-panel");
+      if (!leftCol || !rightCol || !historyPanelEl) return;
+
+      const leftTop = leftCol.getBoundingClientRect().top;
+      const historyTop = historyPanelEl.getBoundingClientRect().top;
+      const offset = historyTop - leftTop;
+      const rightHeight = rightCol.getBoundingClientRect().height;
+      let available = rightHeight - offset;
+      const minHeight = 260;
+      if (!Number.isFinite(available) || available <= 0) {
+        available = minHeight;
+      }
+      available = Math.max(available, minHeight);
+      historyPanelEl.style.height = `${available}px`;
+
+      const historyList = historyPanelEl.querySelector(".history-list");
+      if (historyList) {
+        const header = historyPanelEl.querySelector("h3");
+        const headerHeight = header ? header.getBoundingClientRect().height : 0;
+        const gap = parseFloat(window.getComputedStyle(historyPanelEl).rowGap || "0");
+        const listHeight = Math.max(available - headerHeight - gap, 140);
+        historyList.style.maxHeight = `${listHeight}px`;
+      }
+    }
+
+    window.addEventListener("resize", () => {
+      requestAnimationFrame(syncColumnHeights);
+    });
+
+    function renderAdvisorProposal(transcript) {
+      const proposal = findLatestProposal(transcript);
+      if (!proposal) {
+        advisorBodyEl.classList.add("empty");
+        advisorBodyEl.innerHTML = "Waiting for AI proposal...";
+        latestProposalAction = null;
+        applyProposalBtn.disabled = true;
+        return;
+      }
+
+      const payload = coerceAgentPayload(proposal.content);
+      const action = coerceActionObject(payload.action);
+      const rationale = payload.rationale;
+      const carry = payload.carry_over_insight;
+      const day = proposal.day;
+
+      const actionEntries = Object.entries(action);
+      latestProposalAction = actionEntries.length ? action : null;
+      applyProposalBtn.disabled = !actionEntries.length;
+
+      const actionHtml = actionEntries.length
+        ? `<ul class="proposal-actions">${actionEntries.map(([itemId, qty]) => `
+            <li>
+              <span>${escapeHtml(String(itemId))}</span>
+              <strong>${formatNumber(qty)}</strong>
+            </li>
+          `).join("")}</ul>`
+        : `<p class="placeholder">No explicit order proposal yet.</p>`;
+
+      const rationaleHtml = rationale
+        ? `<div class="proposal-text">${escapeHtml(String(rationale)).replace(/\n/g, "<br>")}</div>`
+        : `<p class="placeholder">No rationale provided.</p>`;
+
+      const carryHtml = carry
+        ? `<div class="carry-over">Carry-over insight: ${escapeHtml(String(carry)).replace(/\n/g, "<br>")}</div>`
+        : "";
+
+      advisorBodyEl.classList.remove("empty");
+      advisorBodyEl.innerHTML = `
+        <div class="proposal-meta">Day ${escapeHtml(String(day || "?"))}</div>
+        ${rationaleHtml}
+        ${actionHtml}
+        ${carryHtml}
+      `;
+    }
+
+    function findLatestProposal(transcript) {
+      if (!Array.isArray(transcript)) return null;
+      for (let i = transcript.length - 1; i >= 0; i -= 1) {
+        const event = transcript[i];
+        if (event && event.kind === "agent_proposal" && event.payload) {
+          return event.payload;
+        }
+      }
+      return null;
+    }
+
+    function renderConversation(conversation) {
+      if (!conversationLogEl) return;
+      if (!Array.isArray(conversation) || !conversation.length) {
+        conversationLogEl.innerHTML = `<p class="placeholder">No messages yet.</p>`;
+        return;
+      }
+
+      const recent = conversation.slice(-12);
+      conversationLogEl.innerHTML = recent.map((msg) => {
+        const roleClass = msg.role === "human" ? "user" : "assistant";
+        const roleLabel = msg.role === "human" ? "👤 You" : "🤖 AI Advisor";
+        const content = formatConversationContent(msg);
+        return `
+          <div class="message ${roleClass}">
+            <div class="message-role">${roleLabel}</div>
+            <div class="message-body">${content}</div>
+          </div>
+        `;
+      }).join("");
+
+      conversationLogEl.scrollTop = conversationLogEl.scrollHeight;
+    }
+
+    function formatConversationContent(message) {
+      const rawContent = message.content;
+      if (message.role !== "human") {
+        const parsed = coerceAgentPayload(rawContent);
+        if (parsed && typeof parsed === "object") {
+          const parts = [];
+          if (parsed.rationale) {
+            parts.push(`<strong>Rationale:</strong> ${escapeHtml(String(parsed.rationale)).replace(/\n/g, "<br>")}`);
           }
-          
-          return `<div class="chat-message ${roleClass}">
-            <div class="role">${roleLabel}</div>
-            <div class="content">${content}</div>
-          </div>`;
-        }).join('');
-        chatHistoryEl.scrollTop = chatHistoryEl.scrollHeight;
+          const actionBlock = coerceActionObject(parsed.action);
+          if (actionBlock && Object.keys(actionBlock).length) {
+            parts.push(`<strong>Action:</strong> ${formatActionList(actionBlock)}`);
+          }
+          if (parsed.carry_over_insight) {
+            parts.push(`<em>Carry-over insight:</em> ${escapeHtml(String(parsed.carry_over_insight)).replace(/\n/g, "<br>")}`);
+          }
+          if (parts.length) {
+            return parts.join("<br><br>");
+          }
+        }
       }
 
-      // Update transcript
-      if (state.transcript && state.transcript.length > 0) {
-        const lines = state.transcript.map(evt => `[${evt.kind.toUpperCase()}]\n${JSON.stringify(evt.payload, null, 2)}`);
-        transcriptEl.textContent = lines.join('\n\n');
-        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      const content = tryExtractString(rawContent);
+      if (!content) return "";
+      try {
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed === "object") {
+          const parts = [];
+          if (parsed.rationale) {
+            parts.push(`<strong>Rationale:</strong> ${escapeHtml(String(parsed.rationale)).replace(/\n/g, "<br>")}`);
+          }
+          if (parsed.action && typeof parsed.action === "object") {
+            parts.push(`<strong>Action:</strong> ${formatActionList(parsed.action)}`);
+          }
+          if (parts.length) {
+            return parts.join("<br><br>");
+          }
+          return escapeHtml(JSON.stringify(parsed, null, 2)).replace(/\n/g, "<br>");
+        }
+      } catch (err) {
+        // Not JSON, fall through
       }
+
+      return escapeHtml(String(content)).replace(/\n/g, "<br>");
+    }
+
+    function formatActionList(actionObj) {
+      const entries = Object.entries(actionObj || {});
+      if (!entries.length) {
+        return "<em>No action proposed.</em>";
+      }
+      return `
+        <ul class="proposal-actions">
+          ${entries.map(([key, value]) => `
+            <li>
+              <span>${escapeHtml(String(key))}</span>
+              <strong>${formatNumber(value)}</strong>
+            </li>
+          `).join("")}
+        </ul>
+      `;
+    }
+
+    function renderTranscript(transcript) {
+      if (!transcriptEl) return;
+      if (!Array.isArray(transcript) || !transcript.length) {
+        transcriptEl.textContent = "Transcript will appear here once the game begins.";
+        return;
+      }
+      const lines = transcript.map((evt) => `[${String(evt.kind || "").toUpperCase()}]\n${JSON.stringify(evt.payload, null, 2)}`);
+      transcriptEl.textContent = lines.join("\n\n");
+    }
+
+    function renderCharts(dailyLogs) {
+      if (!chartsPanel || !demandCanvas || !rewardCanvas) return;
+      if (!Array.isArray(dailyLogs) || dailyLogs.length === 0) {
+        if (chartsPanel) chartsPanel.classList.add("hidden");
+        if (demandChartInstance) {
+          demandChartInstance.destroy();
+          demandChartInstance = null;
+        }
+        if (rewardChartInstance) {
+          rewardChartInstance.destroy();
+          rewardChartInstance = null;
+        }
+        return;
+      }
+
+      chartsPanel.classList.remove("hidden");
+
+      ensureCanvasDimensions(demandCanvas);
+      ensureCanvasDimensions(rewardCanvas);
+
+      const labels = dailyLogs.map((log) => `Day ${formatNumber(log.day)}`);
+      const demandDatasets = buildDemandDatasets(dailyLogs);
+      const rewardData = dailyLogs.map((log) => Number(log.daily_reward || 0));
+
+      if (demandChartInstance) {
+        demandChartInstance.data.labels = labels;
+        demandChartInstance.data.datasets = demandDatasets;
+        demandChartInstance.update();
+        demandChartInstance.resize();
+      } else if (window.Chart && demandCanvas.getContext) {
+        demandChartInstance = new Chart(demandCanvas.getContext("2d"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: demandDatasets,
+          },
+          options: buildLineChartOptions({
+            yLabel: "Units",
+            tooltipLabel: (ctx) => `${ctx.dataset.label}: ${formatNumber(ctx.parsed.y)}`,
+          }),
+        });
+      }
+
+      if (rewardChartInstance) {
+        rewardChartInstance.data.labels = labels;
+        rewardChartInstance.data.datasets[0].data = rewardData;
+        rewardChartInstance.update();
+        rewardChartInstance.resize();
+      } else if (window.Chart && rewardCanvas.getContext) {
+        rewardChartInstance = new Chart(rewardCanvas.getContext("2d"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Daily Reward",
+                data: rewardData,
+                borderColor: "#764ba2",
+                backgroundColor: "rgba(118, 75, 162, 0.15)",
+                tension: 0.25,
+                pointRadius: 3,
+                pointBackgroundColor: "#764ba2",
+                pointBorderWidth: 1,
+                fill: true,
+              },
+            ],
+          },
+          options: buildLineChartOptions({
+            yLabel: "Reward",
+            tooltipLabel: (ctx) => `Reward: ${formatCurrency(ctx.parsed.y)}`,
+          }),
+        });
+      }
+    }
+
+    function buildDemandDatasets(dailyLogs) {
+      const itemIds = new Set();
+      dailyLogs.forEach((log) => {
+        const requests = log.requests || {};
+        Object.keys(requests).forEach((item) => itemIds.add(item));
+      });
+
+      const palette = [
+        "#667eea",
+        "#764ba2",
+        "#ff9f43",
+        "#2ecc71",
+        "#ff6b6b",
+        "#1abc9c",
+      ];
+
+      const ids = Array.from(itemIds);
+      if (ids.length === 0) {
+        ids.push("Total");
+      }
+
+      return ids.map((itemId, index) => {
+        const color = palette[index % palette.length];
+        const data = dailyLogs.map((log) => {
+          const requests = log.requests || {};
+          if (itemId === "Total") {
+            return Object.values(requests).reduce((sum, value) => sum + Number(value || 0), 0);
+          }
+          return Number(requests[itemId] || 0);
+        });
+        return {
+          label: itemId,
+          data,
+          borderColor: color,
+          backgroundColor: `${color}33`,
+          tension: 0.25,
+          pointRadius: 3,
+          pointBackgroundColor: color,
+          pointBorderWidth: 1,
+          fill: true,
+        };
+      });
+    }
+
+    function buildLineChartOptions({ yLabel, tooltipLabel }) {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          mode: "index",
+          intersect: false,
+        },
+        scales: {
+          y: {
+            title: {
+              display: !!yLabel,
+              text: yLabel || "",
+            },
+            ticks: {
+              callback: (value) => formatNumber(value),
+            },
+            grid: {
+              color: "rgba(102, 126, 234, 0.15)",
+            },
+          },
+          x: {
+            grid: {
+              color: "rgba(102, 126, 234, 0.08)",
+            },
+          },
+        },
+        plugins: {
+          legend: {
+            display: true,
+            position: "bottom",
+          },
+          tooltip: {
+            callbacks: {
+              label: tooltipLabel,
+            },
+          },
+        },
+      };
+    }
+
+    function ensureCanvasDimensions(canvas) {
+      if (!canvas) return;
+      const desired = 220;
+      const width = canvas.clientWidth || (canvas.parentElement ? canvas.parentElement.clientWidth : 480);
+      canvas.height = desired;
+      canvas.style.height = `${desired}px`;
+      canvas.style.maxHeight = `${desired}px`;
+      if (width > 0) {
+        canvas.width = width;
+        canvas.style.width = "100%";
+      }
+    }
+
+    function startPolling() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        try {
+          const state = await apiRequest(`/runs/${currentRunId}`, { method: "GET" });
+          updateUI(state);
+          if (state.completed || state.waiting_for_final_action) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+        } catch (err) {
+          console.error("Polling error:", err);
+        }
+      }, 2000);
     }
 
     async function apiRequest(path, options = {}) {
@@ -239,20 +1461,113 @@
         throw new Error("Not authenticated");
       }
       const token = session.data.session.access_token;
-      const resp = await fetch(`http://localhost:8000${path}`, {
+      const response = await fetch(`http://localhost:8000${path}`, {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         ...options,
       });
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(text || resp.statusText);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || response.statusText);
       }
-      return resp.json();
+      return response.json();
+    }
+
+    function formatCurrency(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "$0.00";
+      return `$${num.toFixed(2)}`;
+    }
+
+    function formatUnitCurrency(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "$0.00";
+      return `$${num.toFixed(2)}`;
+    }
+
+    function formatNumber(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "—";
+      return num.toLocaleString();
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function tryExtractString(value) {
+      if (value == null) return "";
+      if (typeof value === "string") return value;
+      if (typeof value === "object") return JSON.stringify(value);
+      return String(value);
+    }
+
+    function coerceAgentPayload(content) {
+      if (content && typeof content === "object" && !Array.isArray(content)) {
+        return content;
+      }
+      const stringContent = tryExtractString(content);
+      const parsed = tryParseJson(stringContent);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed;
+      }
+      return { rationale: stringContent };
+    }
+
+    function coerceActionObject(action) {
+      if (action && typeof action === "object" && !Array.isArray(action)) {
+        return action;
+      }
+      const actionStr = tryExtractString(action);
+      const parsed = tryParseJson(actionStr);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed;
+      }
+      return {};
+    }
+
+    function tryParseJson(raw) {
+      if (typeof raw !== "string") return null;
+      let text = raw.trim();
+      if (!text) return null;
+
+      if (text.startsWith("```")) {
+        text = text.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+      }
+      if (/^json\s*/i.test(text)) {
+        text = text.replace(/^json\s*/i, "");
+      }
+
+      const firstBrace = text.indexOf("{");
+      const firstBracket = text.indexOf("[");
+      let start = firstBrace;
+      if (start === -1 || (firstBracket !== -1 && firstBracket < start)) {
+        start = firstBracket;
+      }
+      if (start > 0) {
+        text = text.slice(start);
+      }
+
+      const lastBrace = text.lastIndexOf("}");
+      const lastBracket = text.lastIndexOf("]");
+      let end = Math.max(lastBrace, lastBracket);
+      if (end >= 0 && end < text.length - 1) {
+        text = text.slice(0, end + 1);
+      }
+
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        return null;
+      }
     }
   </script>
 </body>
 </html>
-

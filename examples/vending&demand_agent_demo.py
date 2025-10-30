@@ -62,7 +62,12 @@ def make_vm_agent():
         "- Learn from past news events to understand their impact on demand\n"
         "- Order enough to cover demand during lead time + buffer, but minimize holding costs\n"
         "- Consider profit margins and holding costs when prioritizing which items to stock\n"
-        "- When you spot patterns future days should remember, summarize them in 'carry_over_insight' (keep it \"\" unless the shift is clearly persistent)\n"
+        "- carry_over_insight RULES:\n"
+        "    - ONLY write when you observe a NEW, sustained change: demand mean/variance shift OR news impact.\n"
+        "    - MUST cite specific evidence: day numbers, old vs new averages, specific news.\n"
+        "    - IMPORTANT: Check if similar insight already exists in the observations above.\n"
+        "    - If the insight is essentially the SAME as what's already shown, return empty string \"\".\n"
+        "    - Example: \"Days 15-20 avg demand 150 vs historical 90\" NOT \"Monitor demand closely\".\n"
         "\n"
         "IMPORTANT: Think step by step, then decide.\n"
         "You MUST respond with valid JSON in this exact format:\n"
@@ -70,7 +75,7 @@ def make_vm_agent():
         '  "rationale": "First, explain your reasoning: analyze current inventory and demand patterns for each item, '
         'evaluate today\'s news (if any) and learn from past news, consider different lead times, '
         'and explain your ordering strategy for each item",\n'
-        '  "carry_over_insight": "Short memo for future days (\"\" when there is no meaningful change)",\n'
+        '  "carry_over_insight": "Only if NEW sustained change observed with specific evidence; otherwise \"\" (must check if already exists above)",\n'
         '  "action": {"item_id": quantity, "item_id": quantity, ...}\n'
         "}\n"
         "\n"

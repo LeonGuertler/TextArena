@@ -266,6 +266,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- Lead time is NOT directly revealed. You must INFER it from arrival records.\n"
         "- When goods arrive, you'll see: 'arrived=X units (ordered on Day Y, lead_time was Z days)'\n"
         "- Use this information to track actual lead time and adjust your strategy\n"
+        "- Each day unfolds as: you place today's order -> any shipments already due arrive -> customer demand occurs.\n"
         "\n"
         "Inventory visibility:\n"
         "- On-hand: Current inventory available for sale today\n"
@@ -333,8 +334,12 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- React to TODAY'S NEWS as it happens, accounting for inferred lead time\n"
         "- Learn from past news events to understand their impact on demand\n"
         "- Balance profit vs holding cost (don't overstock)\n"
-        "- carry_over_insight: Only fill this when you can cite a clear, sustained change (demand mean/variance shift or news impact). Otherwise return empty string \"\"\n"
-        "- If you do provide carry_over_insight, cite specific evidence (e.g., day numbers, updated averages) and ensure it is new; if it matches any earlier memo, leave it blank.\n"
+        "- carry_over_insight: A memo that carries forward to future days to help you remember important discoveries.\n"
+        "  RULES for carry_over_insight:\n"
+        "    (1) ONLY write when you observe a NEW, sustained change: demand mean/variance shift OR news impact.\n"
+        "    (2) MUST cite specific evidence: day numbers, old vs new averages, specific news.\n"
+        "    (3) IMPORTANT: Check if similar insight already exists in the observations above.\n"
+        "    (4) If the insight is essentially the SAME as what's already shown, return empty string \"\".\n"
         "\n\n"
         "IMPORTANT: Think step by step, then decide.\n"
         "You MUST respond with valid JSON in this exact format:\n"
@@ -343,7 +348,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         '(2) analyze current inventory (on-hand + in-transit) and demand patterns, '
         '(3) evaluate today\'s news and learn from past events, '
         '(4) consider lead_time when placing orders (goods won\'t arrive immediately!)",\n'
-        '  "carry_over_insight": "Short memo for future days ("" if nothing new—only fill this when a durable change is evident; cite evidence and avoid repeats)",\n'
+        '  "carry_over_insight": "Only if NEW sustained change observed with specific evidence; otherwise \"\" (must check if already exists above)",\n'
         f'  "action": {{{example_action}}}\n'
         "}\n"
         "\n"
@@ -582,4 +587,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
