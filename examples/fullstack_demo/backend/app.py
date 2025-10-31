@@ -106,9 +106,13 @@ def start_run(
 ):
     _ensure_mode_choice(payload.mode, auth)
 
+    # Construct absolute path to demand.csv
+    backend_dir = Path(__file__).resolve().parent
+    demand_csv_path = backend_dir.parent.parent / "demand.csv"
+    
     config = SimulationConfig(
         mode=payload.mode,  # type: ignore[arg-type]
-        demand_file=os.path.join(os.path.dirname(__file__), "..", "..", "demand.csv"),
+        demand_file=str(demand_csv_path),
         promised_lead_time=payload.promised_lead_time,
         guidance_frequency=payload.guidance_frequency or 5,
     )
