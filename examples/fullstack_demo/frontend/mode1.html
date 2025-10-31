@@ -561,30 +561,57 @@
       font-style: italic;
       font-size: 14px;
     }
-    details.panel {
-      padding: 0 24px 22px;
+    .transcript-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
     }
-    details.panel summary {
-      padding: 18px 0;
-      font-weight: 600;
-      color: var(--primary);
-      cursor: pointer;
-      list-style: none;
-    }
-    details.panel summary::-webkit-details-marker {
-      display: none;
-    }
-    #transcript {
-      max-height: 420px;
+    .timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 320px;
       overflow-y: auto;
+      padding-right: 6px;
+    }
+    .timeline-entry {
+      display: flex;
+      gap: 12px;
+      border-left: 3px solid rgba(118, 75, 162, 0.2);
+      padding-left: 12px;
+    }
+    .timeline-entry .badge {
+      font-size: 12px;
+      font-weight: 600;
+      color: #ffffff;
+      background: var(--accent);
+      border-radius: 999px;
+      padding: 4px 10px;
+      align-self: flex-start;
+    }
+    .timeline-entry .content {
+      font-size: 13px;
+      color: #2f3458;
+      background: rgba(247, 248, 255, 0.95);
+      border-radius: 8px;
+      padding: 10px 12px;
+      border: 1px solid rgba(118, 75, 162, 0.18);
+      white-space: pre-wrap;
+    }
+    .raw-transcript {
       background: #1e1e1e;
       color: #d6f7c4;
-      padding: 18px;
-      border-radius: 8px;
       font-family: 'Courier New', monospace;
       font-size: 13px;
+      padding: 16px;
+      border-radius: 8px;
+      max-height: 320px;
+      overflow-y: auto;
       white-space: pre-wrap;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+      display: none;
+    }
+    .raw-transcript.visible {
+      display: block;
     }
     .hidden {
       display: none !important;
@@ -739,10 +766,16 @@
         </div>
       </section>
 
-      <details class="panel transcript-panel">
-        <summary>📜 Detailed Transcript</summary>
-        <div id="transcript">Waiting for game to start...</div>
-      </details>
+      <section class="panel transcript-panel">
+        <div class="panel-title-row">
+          <h3 class="panel-title">📜 Detailed Transcript</h3>
+          <button id="toggle-transcript-btn" class="ghost">View Raw Log</button>
+        </div>
+        <div id="timeline-list" class="timeline">
+          <p class="placeholder">Timeline will appear once the game begins.</p>
+        </div>
+        <div id="raw-transcript" class="raw-transcript"></div>
+      </section>
     </section>
   </main>
 
@@ -770,10 +803,26 @@
     const applyProposalBtn = document.getElementById("apply-proposal-btn");
 
     const conversationLogEl = document.getElementById("conversation-log");
-    const transcriptEl = document.getElementById("transcript");
+    const timelineListEl = document.getElementById("timeline-list");
+    const rawTranscriptEl = document.getElementById("raw-transcript");
+    const toggleTranscriptBtn = document.getElementById("toggle-transcript-btn");
+    let showingRawTranscript = false;
     const chartsPanel = document.getElementById("charts-panel");
     const demandCanvas = document.getElementById("demand-chart");
     const rewardCanvas = document.getElementById("reward-chart");
+
+    if (toggleTranscriptBtn) {
+      toggleTranscriptBtn.addEventListener("click", () => {
+        showingRawTranscript = !showingRawTranscript;
+        toggleTranscriptBtn.textContent = showingRawTranscript ? "View Timeline" : "View Raw Log";
+        if (timelineListEl) {
+          timelineListEl.classList.toggle("hidden", showingRawTranscript);
+        }
+        if (rawTranscriptEl) {
+          rawTranscriptEl.classList.toggle("visible", showingRawTranscript);
+        }
+      });
+    }
 
     const startError = document.getElementById("start-error");
     const chatError = document.getElementById("chat-error");
@@ -1050,12 +1099,23 @@
 
     function buildHistoryLines(log) {
       const lines = [`Day ${formatNumber(log.day)} concluded:`];
-      const items = Object.keys({
-        ...log.orders,
-        ...log.ending_inventory,
-        ...log.starting_inventory,
-      });
-      items.sort();
+      const items = [];
+      const seen = new Set();
+      const appendItemsFrom = (source) => {
+        if (!source) return;
+        Object.keys(source).forEach((itemId) => {
+          if (!seen.has(itemId)) {
+            seen.add(itemId);
+            items.push(itemId);
+          }
+        });
+      };
+      appendItemsFrom(log.orders);
+      appendItemsFrom(log.requests);
+      appendItemsFrom(log.sales);
+      appendItemsFrom(log.starting_inventory);
+      appendItemsFrom(log.ending_inventory);
+
       items.forEach((itemId) => {
         const ordered = Number((log.orders || {})[itemId] ?? 0);
         const starting = Number((log.starting_inventory || {})[itemId] ?? 0);
@@ -1084,28 +1144,26 @@
       const leftCol = document.querySelector(".column-left");
       const rightCol = document.querySelector(".column-right");
       const historyPanelEl = document.querySelector(".history-panel");
-      if (!leftCol || !rightCol || !historyPanelEl) return;
+      const historyList = document.querySelector(".history-list");
+      if (!leftCol || !rightCol || !historyPanelEl || !historyList) return;
+
+      // Let right column define overall height
+      const layoutHeight = rightCol.getBoundingClientRect().height;
+      leftCol.style.height = `${layoutHeight}px`;
 
       const leftTop = leftCol.getBoundingClientRect().top;
       const historyTop = historyPanelEl.getBoundingClientRect().top;
       const offset = historyTop - leftTop;
-      const rightHeight = rightCol.getBoundingClientRect().height;
-      let available = rightHeight - offset;
-      const minHeight = 260;
-      if (!Number.isFinite(available) || available <= 0) {
-        available = minHeight;
-      }
-      available = Math.max(available, minHeight);
+      const available = Math.max(layoutHeight - offset, 260);
       historyPanelEl.style.height = `${available}px`;
 
-      const historyList = historyPanelEl.querySelector(".history-list");
-      if (historyList) {
-        const header = historyPanelEl.querySelector("h3");
-        const headerHeight = header ? header.getBoundingClientRect().height : 0;
-        const gap = parseFloat(window.getComputedStyle(historyPanelEl).rowGap || "0");
-        const listHeight = Math.max(available - headerHeight - gap, 140);
-        historyList.style.maxHeight = `${listHeight}px`;
-      }
+      const header = historyPanelEl.querySelector("h3");
+      const headerHeight = header ? header.getBoundingClientRect().height : 0;
+      const padding = parseFloat(window.getComputedStyle(historyPanelEl).paddingTop || "0") +
+        parseFloat(window.getComputedStyle(historyPanelEl).paddingBottom || "0");
+      const gap = parseFloat(window.getComputedStyle(historyPanelEl).gap || "0");
+      const listHeight = Math.max(available - headerHeight - padding - gap, 160);
+      historyList.style.maxHeight = `${listHeight}px`;
     }
 
     window.addEventListener("resize", () => {
@@ -1256,13 +1314,50 @@
     }
 
     function renderTranscript(transcript) {
-      if (!transcriptEl) return;
+      if (!timelineListEl || !rawTranscriptEl) return;
       if (!Array.isArray(transcript) || !transcript.length) {
-        transcriptEl.textContent = "Transcript will appear here once the game begins.";
-        return;
+        timelineListEl.innerHTML = `<p class="placeholder">Timeline will appear once the game begins.</p>`;
+        rawTranscriptEl.textContent = "Transcript will appear once the game begins.";
+      } else {
+        timelineListEl.innerHTML = transcript.map(createTimelineEntry).join("");
+        const rawLines = transcript.map((evt) => {
+          const label = String(evt.kind || evt.role || "event").toUpperCase();
+          const payload = evt.payload ?? evt.message ?? evt.data ?? evt;
+          return `[${label}]\n${JSON.stringify(payload, null, 2)}`;
+        });
+        rawTranscriptEl.textContent = rawLines.join("\n\n");
       }
-      const lines = transcript.map((evt) => `[${String(evt.kind || "").toUpperCase()}]\n${JSON.stringify(evt.payload, null, 2)}`);
-      transcriptEl.textContent = lines.join("\n\n");
+      if (toggleTranscriptBtn) {
+        toggleTranscriptBtn.textContent = showingRawTranscript ? "View Timeline" : "View Raw Log";
+      }
+      timelineListEl.classList.toggle("hidden", showingRawTranscript);
+      rawTranscriptEl.classList.toggle("visible", showingRawTranscript);
+    }
+
+    function createTimelineEntry(event) {
+      const kindLabel = escapeHtml(String(event.kind || event.role || "event").toUpperCase());
+      const content = summarizeTimelineContent(event);
+      return `
+        <article class="timeline-entry">
+          <span class="badge">${kindLabel}</span>
+          <div class="content">${content}</div>
+        </article>
+      `;
+    }
+
+    function summarizeTimelineContent(event) {
+      if (!event) return "";
+      if (event.message) {
+        return escapeHtml(tryExtractString(event.message)).replace(/\n/g, "<br>");
+      }
+      const payload = event.payload ?? event.data ?? event.details;
+      if (typeof payload === "string") {
+        return escapeHtml(payload).replace(/\n/g, "<br>");
+      }
+      if (payload && typeof payload === "object") {
+        return escapeHtml(JSON.stringify(payload, null, 2)).replace(/\n/g, "<br>");
+      }
+      return escapeHtml(JSON.stringify(event, null, 2)).replace(/\n/g, "<br>");
     }
 
     function renderCharts(dailyLogs) {

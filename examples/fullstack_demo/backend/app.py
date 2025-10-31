@@ -79,7 +79,7 @@ class StartRunPayload(BaseModel):
 
 
 class MessagePayload(BaseModel):
-    message: str = Field(min_length=1)
+    message: Optional[str] = None
 
 
 class FinalActionPayload(BaseModel):
@@ -141,15 +141,22 @@ def send_message(
     _ensure_user_access(entry, auth)
     session = entry.session
 
+    message = (payload.message or "").strip()
+
     if session.config.mode == "mode1":
+        if not message:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Message cannot be empty",
+            )
         # Mode 1: Add human message to conversation, get AI response
-        result = session.add_human_message(payload.message)
+        result = session.add_human_message(message)
         state = session.serialize_state()
         state["ai_response"] = result
         return state
     
     # Mode 2: Submit guidance
-    result = session.submit_guidance(payload.message)
+    result = session.submit_guidance(message)
     if result.get("completed"):
         _maybe_persist(run_id, session, result, auth, supabase_logger)
     return result

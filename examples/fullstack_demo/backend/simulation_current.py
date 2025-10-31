@@ -388,6 +388,12 @@ class SimulationSession:
             state["waiting_for_final_action"] = self._pid == 0 and not self.transcript.completed
         else:
             state["waiting_for_guidance"] = self._pending_guidance_day is not None
+            state["guidance_history"] = [
+                {"day": day, "message": message} for day, message in self._guidance_history
+            ]
+            latest = self._latest_agent_proposal()
+            if latest is not None:
+                state["latest_agent_proposal"] = latest
         return state
 
     def add_human_message(self, message: str) -> Dict[str, Any]:
@@ -659,6 +665,17 @@ class SimulationSession:
             ]
         sanitized["arrivals"] = arrivals
         return sanitized
+
+    def _latest_agent_proposal(self) -> Optional[Dict[str, Any]]:
+        for event in reversed(self.transcript.events):
+            if event.kind == "agent_proposal" and isinstance(event.payload, dict):
+                payload = event.payload
+                content = payload.get("content")
+                if isinstance(content, dict):
+                    result: Dict[str, Any] = {"day": payload.get("day")}
+                    result.update(content)
+                    return result
+        return None
 
     def _build_status_cards(self) -> Dict[str, Any]:
         latest_log = self._ui_daily_logs[-1] if self._ui_daily_logs else None

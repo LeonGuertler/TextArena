@@ -618,10 +618,14 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "   - EWMA_gamma: (1+L) × exponentially weighted moving average (must specify gamma in [0,1])\n"
         "   - explicit: Provide your own prediction\n"
         "   Example: {\"method\": \"recent_N\", \"N\": 5} or {\"method\": \"explicit\", \"value\": 250}\n"
-        "   When you choose recent_N, think about trend strength:\n"
-        "     • Strong, freshly emerging trends or news-driven shifts → favor a smaller N that focuses on only the most recent days.\n"
-        "     • Mild fluctuations or noisy data with no clear trend → favor a larger N to smooth noise.\n"
-        "     • Ensure N does not exceed the number of available samples; if it would, adjust the window or pick another method.\n"
+        "   When you choose recent_N, PICK N BY REGIME LENGTH (change-point):\n"
+        "     • Identify the most recent change-point (shift in mean/variance or news-driven regime).\n"
+        "       - Set N to the number of days since that change-point (i.e., the current regime length).\n"
+        "     • If no clear change-point is detected, choose N for noise-smoothing based on volatility:\n"
+        "       - High volatility with no trend → smaller N (e.g., 5–8).\n"
+        "       - Stable series with no trend → larger N (e.g., 12–20).\n"
+        "     • Never exceed the available sample count; if fewer samples than N, lower N accordingly.\n"
+        "     • In your rationale, explicitly cite the day index of the detected change (if any) and how it determined N.\n"
         "\n"
         "3. sigma_hat (standard deviation of demand over lead time period):\n"
         "   - default: sqrt(1+L) × std of all historical samples\n"
@@ -905,7 +909,13 @@ def main():
                         observed_lead_times=observed_lead_times[item_id],
                         promised_lead_time=args.promised_lead_time
                     )
-                    print(f"  L method: {item_params['L']['method']}, computed L = {L:.2f}")
+                    l_method = item_params['L']['method']
+                    l_extra = ""
+                    if l_method == 'explicit' and 'value' in item_params['L']:
+                        l_extra = f", value={item_params['L']['value']}"
+                    elif l_method == 'calculate':
+                        l_extra = f", observed_samples={len(observed_lead_times[item_id])}"
+                    print(f"  L method: {l_method}{l_extra}, computed L = {L:.2f}")
                     
                     # Compute mu_hat
                     mu_hat = compute_mu_hat(
@@ -914,7 +924,15 @@ def main():
                         samples=observed_demands[item_id],
                         L=L
                     )
-                    print(f"  mu_hat method: {item_params['mu_hat']['method']}, computed mu_hat = {mu_hat:.2f}")
+                    mu_method = item_params['mu_hat']['method']
+                    mu_extra = ""
+                    if 'N' in item_params['mu_hat']:
+                        mu_extra = f", N={int(item_params['mu_hat']['N'])}"
+                    elif 'gamma' in item_params['mu_hat']:
+                        mu_extra = f", gamma={float(item_params['mu_hat']['gamma']):.3f}"
+                    elif 'value' in item_params['mu_hat']:
+                        mu_extra = f", value={item_params['mu_hat']['value']}"
+                    print(f"  mu_hat method: {mu_method}{mu_extra}, computed mu_hat = {mu_hat:.2f}")
                     
                     # Compute sigma_hat
                     sigma_hat = compute_sigma_hat(
@@ -923,7 +941,13 @@ def main():
                         samples=observed_demands[item_id],
                         L=L
                     )
-                    print(f"  sigma_hat method: {item_params['sigma_hat']['method']}, computed sigma_hat = {sigma_hat:.2f}")
+                    sig_method = item_params['sigma_hat']['method']
+                    sig_extra = ""
+                    if 'N' in item_params['sigma_hat']:
+                        sig_extra = f", N={int(item_params['sigma_hat']['N'])}"
+                    elif 'value' in item_params['sigma_hat']:
+                        sig_extra = f", value={item_params['sigma_hat']['value']}"
+                    print(f"  sigma_hat method: {sig_method}{sig_extra}, computed sigma_hat = {sigma_hat:.2f}")
                     
                     # Get total inventory (on-hand + in-transit)
                     total_inventory = parse_total_inventory(observation, item_id)

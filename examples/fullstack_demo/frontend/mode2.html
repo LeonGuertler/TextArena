@@ -4,34 +4,256 @@
   <meta charset="UTF-8" />
   <title>Mode 2 - Periodic Guidance</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <script src="/config.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
-    header { background: #764ba2; color: white; padding: 16px; text-align: center; }
-    main { max-width: 1200px; margin: 0 auto; padding: 24px; }
-    h1, h2 { margin-top: 0; }
-    section { background: #fff; padding: 20px; margin-bottom: 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    label { display: block; margin-bottom: 8px; font-weight: 500; }
-    input, textarea, button { width: 100%; padding: 10px; margin-bottom: 12px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; }
-    textarea { min-height: 100px; font-family: inherit; }
-    button { background: #764ba2; color: white; border: none; cursor: pointer; font-weight: 600; transition: background 0.3s; }
-    button:hover { background: #6a3f8f; }
-    button:disabled { background: #ccc; cursor: not-allowed; }
-    #transcript { max-height: 500px; overflow-y: auto; background: #1e1e1e; color: #0f0; padding: 16px; font-family: 'Courier New', monospace; border-radius: 6px; font-size: 13px; white-space: pre-wrap; }
-    .error { color: #e74c3c; margin-top: 8px; }
-    .status { font-weight: bold; color: #764ba2; margin-bottom: 12px; font-size: 16px; }
-    .hidden { display: none; }
-    .info-box { background: #fff3cd; border: 1px solid #ffc107; padding: 12px; border-radius: 4px; margin-bottom: 16px; color: #856404; }
+    :root {
+      --primary: #764ba2;
+      --primary-dark: #6a3f8f;
+      --accent: #4f46e5;
+      --surface: #ffffff;
+      --surface-muted: #f6f5ff;
+      --border-radius: 12px;
+      --shadow: 0 6px 16px rgba(82, 67, 170, 0.12);
+      --text-muted: #6b6f85;
+      --text-subtle: #9aa0c1;
+      --success: #27ae60;
+      --warning: #f39c12;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: linear-gradient(135deg, #ebe7ff 0%, #fdf2ff 100%);
+      color: #1d2142;
+    }
+    header {
+      background: var(--primary);
+      color: var(--surface);
+      padding: 22px;
+      text-align: center;
+      box-shadow: 0 6px 16px rgba(118, 75, 162, 0.25);
+    }
+    header h1 { margin: 0; font-size: 28px; }
+    header p { margin: 8px 0 0; font-size: 15px; opacity: 0.92; }
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 28px 24px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .panel {
+      background: var(--surface);
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow);
+      padding: 22px 24px;
+    }
+    .panel h2,
+    .panel h3 { margin: 0; }
+    .panel:not(:last-child) { margin-bottom: 4px; }
+    label { display: block; margin-bottom: 8px; font-weight: 600; }
+    input,
+    textarea,
+    button {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #d9def5;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    textarea { min-height: 140px; resize: vertical; }
+    input:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.18);
+    }
+    button {
+      background: var(--primary);
+      color: var(--surface);
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s ease, background 0.2s ease;
+    }
+    button:hover:not(:disabled) { background: var(--primary-dark); transform: translateY(-1px); }
+    button:disabled { background: #d5c6f3; cursor: not-allowed; }
+    button.ghost {
+      width: auto;
+      padding: 8px 18px;
+      background: transparent;
+      color: var(--primary);
+      border: 1px solid var(--primary);
+      border-radius: 999px;
+      font-size: 13px;
+    }
+    button.ghost:disabled { color: #b7a7d7; border-color: #ddd4f3; }
+    .game-layout {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 24px;
+      align-items: stretch;
+    }
+    .column {
+      flex: 1 1 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      min-width: 320px;
+      min-height: 100%;
+    }
+    .column-left { display: flex; flex-direction: column; gap: 16px; }
+    .column-right { display: flex; flex-direction: column; gap: 16px; }
+    .status-panel { display: flex; flex-direction: column; gap: 14px; }
+    .status-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+    .status-card {
+      background: var(--surface-muted);
+      border-radius: 14px;
+      padding: 16px 18px;
+      border: 1px solid #dde1fb;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .status-card h4 { font-size: 14px; color: #31355a; text-transform: uppercase; letter-spacing: 0.3px; }
+    .card-metric { font-size: 22px; font-weight: 700; color: #191c3a; }
+    .card-subtext { color: var(--text-muted); font-size: 13px; margin-top: auto; }
+    .inventory-card { background: #fff7ea; border: 1px solid #ffe0a3; }
+    .inventory-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .inventory-item { background: rgba(255, 255, 255, 0.8); border-radius: 10px; padding: 10px 12px; border: 1px dashed rgba(255, 165, 0, 0.35); }
+    .inventory-item-title { font-weight: 600; color: #8a5a00; margin-bottom: 4px; }
+    .inventory-line { font-size: 13px; color: #5d6073; }
+    .news-section {
+      background: #f0f3ff;
+      border-radius: 12px;
+      border: 1px solid #d8dcff;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 220px;
+      max-height: 240px;
+      overflow: hidden;
+    }
+    .news-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .news-header h3 { margin: 0; font-size: 18px; color: #2f3562; }
+    .news-header span { font-size: 13px; color: var(--text-subtle); }
+    .news-columns { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); flex: 1 1 auto; align-content: start; overflow-y: auto; padding-right: 6px; }
+    .news-column { display: flex; flex-direction: column; gap: 10px; }
+    .news-column h4 { margin: 0; font-size: 14px; color: #494f78; text-transform: uppercase; letter-spacing: 0.4px; }
+    .news-list { display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; }
+    .news-card { background: #fef2ff; border-radius: 12px; padding: 14px 16px; border: 1px solid rgba(118, 75, 162, 0.25); box-shadow: 0 3px 10px rgba(118, 75, 162, 0.1); }
+    .news-card.today { background: #fff6eb; border-color: rgba(255, 170, 43, 0.45); }
+    .news-day { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: #af58c8; margin-bottom: 6px; }
+    .news-card.today .news-day { color: #d98200; }
+    .news-text { font-size: 14px; color: #3b3052; line-height: 1.45; }
+    .guidance-history-panel {
+      background: linear-gradient(140deg, rgba(118, 75, 162, 0.85), rgba(79, 70, 229, 0.75));
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      color: #ffffff;
+    }
+    .guidance-history { display: flex; flex-direction: column; gap: 10px; max-height: 220px; overflow-y: auto; padding-right: 6px; }
+    .guidance-entry {
+      background: rgba(255, 255, 255, 0.18);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      padding: 10px 12px;
+    }
+    .guidance-entry header { display: flex; justify-content: space-between; align-items: baseline; font-weight: 600; font-size: 13px; color: #ffffff; }
+    .guidance-entry header span { font-size: 12px; color: #ffffff; font-weight: 500; }
+    .guidance-entry p { margin: 6px 0 0; font-size: 13px; color: #ffffff; white-space: pre-wrap; }
+    .history-panel {
+      background: linear-gradient(140deg, rgba(79, 70, 229, 0.85), rgba(118, 75, 162, 0.75));
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      padding: 18px 20px;
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      color: #ffffff;
+    }
+    .history-list {
+      flex: 0 0 auto;
+      max-height: 320px;
+      overflow-y: auto;
+      padding-right: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .history-entry { background: rgba(255, 255, 255, 0.18); border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.3); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+    .history-entry header { display: flex; justify-content: space-between; align-items: baseline; font-weight: 600; color: #ffffff; font-size: 14px; }
+    .history-entry header span { font-size: 12px; color: #ffffff; font-weight: 500; }
+    .history-body { background: rgba(0, 0, 0, 0.25); border-radius: 8px; border: 1px dashed rgba(255, 255, 255, 0.35); padding: 10px 12px; font-family: 'Courier New', monospace; font-size: 12px; color: #ffffff; white-space: pre-wrap; line-height: 1.45; }
+    .status-banner {
+      padding: 16px 18px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #eef0ff;
+      color: var(--primary);
+      box-shadow: inset 0 0 0 1px rgba(118, 75, 162, 0.25);
+    }
+    .status-banner.waiting { background: #fff4e0; color: #c87b0e; box-shadow: inset 0 0 0 1px rgba(200, 123, 14, 0.3); }
+    .status-banner.completed { background: #eaf9f0; color: var(--success); box-shadow: inset 0 0 0 1px rgba(39, 174, 96, 0.3); }
+    .summary-card { display: flex; flex-direction: column; gap: 12px; }
+    .summary-body { background: #f6f5ff; border-radius: 10px; border: 1px solid #dde1fb; padding: 14px 16px; font-size: 14px; color: #32355a; line-height: 1.5; }
+    .summary-body.placeholder { color: var(--text-subtle); font-style: italic; }
+    .summary-actions { display: grid; gap: 8px; }
+    .summary-action { background: #fff; border: 1px solid rgba(118, 75, 162, 0.25); border-radius: 8px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+    .guidance-panel { background: #f9f3ff; border: 1px solid rgba(118, 75, 162, 0.2); display: flex; flex-direction: column; gap: 14px; }
+    .guidance-status { font-weight: 600; font-size: 14px; color: var(--primary); }
+    .guidance-status.waiting { color: var(--warning); }
+    .guidance-status.completed { color: var(--success); }
+    .guidance-panel .info-box { background: rgba(255, 248, 230, 0.9); border: 1px solid rgba(255, 199, 92, 0.45); padding: 12px 14px; border-radius: 8px; color: #8a5b00; font-size: 13px; }
+    .guidance-panel.disabled textarea,
+    .guidance-panel.disabled button { opacity: 0.6; pointer-events: none; }
+    .transcript-panel { display: flex; flex-direction: column; gap: 16px; }
+    .panel-title-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .timeline { display: flex; flex-direction: column; gap: 12px; max-height: 320px; overflow-y: auto; padding-right: 6px; }
+    .timeline-entry { display: flex; gap: 12px; border-left: 3px solid rgba(118, 75, 162, 0.35); padding-left: 12px; }
+    .timeline-entry .badge { font-size: 12px; font-weight: 600; color: #fff; background: var(--accent); border-radius: 999px; padding: 4px 10px; align-self: flex-start; }
+    .timeline-entry .content { font-size: 13px; color: #373c63; white-space: pre-wrap; background: #f8f8ff; border-radius: 8px; padding: 10px 12px; border: 1px solid rgba(118, 75, 162, 0.18); }
+    .raw-transcript { background: #1e1e1e; color: #cde9c8; font-family: 'Courier New', monospace; font-size: 13px; padding: 16px; border-radius: 8px; max-height: 320px; overflow-y: auto; white-space: pre-wrap; display: none; }
+    .raw-transcript.visible { display: block; }
+    .chart-panel { display: flex; flex-direction: column; gap: 16px; }
+    .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+    .chart-card { background: var(--surface-muted); border-radius: 14px; padding: 16px; border: 1px solid #dfe2ff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6); display: flex; flex-direction: column; gap: 12px; }
+    .chart-card h4 { margin: 0; font-size: 16px; color: #2c3053; }
+    .chart-card canvas { width: 100% !important; max-width: 100%; height: 220px !important; max-height: 220px; }
+    .error { color: #e74c3c; font-size: 13px; }
+    .placeholder { color: var(--text-subtle); font-style: italic; font-size: 14px; }
+    .guidance-history .placeholder,
+    .history-panel .placeholder { color: #ffffff; }
+    .hidden { display: none !important; }
+    @media (max-width: 1024px) {
+      .game-layout { flex-direction: column; }
+      .column { min-width: 100%; }
+      .news-section { max-height: none; }
+      .guidance-history { max-height: none; }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>🤖 Mode 2: Periodic Guidance (AI Auto-Play)</h1>
-    <p style="margin: 0; opacity: 0.9;">AI runs automatically • You provide strategic guidance periodically</p>
+    <h1>Mode 2: Periodic Guidance (AI Auto-Play)</h1>
+    <p>AI handles daily actions - you provide strategic guidance at scheduled pauses.</p>
   </header>
 
   <main>
-    <section id="setup-section">
+    <section id="setup-section" class="panel">
       <h2>Game Setup</h2>
       <label>Promised Lead Time (days)
         <input id="promised-lead-time" type="number" min="0" value="4" />
@@ -39,27 +261,121 @@
       <label>Guidance Frequency (days)
         <input id="guidance-frequency" type="number" min="1" value="5" />
       </label>
-      <p style="color: #666; font-size: 14px;">The AI will pause every N days to ask for your strategic guidance</p>
+      <p class="placeholder" style="margin-bottom: 16px;">The AI pauses every N days to request your guidance.</p>
       <button id="start-btn">Start Game</button>
       <div id="start-error" class="error"></div>
     </section>
 
     <section id="game-section" class="hidden">
-      <div class="status" id="status">Loading...</div>
-      
-      <div id="guidance-box" class="hidden">
-        <div class="info-box">
-          ⚠️ The AI is waiting for your strategic guidance. Provide high-level direction for the next phase of the game.
+      <div class="game-layout">
+        <div class="column column-left">
+          <section class="panel status-panel">
+            <div class="panel-title-row">
+              <h3 class="panel-title">Current Status</h3>
+            </div>
+            <div class="status-grid">
+              <article class="status-card" id="progress-card"></article>
+              <article class="status-card" id="reward-card"></article>
+              <article class="status-card" id="cashflow-card"></article>
+            </div>
+            <article class="status-card inventory-card">
+              <h4>Inventory Health</h4>
+              <ul id="inventory-list" class="inventory-list">
+                <li class="placeholder">No inventory data yet.</li>
+              </ul>
+            </article>
+          </section>
+
+          <section class="news-section">
+            <div class="news-header">
+              <h3>News Outlook</h3>
+              <span>Only today's and past headlines are visible to you and the AI.</span>
+            </div>
+            <div class="news-columns">
+              <div class="news-column">
+                <h4>Today</h4>
+                <div class="news-list" id="news-today">
+                  <span class="placeholder">No news for today.</span>
+                </div>
+              </div>
+              <div class="news-column">
+                <h4>History</h4>
+                <div class="news-list history" id="news-past">
+                  <span class="placeholder">No past news yet.</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="history-panel">
+            <h3>Game History</h3>
+            <div id="history-list" class="history-list">
+              <p class="placeholder">Game history will appear once the simulation progresses.</p>
+            </div>
+          </section>
         </div>
-        <label>Your Strategic Guidance
-          <textarea id="guidance-text" placeholder="Example: 'Focus on maintaining higher inventory levels' or 'Be more conservative with orders'"></textarea>
-        </label>
-        <button id="submit-guidance-btn">Submit Guidance</button>
-        <div id="guidance-error" class="error"></div>
+
+        <div class="column column-right">
+          <div class="status-banner" id="status">Loading...</div>
+
+          <article class="panel summary-card">
+            <div class="panel-title-row">
+              <h3 class="panel-title">Latest AI Plan</h3>
+              <span id="summary-day" class="placeholder">Waiting for AI...</span>
+            </div>
+            <div id="ai-summary-body" class="summary-body placeholder">
+              Latest proposal details will appear here after the AI acts.
+            </div>
+            <div id="ai-summary-actions" class="summary-actions hidden"></div>
+          </article>
+
+          <section class="panel guidance-panel" id="guidance-panel">
+            <div id="guidance-status" class="guidance-status">AI is running...</div>
+            <div class="info-box hidden" id="guidance-info">
+              The AI is waiting for your strategic guidance. Provide high-level direction for the next phase.
+            </div>
+            <label>Your Strategic Guidance
+              <textarea id="guidance-text" placeholder="Example: 'Prioritize Regular chips while holding BBQ stock steady.'"></textarea>
+            </label>
+            <button id="submit-guidance-btn">Submit Guidance</button>
+            <div id="guidance-error" class="error"></div>
+          </section>
+
+          <section class="panel guidance-history-panel">
+            <h3>Guidance Log</h3>
+            <div id="guidance-history" class="guidance-history">
+              <p class="placeholder">No guidance submitted yet.</p>
+            </div>
+          </section>
+        </div>
       </div>
 
-      <h3>📜 Game Transcript</h3>
-      <div id="transcript">Waiting for game to start...</div>
+      <section id="charts-panel" class="panel chart-panel hidden">
+        <div class="panel-title-row">
+          <h3 class="panel-title">Performance Trends</h3>
+        </div>
+        <div class="chart-grid">
+          <article class="chart-card">
+            <h4>Historic Daily Demand</h4>
+            <canvas id="demand-chart"></canvas>
+          </article>
+          <article class="chart-card">
+            <h4>Daily Reward</h4>
+            <canvas id="reward-chart"></canvas>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel transcript-panel">
+        <div class="panel-title-row">
+          <h3 class="panel-title">Detailed Transcript</h3>
+          <button id="toggle-transcript-btn" class="ghost">View Raw Log</button>
+        </div>
+        <div id="timeline-list" class="timeline">
+          <p class="placeholder">Timeline will populate as the simulation runs.</p>
+        </div>
+        <div id="raw-transcript" class="raw-transcript"></div>
+      </section>
     </section>
   </main>
 
@@ -67,28 +383,69 @@
     const supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
     let currentRunId = null;
     let pollTimer = null;
+    let demandChartInstance = null;
+    let rewardChartInstance = null;
+    let showingRawTranscript = false;
+    let inventoryOrder = [];
 
     const setupSection = document.getElementById("setup-section");
     const gameSection = document.getElementById("game-section");
-    const statusEl = document.getElementById("status");
-    const guidanceBox = document.getElementById("guidance-box");
-    const transcriptEl = document.getElementById("transcript");
-    const startError = document.getElementById("start-error");
-    const guidanceError = document.getElementById("guidance-error");
 
-    // Check authentication
-    supabaseClient.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
-        window.location.href = '/';
+    const statusBanner = document.getElementById("status");
+    const progressCard = document.getElementById("progress-card");
+    const rewardCard = document.getElementById("reward-card");
+    const cashflowCard = document.getElementById("cashflow-card");
+    const inventoryListEl = document.getElementById("inventory-list");
+
+    const newsTodayEl = document.getElementById("news-today");
+    const newsPastEl = document.getElementById("news-past");
+    const guidanceHistoryEl = document.getElementById("guidance-history");
+    const historyListEl = document.getElementById("history-list");
+
+    const aiSummaryDay = document.getElementById("summary-day");
+    const aiSummaryBody = document.getElementById("ai-summary-body");
+    const aiSummaryActions = document.getElementById("ai-summary-actions");
+    const guidancePanel = document.getElementById("guidance-panel");
+    const guidanceStatus = document.getElementById("guidance-status");
+    const guidanceInfo = document.getElementById("guidance-info");
+    const guidanceText = document.getElementById("guidance-text");
+    const guidanceError = document.getElementById("guidance-error");
+    const submitGuidanceBtn = document.getElementById("submit-guidance-btn");
+
+    const timelineListEl = document.getElementById("timeline-list");
+    const rawTranscriptEl = document.getElementById("raw-transcript");
+    const toggleTranscriptBtn = document.getElementById("toggle-transcript-btn");
+
+    const chartsPanel = document.getElementById("charts-panel");
+    const demandCanvas = document.getElementById("demand-chart");
+    const rewardCanvas = document.getElementById("reward-chart");
+
+    document.getElementById("start-btn").addEventListener("click", startSimulation);
+    submitGuidanceBtn.addEventListener("click", submitGuidance);
+    toggleTranscriptBtn.addEventListener("click", () => {
+      showingRawTranscript = !showingRawTranscript;
+      toggleTranscriptBtn.textContent = showingRawTranscript ? "View Timeline" : "View Raw Log";
+      if (timelineListEl) {
+        timelineListEl.classList.toggle("hidden", showingRawTranscript);
+      }
+      if (rawTranscriptEl) {
+        rawTranscriptEl.classList.toggle("visible", showingRawTranscript);
       }
     });
 
-    document.getElementById("start-btn").addEventListener("click", async () => {
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        window.location.href = "/";
+      }
+    });
+
+    async function startSimulation() {
+      const startError = document.getElementById("start-error");
       startError.textContent = "";
       const promisedLeadTime = parseInt(document.getElementById("promised-lead-time").value, 10);
       const guidanceFrequency = parseInt(document.getElementById("guidance-frequency").value, 10);
-      
-      if (!guidanceFrequency || guidanceFrequency < 1) {
+
+      if (!Number.isFinite(guidanceFrequency) || guidanceFrequency < 1) {
         startError.textContent = "Guidance frequency must be at least 1 day";
         return;
       }
@@ -98,7 +455,7 @@
           method: "POST",
           body: JSON.stringify({
             mode: "mode2",
-            promised_lead_time: promisedLeadTime || 4,
+            promised_lead_time: Number.isFinite(promisedLeadTime) ? promisedLeadTime : 4,
             guidance_frequency: guidanceFrequency,
           }),
         });
@@ -110,105 +467,651 @@
       } catch (err) {
         startError.textContent = err.message || "Failed to start game";
       }
-    });
+    }
 
-    document.getElementById("submit-guidance-btn").addEventListener("click", async () => {
+    async function submitGuidance() {
       guidanceError.textContent = "";
-      const guidance = document.getElementById("guidance-text").value.trim();
-      
-      if (!guidance) {
-        guidanceError.textContent = "Please enter guidance text";
-        return;
-      }
+      const guidance = guidanceText.value ?? "";
 
       try {
         const response = await apiRequest(`/runs/${currentRunId}/messages`, {
           method: "POST",
           body: JSON.stringify({ message: guidance }),
         });
-        document.getElementById("guidance-text").value = "";
+        guidanceText.value = "";
         updateUI(response);
-        
         if (!response.completed) {
           startPolling();
         }
       } catch (err) {
         guidanceError.textContent = err.message || "Failed to submit guidance";
       }
-    });
+    }
+    function startPolling() {
+      stopPolling();
+      pollTimer = setInterval(pollRun, 2500);
+    }
+
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    async function pollRun() {
+      if (!currentRunId) return;
+      try {
+        const state = await apiRequest(`/runs/${currentRunId}`, { method: "GET" });
+        updateUI(state);
+        if (state.completed) {
+          stopPolling();
+        }
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
+    }
 
     function updateUI(state) {
       if (!state) return;
 
-      // Update status
-      if (state.completed) {
-        statusEl.textContent = `✅ Game Complete! Final Reward: $${state.final_reward?.toFixed(2) || '0.00'}`;
-        statusEl.style.color = '#27ae60';
-        guidanceBox.classList.add("hidden");
-        if (pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-      } else if (state.waiting_for_guidance) {
-        statusEl.textContent = `⏸️ Day ${state.current_day || 1} - Waiting for your guidance`;
-        statusEl.style.color = '#f39c12';
-        guidanceBox.classList.remove("hidden");
-        if (pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-      } else {
-        statusEl.textContent = `🔄 Day ${state.current_day || 1} - AI is running...`;
-        statusEl.style.color = '#764ba2';
-        guidanceBox.classList.add("hidden");
+      renderStatusBanner(state);
+      renderStatusCards(state.status_cards || {});
+      renderNews(state.news || {});
+      renderGuidanceHistory(state.guidance_history || []);
+      renderHistory(state.daily_logs || []);
+      renderAISummary(state.latest_agent_proposal || null, state.current_day);
+      renderGuidancePanel(state);
+      renderTimeline(state.transcript || []);
+      renderCharts(state.daily_logs || []);
+
+      const completed = !!state.completed;
+      if (submitGuidanceBtn) {
+        submitGuidanceBtn.disabled = !state.waiting_for_guidance || completed;
+      }
+      if (guidanceText) {
+        guidanceText.disabled = !state.waiting_for_guidance || completed;
       }
 
-      // Update transcript
-      if (state.transcript && state.transcript.length > 0) {
-        const lines = state.transcript.map(evt => `[${evt.kind.toUpperCase()}]\n${JSON.stringify(evt.payload, null, 2)}`);
-        transcriptEl.textContent = lines.join('\n\n');
-        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      if (completed) {
+        stopPolling();
+      }
+    }
+    function renderStatusBanner(state) {
+      if (!statusBanner) return;
+      statusBanner.classList.remove("waiting", "completed");
+      if (state.completed) {
+        statusBanner.textContent = `Game complete! Final reward: ${formatCurrency(state.final_reward)}`;
+        statusBanner.classList.add("completed");
+        return;
+      }
+      if (state.waiting_for_guidance) {
+        statusBanner.textContent = `Paused on Day ${formatNumber(state.current_day)} -- awaiting your guidance`;
+        statusBanner.classList.add("waiting");
+        return;
+      }
+      statusBanner.textContent = `Day ${formatNumber(state.current_day)} -- AI is running`;
+    }
+
+    function renderStatusCards(cards) {
+      const progress = cards.progress || {};
+      const reward = cards.reward || {};
+      const cashflow = cards.cashflow || {};
+      const inventory = Array.isArray(cards.inventory) ? cards.inventory : [];
+
+      if (progressCard) {
+        progressCard.innerHTML = `
+          <h4>Progress</h4>
+          <div class="card-metric">Day ${formatNumber(progress.current_day)} / ${formatNumber(progress.total_days)}</div>
+          <div class="card-subtext">${progress.waiting_for_vm_action ? "AI planning next move" : "Monitoring run"}</div>
+        `;
+      }
+
+      if (rewardCard) {
+        const toDate = formatCurrency(reward.to_date);
+        const finalReward = Number.isFinite(reward.final) ? formatCurrency(reward.final) : "-";
+        rewardCard.innerHTML = `
+          <h4>Reward</h4>
+          <div class="card-metric">${toDate}</div>
+          <div class="card-subtext">Final target: ${finalReward}</div>
+        `;
+      }
+
+      if (cashflowCard) {
+        const dayLabel = cashflow.day ? `Day ${formatNumber(cashflow.day)} snapshot` : "Awaiting first demand turn";
+        const rewardValue = formatCurrency(cashflow.reward);
+        const profit = formatCurrency(cashflow.profit);
+        const holding = formatCurrency(cashflow.holding_cost);
+        cashflowCard.innerHTML = `
+          <h4>Cashflow</h4>
+          <div class="card-metric">${rewardValue}</div>
+          <div class="card-subtext">${dayLabel} &bull; Profit ${profit} &bull; Holding ${holding}</div>
+        `;
+      }
+
+      inventoryOrder = inventory.map((item) => item.item_id);
+      renderInventory(inventory);
+    }
+
+    function renderInventory(inventory) {
+      if (!inventoryListEl) return;
+      if (!inventory.length) {
+        inventoryListEl.innerHTML = `<li class="placeholder">No items tracked yet.</li>`;
+        return;
+      }
+      inventoryListEl.innerHTML = inventory
+        .map((item) => {
+          const itemId = escapeHtml(String(item.item_id || ""));
+          const description = escapeHtml(String(item.description || ""));
+          const onHand = formatNumber(item.on_hand);
+          const inTransit = formatNumber(item.in_transit);
+          const profit = formatUnitCurrency(item.profit);
+          const holding = formatUnitCurrency(item.holding_cost);
+          return `
+            <li class="inventory-item">
+              <div class="inventory-item-title">${itemId}</div>
+              <div class="inventory-line">${description}</div>
+              <div class="inventory-line">On-hand: <strong>${onHand}</strong> &bull; In-transit: <strong>${inTransit}</strong></div>
+              <div class="inventory-line">Profit ${profit}/unit &bull; Holding ${holding}/unit/day</div>
+            </li>
+          `;
+        })
+        .join("");
+    }
+
+    function renderNews(news) {
+      fillNewsList(newsTodayEl, news.today, "No news for today.", true);
+      fillNewsList(newsPastEl, news.past, "No past news yet.");
+    }
+
+    function fillNewsList(container, items, emptyText, highlightToday = false) {
+      if (!container) return;
+      if (!Array.isArray(items) || items.length === 0) {
+        container.innerHTML = `<span class="placeholder">${emptyText}</span>`;
+        return;
+      }
+      container.innerHTML = items
+        .map((item) => {
+          const day = escapeHtml(String(item.day ?? ""));
+          const content = escapeHtml(String(item.content ?? ""))
+            .replace(/\n/g, "<br>");
+          const todayClass = highlightToday ? "today" : "";
+          return `
+            <article class="news-card ${todayClass}">
+              <div class="news-day">Day ${day}</div>
+              <div class="news-text">${content}</div>
+            </article>
+          `;
+        })
+        .join("");
+    }
+
+    function renderGuidanceHistory(history) {
+      if (!guidanceHistoryEl) return;
+      if (!Array.isArray(history) || history.length === 0) {
+        guidanceHistoryEl.innerHTML = `<p class="placeholder">No guidance submitted yet.</p>`;
+        return;
+      }
+      guidanceHistoryEl.innerHTML = history
+        .map(({ day, message }, index) => {
+          const safeMessage = escapeHtml(String(message ?? ""))
+            .replace(/\n/g, "<br>");
+          return `
+            <div class="guidance-entry">
+              <header>
+                <span>Day ${formatNumber(day)} Guidance</span>
+                <span>#${index + 1}</span>
+              </header>
+              <p>${safeMessage || "<em>No message recorded.</em>"}</p>
+            </div>
+          `;
+        })
+        .join("");
+    }
+    function renderHistory(dailyLogs) {
+      if (!historyListEl) return;
+      if (!Array.isArray(dailyLogs) || dailyLogs.length === 0) {
+        historyListEl.innerHTML = `<p class="placeholder">Game history will appear once the simulation progresses.</p>`;
+        return;
+      }
+      const sorted = dailyLogs.slice().sort((a, b) => Number(a.day || 0) - Number(b.day || 0));
+      historyListEl.innerHTML = sorted.map(createHistoryEntry).join("");
+      historyListEl.scrollTop = historyListEl.scrollHeight;
+    }
+
+    function createHistoryEntry(log) {
+      const day = formatNumber(log.day);
+      const reward = formatCurrency(log.daily_reward);
+      const lines = buildHistoryLines(log);
+      const body = escapeHtml(lines.join("\n")).replace(/\n/g, "<br>");
+      return `
+        <article class="history-entry">
+          <header>
+            <div>Day ${day}</div>
+            <span>Reward ${reward}</span>
+          </header>
+          <div class="history-body">${body}</div>
+        </article>
+      `;
+    }
+
+    function buildHistoryLines(log) {
+      const lines = [`Day ${formatNumber(log.day)} concluded:`];
+      const items = [];
+      const seen = new Set();
+      const appendFrom = (source) => {
+        if (!source) return;
+        Object.keys(source).forEach((itemId) => {
+          if (!seen.has(itemId)) {
+            seen.add(itemId);
+            items.push(itemId);
+          }
+        });
+      };
+      appendFrom(log.orders);
+      appendFrom(log.requests);
+      appendFrom(log.sales);
+      appendFrom(log.starting_inventory);
+      appendFrom(log.ending_inventory);
+
+      const priority = new Map();
+      inventoryOrder.forEach((itemId, index) => {
+        if (!priority.has(itemId)) {
+          priority.set(itemId, index);
+        }
+      });
+
+      items.sort((a, b) => {
+        const aRank = priority.has(a) ? priority.get(a) : Number.MAX_SAFE_INTEGER;
+        const bRank = priority.has(b) ? priority.get(b) : Number.MAX_SAFE_INTEGER;
+        if (aRank !== bRank) return aRank - bRank;
+        return a.localeCompare(b);
+      });
+
+      items.forEach((itemId) => {
+        const ordered = Number((log.orders || {})[itemId] ?? 0);
+        const starting = Number((log.starting_inventory || {})[itemId] ?? 0);
+        const demand = Number((log.requests || {})[itemId] ?? 0);
+        const sold = Number((log.sales || {})[itemId] ?? 0);
+        const ending = Number((log.ending_inventory || {})[itemId] ?? 0);
+        const arrivalEntries = (log.arrivals && log.arrivals[itemId]) || [];
+        let arrivalText = "0";
+        if (Array.isArray(arrivalEntries) && arrivalEntries.length) {
+          arrivalText = arrivalEntries
+            .map((entry) => {
+              const qty = formatNumber(entry.quantity ?? entry[0]);
+              const day = formatNumber(entry.order_day ?? entry[1]);
+              return `${qty} from Day ${day}`;
+            })
+            .join(", ");
+        }
+        lines.push(
+          `${itemId}: ordered=${formatNumber(ordered)}, arrived=${arrivalText}, starting on-hand=${formatNumber(starting)}, demand=${formatNumber(demand)}, sold=${formatNumber(sold)}, ending on-hand=${formatNumber(ending)}`
+        );
+      });
+
+      const profit = Number(log.daily_profit || 0);
+      const holding = Number(log.daily_holding_cost || 0);
+      const reward = Number(log.daily_reward || 0);
+      lines.push(`Daily profit ${formatCurrency(profit)}, holding cost ${formatCurrency(holding)}, reward ${formatCurrency(reward)}`);
+      return lines;
+    }
+
+    function renderAISummary(proposal, currentDay) {
+      if (!aiSummaryDay || !aiSummaryBody || !aiSummaryActions) return;
+      if (!proposal) {
+        aiSummaryDay.textContent = "Waiting for AI...";
+        aiSummaryBody.classList.add("placeholder");
+        aiSummaryBody.textContent = "Latest proposal details will appear here after the AI acts.";
+        aiSummaryActions.innerHTML = "";
+        return;
+      }
+
+      const dayLabel = proposal.day ? `Day ${formatNumber(proposal.day)}` : currentDay ? `Day ${formatNumber(currentDay)}` : "Latest update";
+      aiSummaryDay.textContent = dayLabel;
+
+      const summaryText = tryExtractString(proposal.summary || proposal.headline || proposal.overview || proposal.brief || "");
+      if (summaryText) {
+        aiSummaryBody.classList.remove("placeholder");
+        aiSummaryBody.innerHTML = escapeHtml(summaryText).replace(/\n/g, "<br>");
+      } else {
+        aiSummaryBody.classList.add("placeholder");
+        aiSummaryBody.textContent = "No summary provided.";
+      }
+
+      const actions = Array.isArray(proposal.actions)
+        ? proposal.actions
+        : Array.isArray(proposal.recommendations)
+          ? proposal.recommendations
+          : [];
+
+      if (!actions.length) {
+        aiSummaryActions.innerHTML = `<p class="placeholder">No action items provided.</p>`;
+      } else {
+        aiSummaryActions.innerHTML = actions.map((action, index) => renderAISummaryAction(action, index)).join("");
       }
     }
 
-    function startPolling() {
-      if (pollTimer) clearInterval(pollTimer);
-      pollTimer = setInterval(async () => {
-        try {
-          const state = await apiRequest(`/runs/${currentRunId}`, { method: "GET" });
-          updateUI(state);
-          
-          if (state.completed || state.waiting_for_guidance) {
-            clearInterval(pollTimer);
-            pollTimer = null;
-          }
-        } catch (err) {
-          console.error("Polling error:", err);
+    function renderAISummaryAction(action, index) {
+      let title = `Action ${index + 1}`;
+      let detail = "";
+      if (typeof action === "string") {
+        detail = action;
+      } else if (action && typeof action === "object") {
+        if (action.name || action.title) {
+          title = action.name || action.title;
         }
-      }, 2000);
+        detail = tryExtractString(action.detail || action.description || action.text || action.summary || "");
+      } else {
+        detail = tryExtractString(action);
+      }
+      const safeTitle = escapeHtml(String(title));
+      const safeDetail = escapeHtml(detail).replace(/\n/g, "<br>");
+      return `
+        <div class="summary-action">
+          <span>${safeTitle}</span>
+          <span>${safeDetail || "--"}</span>
+        </div>
+      `;
+    }
+
+    function renderGuidancePanel(state) {
+      if (!guidancePanel || !guidanceStatus || !guidanceInfo) return;
+      guidancePanel.classList.toggle("disabled", !state.waiting_for_guidance || state.completed);
+      guidanceStatus.classList.remove("waiting", "completed");
+      if (state.completed) {
+        guidanceStatus.textContent = "Simulation completed";
+        guidanceStatus.classList.add("completed");
+        guidanceInfo.classList.add("hidden");
+        return;
+      }
+      if (state.waiting_for_guidance) {
+        guidanceStatus.textContent = `Awaiting guidance for Day ${formatNumber(state.current_day)}`;
+        guidanceStatus.classList.add("waiting");
+        guidanceInfo.classList.remove("hidden");
+      } else {
+        guidanceStatus.textContent = "AI is running...";
+        guidanceInfo.classList.add("hidden");
+      }
+    }
+    function renderTimeline(transcript) {
+      if (!timelineListEl || !rawTranscriptEl) return;
+      if (!Array.isArray(transcript) || transcript.length === 0) {
+        timelineListEl.innerHTML = `<p class="placeholder">Timeline will populate as the simulation runs.</p>`;
+        renderRawTranscript([]);
+      } else {
+        timelineListEl.innerHTML = transcript.map(createTimelineEntry).join("");
+        renderRawTranscript(transcript);
+      }
+      if (toggleTranscriptBtn) {
+        toggleTranscriptBtn.textContent = showingRawTranscript ? "View Timeline" : "View Raw Log";
+      }
+      timelineListEl.classList.toggle("hidden", showingRawTranscript);
+      rawTranscriptEl.classList.toggle("visible", showingRawTranscript);
+    }
+
+    function createTimelineEntry(event) {
+      const kindLabel = escapeHtml(String(event.kind || event.role || "event").toUpperCase());
+      const content = summarizeTimelineContent(event);
+      return `
+        <article class="timeline-entry">
+          <span class="badge">${kindLabel}</span>
+          <div class="content">${content}</div>
+        </article>
+      `;
+    }
+
+    function summarizeTimelineContent(event) {
+      if (!event) return "";
+      if (event.message) {
+        return escapeHtml(tryExtractString(event.message)).replace(/\n/g, "<br>");
+      }
+      const payload = event.payload ?? event.data ?? event.details;
+      if (typeof payload === "string") {
+        return escapeHtml(payload).replace(/\n/g, "<br>");
+      }
+      if (payload && typeof payload === "object") {
+        return escapeHtml(JSON.stringify(payload, null, 2)).replace(/\n/g, "<br>");
+      }
+      return escapeHtml(JSON.stringify(event, null, 2)).replace(/\n/g, "<br>");
+    }
+
+    function renderRawTranscript(transcript) {
+      if (!rawTranscriptEl) return;
+      if (!Array.isArray(transcript) || transcript.length === 0) {
+        rawTranscriptEl.textContent = "Transcript will appear once the simulation begins.";
+        return;
+      }
+      const text = transcript
+        .map((evt) => {
+          const label = String(evt.kind || evt.role || "event").toUpperCase();
+          const payload = evt.payload ?? evt.message ?? evt.data ?? evt;
+          return `[${label}]\n${JSON.stringify(payload, null, 2)}`;
+        })
+        .join("\n\n");
+      rawTranscriptEl.textContent = text;
+    }
+    function renderCharts(dailyLogs) {
+      if (!demandCanvas || !rewardCanvas) return;
+      if (!Array.isArray(dailyLogs) || dailyLogs.length === 0) {
+        if (chartsPanel) {
+          chartsPanel.classList.add("hidden");
+        }
+        if (demandChartInstance) {
+          demandChartInstance.destroy();
+          demandChartInstance = null;
+        }
+        if (rewardChartInstance) {
+          rewardChartInstance.destroy();
+          rewardChartInstance = null;
+        }
+        return;
+      }
+
+      if (chartsPanel) {
+        chartsPanel.classList.remove("hidden");
+      }
+
+      ensureCanvasDimensions(demandCanvas);
+      ensureCanvasDimensions(rewardCanvas);
+
+      const labels = dailyLogs.map((log) => `Day ${formatNumber(log.day)}`);
+      const demandDatasets = buildDemandDatasets(dailyLogs);
+      const rewardData = dailyLogs.map((log) => Number(log.daily_reward || 0));
+
+      if (!window.Chart || !demandCanvas.getContext || !rewardCanvas.getContext) {
+        return;
+      }
+
+      if (!demandChartInstance) {
+        demandChartInstance = new Chart(demandCanvas.getContext("2d"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: demandDatasets,
+          },
+          options: buildLineChartOptions({
+            yLabel: "Units",
+            tooltipLabel: (ctx) => `${ctx.dataset.label}: ${formatNumber(ctx.parsed.y)}`,
+          }),
+        });
+      } else {
+        demandChartInstance.data.labels = labels;
+        demandChartInstance.data.datasets = demandDatasets;
+        demandChartInstance.update("none");
+        demandChartInstance.resize();
+      }
+
+      if (!rewardChartInstance) {
+        rewardChartInstance = new Chart(rewardCanvas.getContext("2d"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Daily Reward",
+                data: rewardData,
+                borderColor: "#764ba2",
+                backgroundColor: "#764ba233",
+                tension: 0.25,
+                pointRadius: 3,
+                fill: true,
+              },
+            ],
+          },
+          options: buildLineChartOptions({
+            yLabel: "Reward",
+            tooltipLabel: (ctx) => formatCurrency(ctx.parsed.y),
+          }),
+        });
+      } else {
+        rewardChartInstance.data.labels = labels;
+        rewardChartInstance.data.datasets[0].data = rewardData;
+        rewardChartInstance.update("none");
+        rewardChartInstance.resize();
+      }
+    }
+
+    function ensureCanvasDimensions(canvas) {
+      if (!canvas) return;
+      const desired = 220;
+      const width = canvas.clientWidth || (canvas.parentElement ? canvas.parentElement.clientWidth : 480);
+      canvas.height = desired;
+      canvas.style.height = `${desired}px`;
+      canvas.style.maxHeight = `${desired}px`;
+      if (width > 0) {
+        canvas.width = width;
+        canvas.style.width = `${width}px`;
+      }
+    }
+
+    function buildDemandDatasets(dailyLogs) {
+      const itemIds = new Set();
+      dailyLogs.forEach((log) => {
+        const requests = log.requests || {};
+        Object.keys(requests).forEach((item) => itemIds.add(item));
+      });
+
+      const palette = ["#667eea", "#764ba2", "#ff9f43", "#2ecc71", "#ff6b6b", "#1abc9c"];
+      const ids = Array.from(itemIds);
+      if (ids.length === 0) {
+        ids.push("Total");
+      }
+
+      return ids.map((itemId, index) => {
+        const color = palette[index % palette.length];
+        const data = dailyLogs.map((log) => {
+          const requests = log.requests || {};
+          if (itemId === "Total") {
+            return Object.values(requests).reduce((sum, value) => sum + Number(value || 0), 0);
+          }
+          return Number(requests[itemId] || 0);
+        });
+        return {
+          label: itemId,
+          data,
+          borderColor: color,
+          backgroundColor: `${color}33`,
+          tension: 0.25,
+          pointRadius: 3,
+          pointBackgroundColor: color,
+          pointBorderWidth: 1,
+          fill: true,
+        };
+      });
+    }
+
+    function buildLineChartOptions({ yLabel, tooltipLabel }) {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: "top",
+          },
+          tooltip: {
+            callbacks: {
+              label: tooltipLabel,
+            },
+          },
+        },
+        interaction: {
+          intersect: false,
+          mode: "index",
+        },
+        scales: {
+          x: {
+            grid: {
+              display: false,
+            },
+          },
+          y: {
+            beginAtZero: true,
+            title: {
+              display: Boolean(yLabel),
+              text: yLabel || "",
+            },
+          },
+        },
+      };
     }
 
     async function apiRequest(path, options = {}) {
       const session = await supabaseClient.auth.getSession();
       if (!session.data.session) {
-        window.location.href = '/';
+        window.location.href = "/";
         throw new Error("Not authenticated");
       }
       const token = session.data.session.access_token;
-      const resp = await fetch(`http://localhost:8000${path}`, {
+      const fetchOptions = {
+        method: "GET",
+        ...options,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          ...(options.headers || {}),
         },
-        ...options,
-      });
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(text || resp.statusText);
+      };
+      const response = await fetch(`http://localhost:8000${path}`, fetchOptions);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || response.statusText);
       }
-      return resp.json();
+      return response.json();
     }
-  </script>
+
+    function formatCurrency(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "$0.00";
+      return `$${num.toFixed(2)}`;
+    }
+
+    function formatUnitCurrency(value) {
+      return formatCurrency(value);
+    }
+
+    function formatNumber(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "--";
+      return num.toLocaleString();
+    }
+
+    function tryExtractString(value) {
+      if (value == null) return "";
+      if (typeof value === "string") return value;
+      if (typeof value === "object") return JSON.stringify(value);
+      return String(value);
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+</script>
 </body>
 </html>
-
