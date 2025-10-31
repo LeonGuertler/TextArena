@@ -213,6 +213,7 @@
     .summary-body.placeholder { color: var(--text-subtle); font-style: italic; }
     .summary-actions { display: grid; gap: 8px; }
     .summary-action { background: #fff; border: 1px solid rgba(118, 75, 162, 0.25); border-radius: 8px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+    .hidden-card { display: none !important; }
     .guidance-panel { background: #f9f3ff; border: 1px solid rgba(118, 75, 162, 0.2); display: flex; flex-direction: column; gap: 14px; }
     .guidance-status { font-weight: 600; font-size: 14px; color: var(--primary); }
     .guidance-status.waiting { color: var(--warning); }
@@ -318,17 +319,6 @@
         <div class="column column-right">
           <div class="status-banner" id="status">Loading...</div>
 
-          <article class="panel summary-card">
-            <div class="panel-title-row">
-              <h3 class="panel-title">Latest AI Plan</h3>
-              <span id="summary-day" class="placeholder">Waiting for AI...</span>
-            </div>
-            <div id="ai-summary-body" class="summary-body placeholder">
-              Latest proposal details will appear here after the AI acts.
-            </div>
-            <div id="ai-summary-actions" class="summary-actions hidden"></div>
-          </article>
-
           <section class="panel guidance-panel" id="guidance-panel">
             <div id="guidance-status" class="guidance-status">AI is running...</div>
             <div class="info-box hidden" id="guidance-info">
@@ -402,9 +392,6 @@
     const guidanceHistoryEl = document.getElementById("guidance-history");
     const historyListEl = document.getElementById("history-list");
 
-    const aiSummaryDay = document.getElementById("summary-day");
-    const aiSummaryBody = document.getElementById("ai-summary-body");
-    const aiSummaryActions = document.getElementById("ai-summary-actions");
     const guidancePanel = document.getElementById("guidance-panel");
     const guidanceStatus = document.getElementById("guidance-status");
     const guidanceInfo = document.getElementById("guidance-info");
@@ -520,7 +507,6 @@
       renderNews(state.news || {});
       renderGuidanceHistory(state.guidance_history || []);
       renderHistory(state.daily_logs || []);
-      renderAISummary(state.latest_agent_proposal || null, state.current_day);
       renderGuidancePanel(state);
       renderTimeline(state.transcript || []);
       renderCharts(state.daily_logs || []);
@@ -755,64 +741,6 @@
       const reward = Number(log.daily_reward || 0);
       lines.push(`Daily profit ${formatCurrency(profit)}, holding cost ${formatCurrency(holding)}, reward ${formatCurrency(reward)}`);
       return lines;
-    }
-
-    function renderAISummary(proposal, currentDay) {
-      if (!aiSummaryDay || !aiSummaryBody || !aiSummaryActions) return;
-      if (!proposal) {
-        aiSummaryDay.textContent = "Waiting for AI...";
-        aiSummaryBody.classList.add("placeholder");
-        aiSummaryBody.textContent = "Latest proposal details will appear here after the AI acts.";
-        aiSummaryActions.innerHTML = "";
-        return;
-      }
-
-      const dayLabel = proposal.day ? `Day ${formatNumber(proposal.day)}` : currentDay ? `Day ${formatNumber(currentDay)}` : "Latest update";
-      aiSummaryDay.textContent = dayLabel;
-
-      const summaryText = tryExtractString(proposal.summary || proposal.headline || proposal.overview || proposal.brief || "");
-      if (summaryText) {
-        aiSummaryBody.classList.remove("placeholder");
-        aiSummaryBody.innerHTML = escapeHtml(summaryText).replace(/\n/g, "<br>");
-      } else {
-        aiSummaryBody.classList.add("placeholder");
-        aiSummaryBody.textContent = "No summary provided.";
-      }
-
-      const actions = Array.isArray(proposal.actions)
-        ? proposal.actions
-        : Array.isArray(proposal.recommendations)
-          ? proposal.recommendations
-          : [];
-
-      if (!actions.length) {
-        aiSummaryActions.innerHTML = `<p class="placeholder">No action items provided.</p>`;
-      } else {
-        aiSummaryActions.innerHTML = actions.map((action, index) => renderAISummaryAction(action, index)).join("");
-      }
-    }
-
-    function renderAISummaryAction(action, index) {
-      let title = `Action ${index + 1}`;
-      let detail = "";
-      if (typeof action === "string") {
-        detail = action;
-      } else if (action && typeof action === "object") {
-        if (action.name || action.title) {
-          title = action.name || action.title;
-        }
-        detail = tryExtractString(action.detail || action.description || action.text || action.summary || "");
-      } else {
-        detail = tryExtractString(action);
-      }
-      const safeTitle = escapeHtml(String(title));
-      const safeDetail = escapeHtml(detail).replace(/\n/g, "<br>");
-      return `
-        <div class="summary-action">
-          <span>${safeTitle}</span>
-          <span>${safeDetail || "--"}</span>
-        </div>
-      `;
     }
 
     function renderGuidancePanel(state) {

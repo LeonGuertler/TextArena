@@ -25,13 +25,16 @@ def _should_open_browser(reload_enabled: bool) -> bool:
 
 
 def launch_uvicorn(*, reload_enabled: bool) -> None:
+    # Render provides PORT environment variable, fallback to 8000 for local dev
+    port = int(os.environ.get("PORT", 8000))
+    
     if reload_enabled:
         backend_dir = Path(__file__).resolve().parent / "backend"
         frontend_dir = Path(__file__).resolve().parent / "frontend"
         uvicorn.run(
             "examples.fullstack_demo.backend.app:app",
             host="0.0.0.0",
-            port=8000,
+            port=port,
             reload=True,
             log_level="info",
             reload_dirs=[
@@ -44,7 +47,7 @@ def launch_uvicorn(*, reload_enabled: bool) -> None:
     config = Config(
         app=fastapi_app,
         host="0.0.0.0",
-        port=8000,
+        port=port,
         reload=False,
         log_level="info",
     )
@@ -58,11 +61,13 @@ def main() -> None:
         load_dotenv(env_path)
     load_dotenv()
 
+    # Disable reload in production (Render sets FULLSTACK_DEMO_RELOAD=0)
     reload_flag = os.environ.get("FULLSTACK_DEMO_RELOAD", "1")
     reload_enabled = reload_flag not in {"0", "false", "False"}
 
     if _should_open_browser(reload_enabled):
-        frontend_url = "http://localhost:8000/"
+        port = int(os.environ.get("PORT", 8000))
+        frontend_url = f"http://localhost:{port}/"
         try:
             webbrowser.open(frontend_url)
         except Exception:

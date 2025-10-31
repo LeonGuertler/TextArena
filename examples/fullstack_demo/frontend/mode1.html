@@ -543,6 +543,18 @@
       gap: 16px;
       margin-top: 12px;
     }
+    .loading-text {
+      font-size: 13px;
+      color: var(--primary);
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .loading-text::before {
+      content: "⏳";
+      font-size: 14px;
+    }
     .row {
       display: flex;
       gap: 16px;
@@ -724,6 +736,7 @@
               </label>
               <div class="button-row">
                 <button id="send-message-btn">Send Message</button>
+                <span id="chat-loading" class="loading-text hidden">AI is running...</span>
                 <span id="chat-error" class="error"></span>
               </div>
             </section>
@@ -743,7 +756,10 @@
                   </label>
                 </div>
               </div>
-              <button id="submit-decision-btn">Submit Final Decision & Proceed</button>
+              <div class="button-row">
+                <button id="submit-decision-btn">Submit Final Decision & Proceed</button>
+                <span id="decision-loading" class="loading-text hidden">Submitting decision...</span>
+              </div>
               <div id="decision-error" class="error"></div>
             </section>
           </div>
@@ -828,13 +844,19 @@
     const chatError = document.getElementById("chat-error");
     const decisionError = document.getElementById("decision-error");
 
+    const userMessageInput = document.getElementById("user-message");
     const sendMessageBtn = document.getElementById("send-message-btn");
+    const chatLoading = document.getElementById("chat-loading");
     const submitDecisionBtn = document.getElementById("submit-decision-btn");
+    const decisionLoading = document.getElementById("decision-loading");
     const regularInput = document.getElementById("regular-chips");
     const bbqInput = document.getElementById("bbq-chips");
 
     let demandChartInstance = null;
     let rewardChartInstance = null;
+    let latestState = null;
+    let isChatSubmitting = false;
+    let isDecisionSubmitting = false;
 
     // Authentication guard
     supabaseClient.auth.getSession().then(({ data: { session } }) => {
@@ -866,27 +888,35 @@
     });
 
     sendMessageBtn.addEventListener("click", async () => {
+      if (isChatSubmitting) return;
       chatError.textContent = "";
-      const message = document.getElementById("user-message").value.trim();
+      const message = userMessageInput.value.trim();
       if (!message) {
         chatError.textContent = "Please enter a message";
         return;
       }
+
+      isChatSubmitting = true;
+      updateChatControls();
 
       try {
         const response = await apiRequest(`/runs/${currentRunId}/messages`, {
           method: "POST",
           body: JSON.stringify({ message }),
         });
-        document.getElementById("user-message").value = "";
+        userMessageInput.value = "";
         updateUI(response);
         startPolling();
       } catch (err) {
         chatError.textContent = err.message || "Failed to send message";
+      } finally {
+        isChatSubmitting = false;
+        updateChatControls();
       }
     });
 
     submitDecisionBtn.addEventListener("click", async () => {
+      if (isDecisionSubmitting) return;
       decisionError.textContent = "";
       const regularChips = regularInput.value.trim();
       const bbqChips = bbqInput.value.trim();
@@ -909,6 +939,9 @@
         "chips(BBQ)": bbqQty,
       });
 
+      isDecisionSubmitting = true;
+      updateDecisionControls();
+
       try {
         const response = await apiRequest(`/runs/${currentRunId}/final-action`, {
           method: "POST",
@@ -920,6 +953,9 @@
         startPolling();
       } catch (err) {
         decisionError.textContent = err.message || "Failed to submit decision";
+      } finally {
+        isDecisionSubmitting = false;
+        updateDecisionControls();
       }
     });
 
@@ -943,7 +979,7 @@
 
     function updateUI(state) {
       if (!state) return;
-
+      latestState = state;
       renderStatusBanner(state);
       renderStatusCards(state.status_cards || {});
       renderNews(state.news || {});
@@ -954,12 +990,12 @@
       renderCharts(state.daily_logs || []);
 
       const completed = !!state.completed;
-      sendMessageBtn.disabled = completed;
-      submitDecisionBtn.disabled = completed || !state.waiting_for_final_action;
       if (completed && pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
       }
+      updateChatControls();
+      updateDecisionControls();
       requestAnimationFrame(syncColumnHeights);
     }
 
@@ -1569,6 +1605,28 @@
       }
       return response.json();
     }
+
+    function updateChatControls() {
+      const completed = !!(latestState && latestState.completed);
+      const disableSend = completed || isChatSubmitting;
+      if (sendMessageBtn) sendMessageBtn.disabled = disableSend;
+      if (userMessageInput) userMessageInput.disabled = completed || isChatSubmitting;
+      if (chatLoading) chatLoading.classList.toggle("hidden", !isChatSubmitting);
+    }
+
+    function updateDecisionControls() {
+      const completed = latestState ? !!latestState.completed : false;
+      const waiting = latestState ? !!latestState.waiting_for_final_action : false;
+      const disableSubmit = completed || !waiting || isDecisionSubmitting;
+      const disableInputs = completed || isDecisionSubmitting;
+      if (submitDecisionBtn) submitDecisionBtn.disabled = disableSubmit;
+      if (regularInput) regularInput.disabled = disableInputs;
+      if (bbqInput) bbqInput.disabled = disableInputs;
+      if (decisionLoading) decisionLoading.classList.toggle("hidden", !isDecisionSubmitting);
+    }
+
+    updateChatControls();
+    updateDecisionControls();
 
     function formatCurrency(value) {
       const num = Number(value);

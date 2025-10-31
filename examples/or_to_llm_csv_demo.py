@@ -17,13 +17,80 @@ import sys
 import argparse
 import json
 import re
+import unicodedata
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
 import textarena as ta
+from textarena.core import Agent
 
 
 DAY_CONCLUDED_PATTERN = re.compile(r'^(\s*Day\s+(\d+)\s+concluded:)(.*)$')
+
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
+def _sanitize_text(text: str) -> str:
+    """Normalize to NFKC and escape remaining non-ASCII characters."""
+    normalized = unicodedata.normalize("NFKC", text)
+    return normalized.encode("ascii", "backslashreplace").decode("ascii")
+
+
+def _safe_print(text: str) -> None:
+    print(_sanitize_text(str(text)))
+
+
+class GPT5MiniAgent(Agent):
+    """Lightweight agent wrapper that uses the OpenAI Responses API with gpt-5-mini."""
+
+    def __init__(
+        self,
+        system_prompt: str,
+        reasoning_effort: str = "low",
+        text_verbosity: str = "low",
+    ):
+        super().__init__()
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise ImportError(
+                "OpenAI package is required for GPT5MiniAgent. Install it with: pip install openai"
+            ) from exc
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
+
+        self.model_name = "gpt-5-mini"
+        self.system_prompt = system_prompt
+        self.reasoning_effort = reasoning_effort
+        self.text_verbosity = text_verbosity
+        self.client = OpenAI(api_key=api_key)
+
+    def __call__(self, observation: str) -> str:
+        if not isinstance(observation, str):
+            raise ValueError(f"Observation must be a string. Received type: {type(observation)}")
+
+        request_payload = {
+            "model": self.model_name,
+            "input": [
+                {"role": "system", "content": [{"type": "input_text", "text": self.system_prompt}]},
+                {"role": "user", "content": [{"type": "input_text", "text": observation}]},
+            ],
+        }
+
+        if self.reasoning_effort:
+            request_payload["reasoning"] = {"effort": self.reasoning_effort}
+        if self.text_verbosity:
+            request_payload["text"] = {"verbosity": self.text_verbosity}
+
+        response = self.client.responses.create(**request_payload)
+        return response.output_text.strip()
 
 
 def inject_carry_over_insights(observation: str, insights) -> str:
@@ -545,7 +612,8 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "Think through your rationale BEFORE making the final order decision.\n"
         "Do NOT include any other text outside the JSON."
     )
-    return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
+    # return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
+    return GPT5MiniAgent(system_prompt=system)
 
 
 def main():
@@ -724,7 +792,7 @@ def main():
                 action_dict = json.loads(cleaned_action)
                 
                 formatted_json = json.dumps(action_dict, indent=2, ensure_ascii=False)
-                print(formatted_json)
+                _safe_print(formatted_json)
                 
                 carry_memo = action_dict.get("carry_over_insight")
                 if isinstance(carry_memo, str):
@@ -745,7 +813,7 @@ def main():
             except Exception as e:
                 # Fallback to raw output if JSON parsing fails
                 print(f"[DEBUG: JSON parsing failed: {e}]")
-                print(action)
+                _safe_print(action)
                 sys.stdout.flush()
             print("="*60)
             print(f"  (OR recommended: {or_recommendations})")

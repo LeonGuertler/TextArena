@@ -258,7 +258,6 @@ def _make_base_agent(
 
     return GPT5MiniAgent(
         system_prompt=system_prompt,
-        temperature=0.0,
         reasoning_effort="minimal",
         verbosity="low",
     )
@@ -271,7 +270,6 @@ class GPT5MiniAgent(ta.Agent):
         self,
         *,
         system_prompt: str,
-        temperature: float = 0.0,
         reasoning_effort: str = "minimal",
         verbosity: str = "low",
     ) -> None:
@@ -281,7 +279,6 @@ class GPT5MiniAgent(ta.Agent):
             raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
         self._client = OpenAI(api_key=api_key)
         self._system_prompt = system_prompt
-        self._temperature = temperature
         self._reasoning_effort = reasoning_effort
         self._verbosity = verbosity
 
