@@ -19,8 +19,11 @@ from .simulation_current import (
     SimulationConfig,
     load_simulation,
 )
-from .supabase_client import SupabaseLogger, get_supabase_logger
-from .token_verifier import AuthContext, get_auth_context
+from .optional_auth import get_auth_context_optional as get_auth_context, AuthContext
+from .optional_supabase import (
+    get_supabase_logger_optional as get_supabase_logger,
+    SupabaseLogger,
+)
 
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -35,6 +38,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint."""
+    import os
+    demo_mode = not os.getenv("SUPABASE_JWT_SECRET")
+    return {
+        "status": "healthy",
+        "demo_mode": demo_mode,
+        "message": "Demo mode: authentication disabled" if demo_mode else "Production mode: authentication required"
+    }
 
 
 @app.get("/")
