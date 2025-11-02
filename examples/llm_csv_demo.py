@@ -93,28 +93,38 @@ class GPT5MiniAgent(Agent):
         return response.output_text.strip()
 
 
-def inject_carry_over_insights(observation: str, insights) -> str:
-    """Insert prior carry-over insights into matching day summaries."""
+def inject_carry_over_insights(observation: str, insights: dict) -> str:
+    """
+    Insert carry-over insights at the top of observation.
+    
+    Format:
+    ========================================
+    CARRY-OVER INSIGHTS (Key Discoveries):
+    ========================================
+    Day 5: Demand increased by 50% after Day 3 sports event (avg: 100->150)
+    Day 12: Lead time changed from 2 to 4 days starting Day 10
+    ========================================
+    
+    [Original Observation]
+    """
     if not insights:
         return observation
-
-    lines = observation.splitlines()
-    augmented = []
-
-    for line in lines:
-        match = DAY_CONCLUDED_PATTERN.match(line)
-        if match:
-            day_num = int(match.group(2))
-            memo = insights.get(day_num)
-            if memo:
-                if "Insight:" in match.group(3):
-                    augmented.append(line)
-                else:
-                    augmented.append(f"{match.group(1)}{match.group(3)} | Insight: {memo}")
-                continue
-        augmented.append(line)
-
-    return "\n".join(augmented)
+    
+    # Sort insights by day number
+    sorted_insights = sorted(insights.items())
+    
+    # Build insights section at the top
+    insights_section = "=" * 70 + "\n"
+    insights_section += "CARRY-OVER INSIGHTS (Key Discoveries):\n"
+    insights_section += "=" * 70 + "\n"
+    
+    for day_num, memo in sorted_insights:
+        insights_section += f"Day {day_num}: {memo}\n"
+    
+    insights_section += "=" * 70 + "\n\n"
+    
+    # Prepend insights section to observation
+    return insights_section + observation
 
 
 class CSVDemandPlayer:
@@ -333,7 +343,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- Lead time is NOT directly revealed. You must INFER it from arrival records.\n"
         "- When goods arrive, you'll see: 'arrived=X units (ordered on Day Y, lead_time was Z days)'\n"
         "- Use this information to track actual lead time and adjust your strategy\n"
-        "- Each day unfolds as: you place today's order -> any shipments already due arrive -> customer demand occurs.\n"
+        "- Daily sequence: order submission happens first, then any scheduled shipments arrive, and customer demand is realized last\n"
         "\n"
         "Inventory visibility:\n"
         "- On-hand: Current inventory available for sale today\n"
@@ -342,7 +352,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- IMPORTANT: Initial inventory on Day 1: Each item starts with 0 units on-hand\n"
         "\n"
         "- Holding cost is charged on ending inventory each day\n"
-        "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
+        "- NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
         "\n"
     )
     
@@ -401,13 +411,44 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- React to TODAY'S NEWS as it happens, accounting for inferred lead time\n"
         "- Learn from past news events to understand their impact on demand\n"
         "- Balance profit vs holding cost (don't overstock)\n"
-        "- carry_over_insight: A memo that carries forward to future days to help you remember important discoveries.\n"
-        "  RULES for carry_over_insight:\n"
-        "    (1) ONLY write when you observe a NEW, sustained change: demand mean/variance shift OR news impact.\n"
-        "    (2) MUST cite specific evidence: day numbers, old vs new averages, specific news.\n"
-        "    (3) IMPORTANT: Check if similar insight already exists in the observations above.\n"
-        "    (4) If the insight is essentially the SAME as what's already shown, return empty string \"\".\n"
-        "\n\n"
+        "\n"
+        "CARRY-OVER INSIGHTS:\n"
+        "- If carry-over insights exist, they will appear at the TOP of your observation in a dedicated section.\n"
+        "- Focus on the MOST RECENT insights as trends evolve over time. Older insights may be outdated.\n"
+        "- Use insights as quick references, but always verify against current game data.\n"
+        "\n"
+        "STRICT RULES for writing carry_over_insight:\n"
+        "⚠️ DEFAULT: Return empty string \"\" (most days should have NO new insight)\n"
+        "\n"
+        "ONLY write a new insight when ALL of these conditions are met:\n"
+        "  1. You observe a SIGNIFICANT, SUSTAINED change (not temporary fluctuation):\n"
+        "     - Demand mean shift (e.g., sustained 30%+ change over 3+ days)\n"
+        "     - Variance pattern change (e.g., volatility doubled/halved)\n"
+        "     - Lead time structural change (e.g., changed from 2 to 4 days)\n"
+        "     - Major news impact with lasting effect\n"
+        "\n"
+        "  2. You have CONCRETE EVIDENCE with specific numbers:\n"
+        "     - Day ranges (e.g., \"Days 8-12 avg: 150 vs Days 1-7 avg: 100\")\n"
+        "     - Statistical measures (mean, std, lead_time values)\n"
+        "     - Specific news events and their timing\n"
+        "\n"
+        "  3. NO similar insight exists in CARRY-OVER INSIGHTS section above:\n"
+        "     - Check if the change is already documented\n"
+        "     - If updating an existing insight, reference the old one\n"
+        "     - If change is temporary/reversed, note that it ended\n"
+        "\n"
+        "  4. The insight will be USEFUL for future decisions (not just describing history)\n"
+        "\n"
+        "EXAMPLES of when to write:\n"
+        "  ✅ \"Demand increased 50% after Day 5 sports event; new baseline: 150 units (was 100)\"\n"
+        "  ✅ \"Lead time changed from 2 to 4 days starting Day 10 (observed in Days 10-13 arrivals)\"\n"
+        "  ✅ \"Variance doubled after Day 15; demand now fluctuates 80-220 (was 90-110)\"\n"
+        "  ❌ \"Today's demand was high\" (not sustained, no evidence)\n"
+        "  ❌ \"Sales continue as before\" (no change, unnecessary)\n"
+        "  ❌ \"Demand is volatile\" (already documented in previous insight)\n"
+        "\n"
+        "Remember: Insights are for PERSISTENT changes only. Temporary fluctuations go in rationale, not insights.\n"
+        "\n"
         "IMPORTANT: Think step by step, then decide.\n"
         "You MUST respond with valid JSON in this exact format:\n"
         "{\n"

@@ -19,10 +19,30 @@ import os
 import sys
 import argparse
 import json
+import unicodedata
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
 import textarena as ta
+
+
+# Fix stdout encoding for Windows
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
+def _sanitize_text(text: str) -> str:
+    """Normalize to NFKC and escape remaining non-ASCII characters."""
+    normalized = unicodedata.normalize("NFKC", text)
+    return normalized.encode("ascii", "backslashreplace").decode("ascii")
+
+
+def _safe_print(text: str) -> None:
+    """Print text with encoding fallback for Windows."""
+    print(_sanitize_text(str(text)))
 
 
 class CSVDemandPlayer:
@@ -219,29 +239,34 @@ class ORAgent:
     """
     OR algorithm baseline agent using base-stock policy.
     
-    Policy: order_quantity = max(base_stock - current_inventory, 0)
-    where base_stock = μ̂ + z*σ̂
+    Supports two policies:
+    1. Vanilla: order_quantity = max(base_stock - current_inventory, 0)
+       where base_stock = μ̂ + z*σ̂
+    2. Capped: order_quantity = max(min(base_stock - current_inventory, cap), 0)
+       where cap = μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
     
     μ̂ = (1+L) × empirical_mean
     σ̂ = sqrt(1+L) × empirical_std
     z* = Φ^(-1)(q), where q = profit/(profit + holding_cost)
     """
     
-    def __init__(self, items_config: dict, initial_samples: dict = None):
+    def __init__(self, items_config: dict, initial_samples: dict = None, policy: str = 'capped'):
         """
         Args:
             items_config: Dict of {item_id: {'lead_time': L, 'profit': p, 'holding_cost': h}}
             initial_samples: Optional dict of {item_id: [list of initial demand samples]}
                            If None or empty, will use only observed demands
+            policy: 'vanilla' or 'capped' (default: 'capped')
         """
         self.items_config = items_config
         self.initial_samples = initial_samples if initial_samples else {}
+        self.policy = policy
         
         # Store observed demands (will be updated each day)
         # Format: {item_id: [demand_day1, demand_day2, ...]}
         self.observed_demands = {item_id: [] for item_id in items_config}
         
-        print("\n=== OR Agent Initialized ===")
+        print(f"\n=== OR Agent Initialized (Policy: {policy.upper()}) ===")
         for item_id, config in items_config.items():
             L = config['lead_time']
             p = config['profit']
@@ -254,7 +279,7 @@ class ORAgent:
             print(f"  Lead time (L): {L}")
             print(f"  Profit (p): {p}, Holding cost (h): {h}")
             print(f"  Critical fractile (q): {q:.4f}")
-            print(f"  z* = Φ^(-1)(q): {z_star:.4f}")
+            _safe_print(f"  z* = Φ^(-1)(q): {z_star:.4f}")
             print(f"  Initial samples: {samples if samples else 'None (will learn from observed demands)'}")
     
     def _parse_inventory_from_observation(self, observation: str, item_id: str) -> int:
@@ -302,7 +327,7 @@ class ORAgent:
             print(f"Error parsing inventory for {item_id}: {e}")
             return 0
     
-    def _calculate_order(self, item_id: str, current_inventory: int) -> int:
+    def _calculate_order(self, item_id: str, current_inventory: int) -> dict:
         """
         Calculate order quantity using OR base-stock policy.
         
@@ -311,7 +336,8 @@ class ORAgent:
             current_inventory: Current total inventory (on-hand + in-transit)
             
         Returns:
-            Order quantity (non-negative integer)
+            Dict with keys: order, empirical_mean, empirical_std, mu_hat, sigma_hat, 
+                           L, z_star, q, base_stock, cap (if capped), order_uncapped (if capped)
         """
         config = self.items_config[item_id]
         L = config['lead_time']
@@ -324,7 +350,18 @@ class ORAgent:
         
         # If no samples yet, use a conservative default (order 0)
         if not all_samples:
-            return 0
+            return {
+                'order': 0,
+                'empirical_mean': 0,
+                'empirical_std': 0,
+                'mu_hat': 0,
+                'sigma_hat': 0,
+                'L': L,
+                'z_star': 0,
+                'q': p / (p + h),
+                'base_stock': 0,
+                'current_inventory': current_inventory
+            }
         
         # Calculate empirical statistics
         empirical_mean = np.mean(all_samples)
@@ -341,10 +378,38 @@ class ORAgent:
         # Calculate base stock
         base_stock = mu_hat + z_star * sigma_hat
         
-        # Calculate order quantity
-        order = max(int(np.ceil(base_stock - current_inventory)), 0)
+        result = {
+            'empirical_mean': empirical_mean,
+            'empirical_std': empirical_std,
+            'mu_hat': mu_hat,
+            'sigma_hat': sigma_hat,
+            'L': L,
+            'z_star': z_star,
+            'q': q,
+            'base_stock': base_stock,
+            'current_inventory': current_inventory
+        }
         
-        return order
+        # Calculate order quantity based on policy
+        if self.policy == 'vanilla':
+            order = max(int(np.ceil(base_stock - current_inventory)), 0)
+            result['order'] = order
+        else:  # capped policy
+            # Vanilla order (for logging)
+            order_uncapped = max(int(np.ceil(base_stock - current_inventory)), 0)
+            
+            # Cap calculation: μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
+            cap_z = norm.ppf(0.95)
+            cap = mu_hat / (1 + L) + cap_z * sigma_hat / np.sqrt(1 + L)
+            
+            # Capped order
+            order = max(min(int(np.ceil(base_stock - current_inventory)), int(np.ceil(cap))), 0)
+            
+            result['order'] = order
+            result['order_uncapped'] = order_uncapped
+            result['cap'] = cap
+        
+        return result
     
     def update_demand_observation(self, item_id: str, observed_demand: int):
         """
@@ -356,58 +421,56 @@ class ORAgent:
         """
         self.observed_demands[item_id].append(observed_demand)
     
-    def get_action(self, observation: str) -> str:
+    def get_action(self, observation: str) -> tuple[str, dict]:
         """
-        Generate ordering decision in JSON format.
+        Generate ordering decision in JSON format with detailed statistics.
         
         Args:
             observation: Current game observation
             
         Returns:
-            JSON string like '{"action": {"chips(Regular)": 15, "chips(BBQ)": 10}, "rationale": "..."}'
+            Tuple of (action_json_string, statistics_dict)
+            statistics_dict contains all calculation details for logging
         """
         action_dict = {}
         rationale_parts = []
+        statistics = {}
         
         for item_id in self.items_config:
             # Parse current inventory from observation
             current_inventory = self._parse_inventory_from_observation(observation, item_id)
             
-            # Calculate order quantity
-            order = self._calculate_order(item_id, current_inventory)
-            action_dict[item_id] = order
+            # Calculate order quantity with full statistics
+            calc_result = self._calculate_order(item_id, current_inventory)
+            action_dict[item_id] = calc_result['order']
+            statistics[item_id] = calc_result
             
             # Build rationale
-            config = self.items_config[item_id]
-            L = config['lead_time']
-            initial = self.initial_samples.get(item_id, [])
-            all_samples = initial + self.observed_demands[item_id]
-            
-            if not all_samples:
+            if calc_result['mu_hat'] == 0:
                 rationale_parts.append(f"{item_id}: No samples yet, order=0")
-                continue
-                
-            empirical_mean = np.mean(all_samples)
-            empirical_std = np.std(all_samples, ddof=1) if len(all_samples) > 1 else 0
-            mu_hat = (1 + L) * empirical_mean
-            sigma_hat = np.sqrt(1 + L) * empirical_std
-            q = config['profit'] / (config['profit'] + config['holding_cost'])
-            z_star = norm.ppf(q)
-            base_stock = mu_hat + z_star * sigma_hat
-            
-            rationale_parts.append(
-                f"{item_id}: base_stock={base_stock:.1f} (μ̂={mu_hat:.1f}, σ̂={sigma_hat:.1f}, z*={z_star:.2f}), "
-                f"current_inv={current_inventory}, order={order}"
-            )
+            else:
+                if self.policy == 'vanilla':
+                    rationale_parts.append(
+                        f"{item_id}: base_stock={calc_result['base_stock']:.1f} "
+                        f"(μ̂={calc_result['mu_hat']:.1f}, σ̂={calc_result['sigma_hat']:.1f}, z*={calc_result['z_star']:.2f}), "
+                        f"inv={current_inventory}, order={calc_result['order']}"
+                    )
+                else:  # capped
+                    rationale_parts.append(
+                        f"{item_id}: base_stock={calc_result['base_stock']:.1f}, cap={calc_result['cap']:.1f}, "
+                        f"inv={current_inventory}, order={calc_result['order']} "
+                        f"(uncapped would be {calc_result['order_uncapped']})"
+                    )
         
-        rationale = "OR base-stock policy: " + "; ".join(rationale_parts)
+        policy_name = "OR base-stock (capped)" if self.policy == 'capped' else "OR base-stock (vanilla)"
+        rationale = f"{policy_name}: " + "; ".join(rationale_parts)
         
         result = {
             "action": action_dict,
             "rationale": rationale
         }
         
-        return json.dumps(result, indent=2)
+        return json.dumps(result, indent=2), statistics
 
 
 def main():
@@ -416,6 +479,8 @@ def main():
                        help='Path to CSV file with demand data')
     parser.add_argument('--promised-lead-time', type=int, default=0,
                        help='Promised lead time used by OR algorithm (default: 0). Actual lead time in CSV may differ.')
+    parser.add_argument('--policy', type=str, choices=['vanilla', 'capped'], default='capped',
+                       help='OR policy type: vanilla (standard base-stock) or capped (smoothed orders). Default: capped')
     args = parser.parse_args()
     
     # Create environment
@@ -465,7 +530,7 @@ def main():
         }
         for config in item_configs
     }
-    or_agent = ORAgent(or_items_config, initial_samples)
+    or_agent = ORAgent(or_items_config, initial_samples, policy=args.policy)
     
     # Reset environment
     env.reset(num_players=2)
@@ -507,8 +572,32 @@ def main():
                 done, _ = env.step(action=action)
                 continue
             
-            action = or_agent.get_action(observation)
-            print(f"\nDay {current_day} OR Decision: {action}")
+            action, stats = or_agent.get_action(observation)
+            
+            # Print detailed statistics for each item
+            print(f"\n{'='*70}")
+            print(f"Day {current_day} OR Decision ({args.policy.upper()} Policy):")
+            print(f"{'='*70}")
+            for item_id, item_stats in stats.items():
+                print(f"\n{item_id}:")
+                print(f"  Empirical mean: {item_stats['empirical_mean']:.2f}")
+                print(f"  Empirical std: {item_stats['empirical_std']:.2f}")
+                print(f"  Lead time (L): {item_stats['L']}")
+                _safe_print(f"  mu_hat (μ̂): {item_stats['mu_hat']:.2f}")
+                _safe_print(f"  sigma_hat (σ̂): {item_stats['sigma_hat']:.2f}")
+                print(f"  Critical fractile (q): {item_stats['q']:.4f}")
+                print(f"  z*: {item_stats['z_star']:.4f}")
+                print(f"  Base stock: {item_stats['base_stock']:.2f}")
+                print(f"  Current inventory: {item_stats['current_inventory']}")
+                if args.policy == 'capped':
+                    print(f"  Cap value: {item_stats['cap']:.2f}")
+                    print(f"  Order (capped): {item_stats['order']}")
+                    print(f"  Order (uncapped): {item_stats['order_uncapped']}")
+                else:
+                    print(f"  Order: {item_stats['order']}")
+            
+            _safe_print(f"\n{action}")
+            print(f"{'='*70}")
         else:  # Demand from CSV
             action = csv_player.get_action(current_day)
             

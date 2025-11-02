@@ -1,8 +1,8 @@
 """
-LLM→OR Strategy: LLM Proposes OR Parameters
+LLM->OR Strategy: LLM Proposes OR Parameters
 
 This demo uses:
-- LLM Agent: Analyzes game state and proposes OR algorithm parameters (L, μ̂, σ̂)
+- LLM Agent: Analyzes game state and proposes OR algorithm parameters (L, mu_hat, sigma_hat)
 - OR Calculator: Uses LLM-proposed parameters to compute optimal orders
 
 The LLM evaluates current conditions (inventory, news, demand patterns) and
@@ -96,27 +96,37 @@ class GPT5MiniAgent(Agent):
 
 
 def inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> str:
-    """Insert previously recorded insights into matching day summaries."""
+    """
+    Insert carry-over insights at the top of observation.
+    
+    Format:
+    ========================================
+    CARRY-OVER INSIGHTS (Key Discoveries):
+    ========================================
+    Day 5: Demand increased by 50% after Day 3 sports event (avg: 100->150)
+    Day 12: Lead time changed from 2 to 4 days starting Day 10
+    ========================================
+    
+    [Original Observation]
+    """
     if not insights:
         return observation
-
-    lines = observation.splitlines()
-    augmented: List[str] = []
-
-    for line in lines:
-        match = DAY_CONCLUDED_PATTERN.match(line)
-        if match:
-            day_num = int(match.group(2))
-            memo = insights.get(day_num)
-            if memo:
-                if "Insight:" in match.group(3):
-                    augmented.append(line)
-                else:
-                    augmented.append(f"{match.group(1)}{match.group(3)} | Insight: {memo}")
-                continue
-        augmented.append(line)
-
-    return "\n".join(augmented)
+    
+    # Sort insights by day number
+    sorted_insights = sorted(insights.items())
+    
+    # Build insights section at the top
+    insights_section = "=" * 70 + "\n"
+    insights_section += "CARRY-OVER INSIGHTS (Key Discoveries):\n"
+    insights_section += "=" * 70 + "\n"
+    
+    for day_num, memo in sorted_insights:
+        insights_section += f"Day {day_num}: {memo}\n"
+    
+    insights_section += "=" * 70 + "\n\n"
+    
+    # Prepend insights section to observation
+    return insights_section + observation
 
 
 class CSVDemandPlayer:
@@ -383,8 +393,8 @@ def compute_L(method: str, params: dict, observed_lead_times: List[int], promise
     Compute lead time L based on method.
     
     Args:
-        method: "default", "calculate", or "explicit"
-        params: Dict that may contain "value" for explicit method
+        method: "default", "calculate", "recent_N", or "explicit"
+        params: Dict that may contain "N" for recent_N or "value" for explicit
         observed_lead_times: List of observed lead times from arrivals
         promised_lead_time: The promised lead time from supplier
         
@@ -400,6 +410,16 @@ def compute_L(method: str, params: dict, observed_lead_times: List[int], promise
         if not observed_lead_times:
             raise ValueError("Cannot calculate lead time: no observed arrivals yet")
         return float(np.mean(observed_lead_times))
+    elif method == "recent_N":
+        if not observed_lead_times:
+            raise ValueError("Cannot compute recent_N lead time: no observed arrivals yet")
+        if "N" not in params:
+            raise ValueError("Method 'recent_N' for L requires 'N' field")
+        N = int(params["N"])
+        if N < 1:
+            raise ValueError(f"N must be >= 1, got {N}")
+        recent_samples = observed_lead_times[-N:] if len(observed_lead_times) >= N else observed_lead_times
+        return float(np.mean(recent_samples))
     elif method == "explicit":
         if "value" not in params:
             raise ValueError("Method 'explicit' for L requires 'value' field")
@@ -545,8 +565,10 @@ def validate_parameters_json(params_json: dict, item_ids: List[str], current_con
             raise ValueError(f"Missing 'method' in L parameter for item {item_id}")
         
         L_method = L_param["method"]
-        if L_method not in ["default", "calculate", "explicit"]:
+        if L_method not in ["default", "calculate", "recent_N", "explicit"]:
             raise ValueError(f"Invalid L method for item {item_id}: {L_method}")
+        if L_method == "recent_N" and "N" not in L_param:
+            raise ValueError(f"Method 'recent_N' for L requires 'N' field for item {item_id}")
         if L_method == "explicit" and "value" not in L_param:
             raise ValueError(f"Method 'explicit' for L requires 'value' field for item {item_id}")
         
@@ -602,7 +624,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         guidance_enabled: Whether guidance mode is enabled
     """
     system = (
-        "You are the Vending Machine controller (VM) using an LLM→OR strategy.\n"
+        "You are the Vending Machine controller (VM) using an LLM->OR strategy.\n"
         "Your role: Analyze the current situation and propose parameters for an OR algorithm.\n"
         "The OR algorithm will use your parameters to compute optimal orders.\n"
         "\n"
@@ -633,12 +655,44 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "  * ⚠️ Initial inventory on Day 1: Each item starts with 0 units on-hand\n"
         "- Holding cost is charged on ending inventory each day\n"
         "- Daily sequence: order submission happens first, then any scheduled shipments arrive, and customer demand is realized last\n"
-        "- carry_over_insight RULES:\n"
-        "    - ONLY write when you observe a NEW, sustained change: demand mean/variance shift OR news impact.\n"
-        "    - MUST cite specific evidence: day numbers, old vs new averages, specific news.\n"
-        "    - IMPORTANT: Check if similar insight already exists in the observations above.\n"
-        "    - If the insight is essentially the SAME as what's already shown, return empty string \"\".\n"
         "- News events may affect future demand\n"
+        "\n"
+        "CARRY-OVER INSIGHTS:\n"
+        "- If carry-over insights exist, they will appear at the TOP of your observation in a dedicated section.\n"
+        "- Focus on the MOST RECENT insights as trends evolve over time. Older insights may be outdated.\n"
+        "- Use insights as quick references, but always verify against current game data.\n"
+        "\n"
+        "STRICT RULES for writing carry_over_insight:\n"
+        "⚠️ DEFAULT: Return empty string \"\" (most days should have NO new insight)\n"
+        "\n"
+        "ONLY write a new insight when ALL of these conditions are met:\n"
+        "  1. You observe a SIGNIFICANT, SUSTAINED change (not temporary fluctuation):\n"
+        "     - Demand mean shift (e.g., sustained 30%+ change over 3+ days)\n"
+        "     - Variance pattern change (e.g., volatility doubled/halved)\n"
+        "     - Lead time structural change (e.g., changed from 2 to 4 days)\n"
+        "     - Major news impact with lasting effect\n"
+        "\n"
+        "  2. You have CONCRETE EVIDENCE with specific numbers:\n"
+        "     - Day ranges (e.g., \"Days 8-12 avg: 150 vs Days 1-7 avg: 100\")\n"
+        "     - Statistical measures (mean, std, lead_time values)\n"
+        "     - Specific news events and their timing\n"
+        "\n"
+        "  3. NO similar insight exists in CARRY-OVER INSIGHTS section above:\n"
+        "     - Check if the change is already documented\n"
+        "     - If updating an existing insight, reference the old one\n"
+        "     - If change is temporary/reversed, note that it ended\n"
+        "\n"
+        "  4. The insight will be USEFUL for future decisions (not just describing history)\n"
+        "\n"
+        "EXAMPLES of when to write:\n"
+        "  ✅ \"Demand increased 50% after Day 5 sports event; new baseline: 150 units (was 100)\"\n"
+        "  ✅ \"Lead time changed from 2 to 4 days starting Day 10 (observed in Days 10-13 arrivals)\"\n"
+        "  ✅ \"Variance doubled after Day 15; demand now fluctuates 80-220 (was 90-110)\"\n"
+        "  ❌ \"Today's demand was high\" (not sustained, no evidence)\n"
+        "  ❌ \"Sales continue as before\" (no change, unnecessary)\n"
+        "  ❌ \"Demand is volatile\" (already documented in previous insight)\n"
+        "\n"
+        "Remember: Insights are for PERSISTENT changes only. Temporary fluctuations go in rationale, not insights.\n"
         "\n"
     )
     
@@ -676,8 +730,9 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "1. L (lead time for current order):\n"
         "   - default: Use the supplier-promised lead time shown above\n"
         "   - calculate: Use average of all observed lead times from past arrivals\n"
+        "   - recent_N: Use average of last N observed lead times (must specify N)\n"
         "   - explicit: Provide your own predicted value\n"
-        "   Example: {\"method\": \"calculate\"} or {\"method\": \"explicit\", \"value\": 3}\n"
+        "   Example: {\"method\": \"calculate\"} or {\"method\": \"recent_N\", \"N\": 5} or {\"method\": \"explicit\", \"value\": 3}\n"
         "\n"
         "2. mu_hat (expected total demand over lead time period):\n"
         "   - default: (1+L) × mean of all historical samples\n"
@@ -685,20 +740,42 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "   - EWMA_gamma: (1+L) × exponentially weighted moving average (must specify gamma in [0,1])\n"
         "   - explicit: Provide your own prediction\n"
         "   Example: {\"method\": \"recent_N\", \"N\": 5} or {\"method\": \"explicit\", \"value\": 250}\n"
-        "   When you choose recent_N, PICK N BY REGIME LENGTH (change-point):\n"
-        "     • Identify the most recent change-point (shift in mean/variance or news-driven regime).\n"
-        "       - Set N to the number of days since that change-point (i.e., the current regime length).\n"
-        "     • If no clear change-point is detected, choose N for noise-smoothing based on volatility:\n"
-        "       - High volatility with no trend → smaller N (e.g., 5–8).\n"
-        "       - Stable series with no trend → larger N (e.g., 12–20).\n"
-        "     • Never exceed the available sample count; if fewer samples than N, lower N accordingly.\n"
-        "     • In your rationale, explicitly cite the day index of the detected change (if any) and how it determined N.\n"
         "\n"
         "3. sigma_hat (standard deviation of demand over lead time period):\n"
         "   - default: sqrt(1+L) × std of all historical samples\n"
         "   - recent_N: sqrt(1+L) × std of last N samples (must specify N)\n"
         "   - explicit: Provide your own prediction\n"
-        "   Example: {\"method\": \"default\"} or {\"method\": \"explicit\", \"value\": 15}\n"
+        "   Example: {\"method\": \"default\"} or {\"method\": \"recent_N\", \"N\": 6} or {\"method\": \"explicit\", \"value\": 15}\n"
+        "\n"
+        "⚠️ IMPORTANT: When choosing recent_N for L, mu_hat, or sigma_hat:\n"
+        "The three parameters may have DIFFERENT change-points and thus DIFFERENT N values!\n"
+        "\n"
+        "STRATEGY for setting N when using recent_N:\n"
+        "Step 1: Detect the most recent change-point for THIS parameter using simple heuristics:\n"
+        "        • For demand (mu_hat/sigma_hat): Look for mean/variance shifts (>30% sustained over 3+ days),\n"
+        "          news events with lasting impact, or trend reversals in demand patterns.\n"
+        "        • For lead time (L): Look for sustained lead_time changes in arrival records\n"
+        "          (e.g., shifted from 2 to 4 days starting Day X).\n"
+        "\n"
+        "Step 2: Calculate regime length using the formula:\n"
+        "        N = (current_day - changepoint_day) + 1\n"
+        "\n"
+        "Step 3: Apply adaptive constraints:\n"
+        "        • N = 3 (minimum) if regime_length < 3\n"
+        "        • N = 20 (maximum) if regime_length > 20\n"
+        "        • N = sample_count if fewer samples than calculated N\n"
+        "        • Otherwise: N = regime_length\n"
+        "\n"
+        "Step 4: In your rationale, explicitly state:\n"
+        "        • Which changepoint you detected and the evidence\n"
+        "        • The calculated N value and why\n"
+        "\n"
+        "Examples of N calculation:\n"
+        "  • Detected demand change at Day 15, current Day 20: regime_length = 6 → N = 6\n"
+        "  • Detected lead_time change at Day 10, current Day 25: regime_length = 16 → N = 16\n"
+        "  • Change at Day 5, current Day 5: regime_length = 1 → N = 3 (applied minimum)\n"
+        "  • Change at Day 1, current Day 30: regime_length = 30 → N = 20 (applied maximum)\n"
+        "  • No clear change detected: Use N = 10 as default (balanced for stable periods)\n"
         "\n"
         "The OR algorithm will compute orders using:\n"
         "  order = max(mu_hat + Φ^(-1)(q) × sigma_hat - pipeline_inventory, 0)\n"
@@ -723,7 +800,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "  \"carry_over_insight\": \"Only if NEW sustained change observed with specific evidence; otherwise \"\" (must check if already exists above)\",\n"
         "  \"parameters\": {\n"
         "    \"item_id_1\": {\n"
-        "      \"L\": {\"method\": \"...\", \"value\": ...},\n"
+        "      \"L\": {\"method\": \"...\", \"N\": ..., \"value\": ...},\n"
         "      \"mu_hat\": {\"method\": \"...\", \"N\": ..., \"gamma\": ..., \"value\": ...},\n"
         "      \"sigma_hat\": {\"method\": \"...\", \"N\": ..., \"value\": ...}\n"
         "    },\n"
@@ -733,11 +810,13 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "\n"
         "IMPORTANT:\n"
         "- Include ONLY the fields required for each method\n"
-        "- For 'recent_N', include 'N' (integer >= 1)\n"
-        "- For 'EWMA_gamma', include 'gamma' (float in [0, 1])\n"
-        "- For 'explicit', include 'value' (numeric)\n"
+        "- For L: 'recent_N' requires 'N', 'explicit' requires 'value', others require no extra field\n"
+        "- For mu_hat: 'recent_N' requires 'N', 'EWMA_gamma' requires 'gamma', 'explicit' requires 'value'\n"
+        "- For sigma_hat: 'recent_N' requires 'N', 'explicit' requires 'value', others require no extra field\n"
+        "- All 'N' values are integers >= 1 and should be chosen based on changepoint detection\n"
+        "- All 'value' fields are numeric\n"
         "- Do NOT include any text outside the JSON\n"
-        "- Think carefully about your parameter choices\n"
+        "- Think carefully about your parameter choices and changepoint reasoning\n"
     )
     
     # return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
@@ -749,11 +828,13 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
 # ============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description='Run LLM→OR strategy with CSV demand')
+    parser = argparse.ArgumentParser(description='Run LLM->OR strategy with CSV demand')
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
     parser.add_argument('--promised-lead-time', type=int, default=0,
                        help='Promised lead time to show to LLM (default: 1). This is what supplier promises, not the actual lead time in CSV.')
+    parser.add_argument('--policy', type=str, choices=['vanilla', 'capped'], default='capped',
+                       help='OR policy type: vanilla (standard base-stock) or capped (smoothed orders). Default: capped')
     parser.add_argument('--human-feedback', action='store_true',
                        help='Enable daily human feedback on agent decisions (Mode 1)')
     parser.add_argument('--guidance-frequency', type=int, default=0,
@@ -930,7 +1011,7 @@ def main():
                 # Validate JSON structure
                 validate_parameters_json(params_json, csv_player.get_item_ids(), current_item_configs)
                 
-                print(f"\nDay {current_day} LLM→OR Decision:")
+                _safe_print(f"\nDay {current_day} LLM->OR Decision:")
                 print("="*70)
                 print("LLM Rationale:")
                 print(params_json.get("rationale", "(no rationale provided)"))
@@ -963,6 +1044,10 @@ def main():
             # Compute orders using OR formula with LLM-proposed parameters
             orders = {}
             
+            print(f"\n{'='*70}")
+            _safe_print(f"Day {current_day} LLM->OR Backend Computation ({args.policy.upper()} Policy):")
+            print(f"{'='*70}")
+            
             for item_id in csv_player.get_item_ids():
                 item_params = params_json["parameters"][item_id]
                 config = current_item_configs[item_id]
@@ -981,6 +1066,8 @@ def main():
                     l_extra = ""
                     if l_method == 'explicit' and 'value' in item_params['L']:
                         l_extra = f", value={item_params['L']['value']}"
+                    elif l_method == 'recent_N' and 'N' in item_params['L']:
+                        l_extra = f", N={int(item_params['L']['N'])}"
                     elif l_method == 'calculate':
                         l_extra = f", observed_samples={len(observed_lead_times[item_id])}"
                     print(f"  L method: {l_method}{l_extra}, computed L = {L:.2f}")
@@ -1028,11 +1115,27 @@ def main():
                     z_star = norm.ppf(q)
                     print(f"  Critical fractile q = {q:.4f}, z* = {z_star:.4f}")
                     
-                    # Compute order using OR formula
+                    # Compute base stock and order based on policy
                     base_stock = mu_hat + z_star * sigma_hat
-                    order = max(int(np.ceil(base_stock - total_inventory)), 0)
                     print(f"  Base stock = {base_stock:.2f}")
-                    print(f"  Computed order: {order}")
+                    
+                    if args.policy == 'vanilla':
+                        order = max(int(np.ceil(base_stock - total_inventory)), 0)
+                        print(f"  Order (vanilla): {order}")
+                    else:  # capped policy
+                        # Vanilla order (for logging)
+                        order_uncapped = max(int(np.ceil(base_stock - total_inventory)), 0)
+                        
+                        # Cap calculation: μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
+                        cap_z = norm.ppf(0.95)
+                        cap = mu_hat / (1 + L) + cap_z * sigma_hat / np.sqrt(1 + L)
+                        
+                        # Capped order
+                        order = max(min(int(np.ceil(base_stock - total_inventory)), int(np.ceil(cap))), 0)
+                        
+                        print(f"  Cap value: {cap:.2f}")
+                        print(f"  Order (capped): {order}")
+                        print(f"  Order (uncapped): {order_uncapped}")
                     
                     orders[item_id] = order
                     
@@ -1068,7 +1171,7 @@ def main():
     vm_info = game_info[0]
     
     print("\n" + "="*70)
-    print("=== Final Results (LLM→OR Strategy) ===")
+    _safe_print("=== Final Results (LLM->OR Strategy) ===")
     print("="*70)
     
     # Per-item statistics
@@ -1115,7 +1218,7 @@ def main():
     print("="*70)
     print(f"Total Profit from Sales: ${total_profit:.2f}")
     print(f"Total Holding Cost: ${total_holding:.2f}")
-    print(f"\n>>> Total Reward (LLM→OR Strategy): ${total_reward:.2f} <<<")
+    _safe_print(f"\n>>> Total Reward (LLM->OR Strategy): ${total_reward:.2f} <<<")
     print(f"VM Final Reward: {rewards.get(0, 0):.2f}")
     print("="*70)
     

@@ -20,9 +20,29 @@ import sys
 import argparse
 import json
 import math
+import unicodedata
 import pandas as pd
 from scipy.stats import norm
 import textarena as ta
+
+
+# Fix stdout encoding for Windows
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
+def _sanitize_text(text: str) -> str:
+    """Normalize to NFKC and escape remaining non-ASCII characters."""
+    normalized = unicodedata.normalize("NFKC", text)
+    return normalized.encode("ascii", "backslashreplace").decode("ascii")
+
+
+def _safe_print(text: str) -> None:
+    """Print text with encoding fallback for Windows."""
+    print(_sanitize_text(str(text)))
 
 
 class CSVDemandPlayer:
@@ -236,6 +256,12 @@ def _schedule_instance4(day: int, _item_id: str) -> tuple[float, float]:
     return 100.0, 50.0
 
 
+def _schedule_instance4_1(day: int, _item_id: str) -> tuple[float, float]:
+    if day <= 15:
+        return 100.0, 25.0
+    return 100.0, 0.0
+
+
 def _schedule_instance5(day: int, _item_id: str) -> tuple[float, float]:
     return 500.0, 25.0 * math.sqrt(5.0)
 
@@ -254,24 +280,25 @@ def _schedule_instance8(day: int, _item_id: str) -> tuple[float, float]:
     return 511.0, 25.0 * math.sqrt(5.11)
 
 
-CLAIRVOYANT_SCHEDULES: dict[int, tuple] = {
-    1: (_schedule_instance1, "Instance 1: μ̂=100, σ̂=25 (stationary)."),
-    2: (_schedule_instance2, "Instance 2: μ̂/σ̂ shift at day 16 (100→200, 25→25√2)."),
-    3: (_schedule_instance3, "Instance 3: μ̂=100·t, σ̂=25√t (increasing demand)."),
-    4: (_schedule_instance4, "Instance 4: σ̂ doubles after day 15 (variance increase)."),
-    5: (_schedule_instance5, "Instance 5: μ̂=500, σ̂=25√5 (L=4)."),
-    6: (_schedule_instance6, "Instance 6: μ̂=500, σ̂=25√5 (random lead time)."),
-    7: (_schedule_instance7, "Instance 7: shift to μ̂=700, σ̂=25√7 after day 15."),
-    8: (_schedule_instance8, "Instance 8: μ̂=511, σ̂=25√5.11 (intermittent supplier)."),
+CLAIRVOYANT_SCHEDULES: dict[str, tuple] = {
+    "1": (_schedule_instance1, "Instance 1: mu_hat=100, sigma_hat=25 (stationary)."),
+    "2": (_schedule_instance2, "Instance 2: mu_hat/sigma_hat shift at day 16 (100->200, 25->25*sqrt(2))."),
+    "3": (_schedule_instance3, "Instance 3: mu_hat=100*t, sigma_hat=25*sqrt(t) (increasing demand)."),
+    "4": (_schedule_instance4, "Instance 4: sigma_hat doubles after day 15 (variance increase)."),
+    "4_1": (_schedule_instance4_1, "Instance 4_1: sigma_hat -> 0 after day 15 (variance decrease to zero)."),
+    "5": (_schedule_instance5, "Instance 5: mu_hat=500, sigma_hat=25*sqrt(5) (L=4)."),
+    "6": (_schedule_instance6, "Instance 6: mu_hat=500, sigma_hat=25*sqrt(5) (random lead time)."),
+    "7": (_schedule_instance7, "Instance 7: shift to mu_hat=700, sigma_hat=25*sqrt(7) after day 15."),
+    "8": (_schedule_instance8, "Instance 8: mu_hat=511, sigma_hat=25*sqrt(5.11) (intermittent supplier)."),
 }
 
 
 class ClairvoyantSchedule:
     """Provides clairvoyant μ̂ and σ̂ values for each instance."""
 
-    def __init__(self, instance_id: int):
+    def __init__(self, instance_id: str):
         if instance_id not in CLAIRVOYANT_SCHEDULES:
-            available = ", ".join(str(k) for k in sorted(CLAIRVOYANT_SCHEDULES))
+            available = ", ".join(sorted(CLAIRVOYANT_SCHEDULES.keys()))
             raise ValueError(f"Unsupported instance {instance_id}. Available: {available}")
         self.instance_id = instance_id
         self.schedule_fn, self.description = CLAIRVOYANT_SCHEDULES[instance_id]
@@ -290,18 +317,26 @@ class ClairvoyantORAgent:
     """
     Clairvoyant OR baseline agent using predetermined μ̂/σ̂ schedules.
     
-    Policy: order_quantity = max(base_stock - current_inventory, 0)
-    where base_stock = μ̂ + z*σ̂ and μ̂, σ̂ come from the clairvoyant schedule.
+    Supports two policies:
+    1. Vanilla: order_quantity = max(base_stock - current_inventory, 0)
+       where base_stock = μ̂ + z*σ̂
+    2. Capped: order_quantity = max(min(base_stock - current_inventory, cap), 0)
+       where cap = μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
+    
+    μ̂, σ̂ come from the clairvoyant schedule.
+    L is determined by instance number and current day (hard-coded for each instance).
     """
 
-    def __init__(self, items_config: dict, schedule: ClairvoyantSchedule):
+    def __init__(self, items_config: dict, schedule: ClairvoyantSchedule, policy: str = 'capped'):
         self.items_config = items_config
         self.schedule = schedule
+        self.policy = policy
         self.current_day = 1
         self.observed_demands = {item_id: [] for item_id in items_config}
 
-        print("\n=== Clairvoyant OR Agent Initialized ===")
+        print(f"\n=== Clairvoyant OR Agent Initialized (Policy: {policy.upper()}) ===")
         print(f"Schedule: {self.schedule.describe()}")
+        print(f"Instance {self.schedule.instance_id}: Lead time L is hard-coded per instance specification")
         for item_id, config in items_config.items():
             p = config['profit']
             h = config['holding_cost']
@@ -310,10 +345,35 @@ class ClairvoyantORAgent:
             print(f"{item_id}:")
             print(f"  Profit (p): {p}, Holding cost (h): {h}")
             print(f"  Critical fractile (q): {q:.4f}")
-            print(f"  z* = Φ^(-1)(q): {z_star:.4f}")
+            _safe_print(f"  z* = Φ^(-1)(q): {z_star:.4f}")
 
     def set_day(self, day: int):
         self.current_day = max(1, day)
+    
+    def _get_lead_time(self) -> float:
+        """
+        Get lead time L for current instance and day.
+        
+        Hard-coded based on instance characteristics:
+        - Instances 1-4, 4_1: L = 0 (always)
+        - Instances 5, 6, 8: L = 4 (always)
+        - Instance 7: L = 4 (days 1-15), L = 6 (days 16+)
+        
+        Returns:
+            Lead time value for current instance and day
+        """
+        instance = self.schedule.instance_id
+        
+        if instance in ["1", "2", "3", "4", "4_1"]:
+            return 0.0
+        elif instance in ["5", "6", "8"]:
+            return 4.0
+        elif instance == "7":
+            # Days 1-15: L=4, Days 16+: L=6
+            return 4.0 if self.current_day <= 15 else 6.0
+        else:
+            # Fallback (should not happen)
+            return 0.0
 
     def _parse_inventory_from_observation(self, observation: str, item_id: str) -> int:
         """
@@ -346,14 +406,16 @@ class ClairvoyantORAgent:
         self,
         item_id: str,
         current_inventory: int,
-    ) -> tuple[int, float, float, float, float]:
+    ) -> dict:
         """
         Calculate order quantity using clairvoyant μ̂/σ̂.
 
         Returns:
-            (order_qty, mu_hat, sigma_hat, z_star, base_stock)
+            Dict with keys: order, mu_hat, sigma_hat, L, z_star, q, base_stock,
+                           cap (if capped), order_uncapped (if capped)
         """
         config = self.items_config[item_id]
+        L = self._get_lead_time()  # Hard-coded L based on instance and current day
         p = config['profit']
         h = config['holding_cost']
         mu_hat, sigma_hat = self.schedule.get_params(self.current_day, item_id)
@@ -361,51 +423,101 @@ class ClairvoyantORAgent:
         q = p / (p + h)
         z_star = norm.ppf(q)
         base_stock = mu_hat + z_star * sigma_hat
-        order = max(int(math.ceil(base_stock - current_inventory)), 0)
-        return order, mu_hat, sigma_hat, z_star, base_stock
+        
+        result = {
+            'mu_hat': mu_hat,
+            'sigma_hat': sigma_hat,
+            'L': L,
+            'z_star': z_star,
+            'q': q,
+            'base_stock': base_stock,
+            'current_inventory': current_inventory
+        }
+        
+        # Calculate order quantity based on policy
+        if self.policy == 'vanilla':
+            order = max(int(math.ceil(base_stock - current_inventory)), 0)
+            result['order'] = order
+        else:  # capped policy
+            # Vanilla order (for logging)
+            order_uncapped = max(int(math.ceil(base_stock - current_inventory)), 0)
+            
+            # Cap calculation: μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
+            cap_z = norm.ppf(0.95)
+            cap = mu_hat / (1 + L) + cap_z * sigma_hat / math.sqrt(1 + L)
+            
+            # Capped order
+            order = max(min(int(math.ceil(base_stock - current_inventory)), int(math.ceil(cap))), 0)
+            
+            result['order'] = order
+            result['order_uncapped'] = order_uncapped
+            result['cap'] = cap
+        
+        return result
 
     def update_demand_observation(self, item_id: str, observed_demand: int):
         """Track observed demand for logging purposes."""
         self.observed_demands[item_id].append(observed_demand)
 
-    def get_action(self, observation: str) -> str:
+    def get_action(self, observation: str) -> tuple[str, dict]:
         """
-        Generate ordering decision in JSON format.
+        Generate ordering decision in JSON format with detailed statistics.
+        
+        Returns:
+            Tuple of (action_json_string, statistics_dict)
+            statistics_dict contains all calculation details for logging
         """
         action_dict = {}
         rationale_parts = []
+        statistics = {}
 
         for item_id in self.items_config:
             current_inventory = self._parse_inventory_from_observation(observation, item_id)
-            order, mu_hat, sigma_hat, z_star, base_stock = self._calculate_order(item_id, current_inventory)
-            action_dict[item_id] = order
+            calc_result = self._calculate_order(item_id, current_inventory)
+            action_dict[item_id] = calc_result['order']
+            statistics[item_id] = calc_result
 
-            rationale_parts.append(
-                f"{item_id}: base_stock={base_stock:.1f} "
-                f"(μ̂={mu_hat:.1f}, σ̂={sigma_hat:.1f}, z*={z_star:.2f}), "
-                f"current_inv={current_inventory}, order={order}"
-            )
+            if self.policy == 'vanilla':
+                rationale_parts.append(
+                    f"{item_id}: base_stock={calc_result['base_stock']:.1f} "
+                    f"(μ̂={calc_result['mu_hat']:.1f}, σ̂={calc_result['sigma_hat']:.1f}, z*={calc_result['z_star']:.2f}), "
+                    f"inv={current_inventory}, order={calc_result['order']}"
+                )
+            else:  # capped
+                rationale_parts.append(
+                    f"{item_id}: base_stock={calc_result['base_stock']:.1f}, cap={calc_result['cap']:.1f}, "
+                    f"inv={current_inventory}, order={calc_result['order']} "
+                    f"(uncapped would be {calc_result['order_uncapped']})"
+                )
 
-        rationale = "Clairvoyant OR base-stock policy: " + "; ".join(rationale_parts)
+        policy_name = "Clairvoyant OR (capped)" if self.policy == 'capped' else "Clairvoyant OR (vanilla)"
+        rationale = f"{policy_name}: " + "; ".join(rationale_parts)
         result = {
             "action": action_dict,
             "rationale": rationale
         }
-        return json.dumps(result, indent=2)
+        return json.dumps(result, indent=2), statistics
 
 
 def main():
     parser = argparse.ArgumentParser(description='Run Clairvoyant OR baseline with CSV demand')
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
-    parser.add_argument('--instance', type=int, choices=sorted(CLAIRVOYANT_SCHEDULES.keys()), default=1,
-                       help='Clairvoyant benchmark instance (1-8).')
-    parser.add_argument('--promised-lead-time', type=int, default=0,
-                       help='Promised lead time used by the clairvoyant agent (default: 0).')
+    parser.add_argument('--instance', type=str, choices=sorted(CLAIRVOYANT_SCHEDULES.keys()), default="1",
+                       help='Clairvoyant benchmark instance (1, 2, 3, 4, 4_1, 5, 6, 7, 8).')
+    parser.add_argument('--policy', type=str, choices=['vanilla', 'capped'], default='capped',
+                       help='OR policy type: vanilla (standard base-stock) or capped (smoothed orders). Default: capped')
     args = parser.parse_args()
 
     schedule = ClairvoyantSchedule(args.instance)
-    print(f"\nSelected instance {args.instance}: {schedule.describe()}")
+    _safe_print(f"\nSelected instance {args.instance}: {schedule.describe()}")
+    print("Lead time L is hard-coded for each instance:")
+    if args.instance in ["1", "2", "3", "4", "4_1"]:
+        print("  L = 0 (always)")
+    elif args.instance in ["5", "6", "8"]:
+        print("  L = 4 (always)")
+    elif args.instance == "7":
+        print("  L = 4 (days 1-15), L = 6 (days 16+)")
 
     # Create environment
     env = ta.make(env_id="VendingMachine-v0")
@@ -424,8 +536,8 @@ def main():
     for config in item_configs:
         env.add_item(**config)
 
-    print(f"\nPromised lead time supplied to clairvoyant agent: {args.promised_lead_time} days")
-    print("Note: Actual lead times follow the CSV and may change dynamically.")
+    print("\nNote: Actual lead times in CSV may differ from the hard-coded L used by OR agent.")
+    print("      The hard-coded L values match the implicit lead times in the clairvoyant schedules.")
 
     # Set NUM_DAYS based on CSV
     from textarena.envs.VendingMachine import env as vm_env_module
@@ -438,16 +550,15 @@ def main():
     for day, news in news_schedule.items():
         env.add_news(day, news)
 
-    # Create clairvoyant OR agent (uses promised lead time, not actual CSV lead time)
+    # Create clairvoyant OR agent (L is hard-coded based on instance)
     or_items_config = {
         config['item_id']: {
-            'lead_time': args.promised_lead_time,
             'profit': config['profit'],
             'holding_cost': config['holding_cost']
         }
         for config in item_configs
     }
-    or_agent = ClairvoyantORAgent(or_items_config, schedule)
+    or_agent = ClairvoyantORAgent(or_items_config, schedule, policy=args.policy)
 
     # Reset environment
     env.reset(num_players=2)
@@ -487,8 +598,30 @@ def main():
                 continue
 
             or_agent.set_day(current_day)
-            action = or_agent.get_action(observation)
-            print(f"\nDay {current_day} OR Decision: {action}")
+            action, stats = or_agent.get_action(observation)
+            
+            # Print detailed statistics for each item
+            print(f"\n{'='*70}")
+            print(f"Day {current_day} Clairvoyant OR Decision ({args.policy.upper()} Policy):")
+            print(f"{'='*70}")
+            for item_id, item_stats in stats.items():
+                print(f"\n{item_id}:")
+                _safe_print(f"  mu_hat (μ̂) from schedule: {item_stats['mu_hat']:.2f}")
+                _safe_print(f"  sigma_hat (σ̂) from schedule: {item_stats['sigma_hat']:.2f}")
+                print(f"  Lead time (L): {item_stats['L']}")
+                print(f"  Critical fractile (q): {item_stats['q']:.4f}")
+                print(f"  z*: {item_stats['z_star']:.4f}")
+                print(f"  Base stock: {item_stats['base_stock']:.2f}")
+                print(f"  Current inventory: {item_stats['current_inventory']}")
+                if args.policy == 'capped':
+                    print(f"  Cap value: {item_stats['cap']:.2f}")
+                    print(f"  Order (capped): {item_stats['order']}")
+                    print(f"  Order (uncapped): {item_stats['order_uncapped']}")
+                else:
+                    print(f"  Order: {item_stats['order']}")
+            
+            _safe_print(f"\n{action}")
+            print(f"{'='*70}")
         else:  # Demand from CSV
             action = csv_player.get_action(current_day)
 

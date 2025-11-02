@@ -93,28 +93,38 @@ class GPT5MiniAgent(Agent):
         return response.output_text.strip()
 
 
-def inject_carry_over_insights(observation: str, insights) -> str:
-    """Insert previously recorded carry-over insights into day summaries."""
+def inject_carry_over_insights(observation: str, insights: dict) -> str:
+    """
+    Insert carry-over insights at the top of observation.
+    
+    Format:
+    ========================================
+    CARRY-OVER INSIGHTS (Key Discoveries):
+    ========================================
+    Day 5: Demand increased by 50% after Day 3 sports event (avg: 100->150)
+    Day 12: Lead time changed from 2 to 4 days starting Day 10
+    ========================================
+    
+    [Original Observation]
+    """
     if not insights:
         return observation
-
-    lines = observation.splitlines()
-    augmented = []
-
-    for line in lines:
-        match = DAY_CONCLUDED_PATTERN.match(line)
-        if match:
-            day_num = int(match.group(2))
-            memo = insights.get(day_num)
-            if memo:
-                if "Insight:" in match.group(3):
-                    augmented.append(line)
-                else:
-                    augmented.append(f"{match.group(1)}{match.group(3)} | Insight: {memo}")
-                continue
-        augmented.append(line)
-
-    return "\n".join(augmented)
+    
+    # Sort insights by day number
+    sorted_insights = sorted(insights.items())
+    
+    # Build insights section at the top
+    insights_section = "=" * 70 + "\n"
+    insights_section += "CARRY-OVER INSIGHTS (Key Discoveries):\n"
+    insights_section += "=" * 70 + "\n"
+    
+    for day_num, memo in sorted_insights:
+        insights_section += f"Day {day_num}: {memo}\n"
+    
+    insights_section += "=" * 70 + "\n\n"
+    
+    # Prepend insights section to observation
+    return insights_section + observation
 
 
 class CSVDemandPlayer:
@@ -311,29 +321,34 @@ class ORAgent:
     """
     OR algorithm baseline agent using base-stock policy.
 
-    Policy: order_quantity = max(base_stock - current_inventory, 0)
-    where base_stock = mu_hat + z * sigma_hat
+    Supports two policies:
+    1. Vanilla: order_quantity = max(base_stock - current_inventory, 0)
+       where base_stock = μ̂ + z*σ̂
+    2. Capped: order_quantity = max(min(base_stock - current_inventory, cap), 0)
+       where cap = μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
 
     mu_hat = (1+L) * empirical_mean
     sigma_hat = sqrt(1+L) * empirical_std
     z* = Phi^(-1)(q), where q = profit / (profit + holding_cost)
     """
     
-    def __init__(self, items_config: dict, initial_samples: dict = None):
+    def __init__(self, items_config: dict, initial_samples: dict = None, policy: str = 'capped'):
         """
         Args:
             items_config: Dict of {item_id: {'lead_time': L, 'profit': p, 'holding_cost': h}}
             initial_samples: Optional dict of {item_id: [list of initial demand samples]}
                            If None or empty, will use only observed demands
+            policy: 'vanilla' or 'capped' (default: 'capped')
         """
         self.items_config = items_config
         self.initial_samples = initial_samples if initial_samples else {}
+        self.policy = policy
         
         # Store observed demands (will be updated each day)
         # Format: {item_id: [demand_day1, demand_day2, ...]}
         self.observed_demands = {item_id: [] for item_id in items_config}
         
-        print("\n=== OR Agent Initialized (for recommendations) ===")
+        print(f"\n=== OR Agent Initialized for recommendations (Policy: {policy.upper()}) ===")
         for item_id, config in items_config.items():
             L = config['lead_time']
             p = config['profit']
@@ -394,7 +409,7 @@ class ORAgent:
             print(f"Error parsing inventory for {item_id}: {e}")
             return 0
     
-    def _calculate_order(self, item_id: str, current_inventory: int) -> int:
+    def _calculate_order(self, item_id: str, current_inventory: int) -> dict:
         """
         Calculate order quantity using OR base-stock policy.
         
@@ -403,7 +418,8 @@ class ORAgent:
             current_inventory: Current total inventory (on-hand + in-transit)
             
         Returns:
-            Order quantity (non-negative integer)
+            Dict with keys: order, empirical_mean, empirical_std, mu_hat, sigma_hat, 
+                           L, z_star, q, base_stock, cap (if capped), order_uncapped (if capped)
         """
         config = self.items_config[item_id]
         L = config['lead_time']
@@ -416,13 +432,24 @@ class ORAgent:
         
         # If no samples yet, use a conservative default (order 0)
         if not all_samples:
-            return 0
+            return {
+                'order': 0,
+                'empirical_mean': 0,
+                'empirical_std': 0,
+                'mu_hat': 0,
+                'sigma_hat': 0,
+                'L': L,
+                'z_star': 0,
+                'q': p / (p + h),
+                'base_stock': 0,
+                'current_inventory': current_inventory
+            }
         
         # Calculate empirical statistics
         empirical_mean = np.mean(all_samples)
         empirical_std = np.std(all_samples, ddof=1) if len(all_samples) > 1 else 0
         
-# Calculate mu_hat and sigma_hat for lead time + review period
+        # Calculate mu_hat and sigma_hat for lead time + review period
         mu_hat = (1 + L) * empirical_mean
         sigma_hat = np.sqrt(1 + L) * empirical_std
         
@@ -433,10 +460,38 @@ class ORAgent:
         # Calculate base stock
         base_stock = mu_hat + z_star * sigma_hat
         
-        # Calculate order quantity
-        order = max(int(np.ceil(base_stock - current_inventory)), 0)
+        result = {
+            'empirical_mean': empirical_mean,
+            'empirical_std': empirical_std,
+            'mu_hat': mu_hat,
+            'sigma_hat': sigma_hat,
+            'L': L,
+            'z_star': z_star,
+            'q': q,
+            'base_stock': base_stock,
+            'current_inventory': current_inventory
+        }
         
-        return order
+        # Calculate order quantity based on policy
+        if self.policy == 'vanilla':
+            order = max(int(np.ceil(base_stock - current_inventory)), 0)
+            result['order'] = order
+        else:  # capped policy
+            # Vanilla order (for logging)
+            order_uncapped = max(int(np.ceil(base_stock - current_inventory)), 0)
+            
+            # Cap calculation: μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
+            cap_z = norm.ppf(0.95)
+            cap = mu_hat / (1 + L) + cap_z * sigma_hat / np.sqrt(1 + L)
+            
+            # Capped order
+            order = max(min(int(np.ceil(base_stock - current_inventory)), int(np.ceil(cap))), 0)
+            
+            result['order'] = order
+            result['order_uncapped'] = order_uncapped
+            result['cap'] = cap
+        
+        return result
     
     def update_demand_observation(self, item_id: str, observed_demand: int):
         """
@@ -448,27 +503,31 @@ class ORAgent:
         """
         self.observed_demands[item_id].append(observed_demand)
     
-    def get_recommendation(self, observation: str) -> dict:
+    def get_recommendation(self, observation: str) -> tuple[dict, dict]:
         """
-        Generate OR algorithm recommendations (not final action, just recommendation).
+        Generate OR algorithm recommendations with detailed statistics.
         
         Args:
             observation: Current game observation
             
         Returns:
-            Dict like {"chips(Regular)": 250, "chips(BBQ)": 180}
+            Tuple of (recommendations_dict, statistics_dict)
+            recommendations_dict: {"item_id": order_quantity, ...}
+            statistics_dict: {"item_id": {calculation_details}, ...}
         """
         recommendations = {}
+        statistics = {}
         
         for item_id in self.items_config:
             # Parse current inventory from observation
             current_inventory = self._parse_inventory_from_observation(observation, item_id)
             
-            # Calculate order quantity
-            order = self._calculate_order(item_id, current_inventory)
-            recommendations[item_id] = order
+            # Calculate order quantity with full statistics
+            calc_result = self._calculate_order(item_id, current_inventory)
+            recommendations[item_id] = calc_result['order']
+            statistics[item_id] = calc_result
         
-        return recommendations
+        return recommendations, statistics
 
 
 def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
@@ -503,8 +562,8 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "- IMPORTANT: Initial inventory on Day 1: Each item starts with 0 units on-hand\n"
         "\n"
         "- Holding cost is charged on ending inventory each day\n"
-        "- Daily sequence: orders are placed first, previously scheduled shipments arrive next, and demand is realized at the end of the day\n"
-        "- DAILY NEWS: News events are revealed each day (if any). You will NOT know future news in advance.\n"
+        "- Daily sequence: order submission happens first, then any scheduled shipments arrive, and customer demand is realized last\n"
+        "- News events may affect future demand\n"
         "\n"
     )
     
@@ -569,11 +628,43 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "7. React to TODAY'S NEWS as it happens, considering inferred actual lead time\n"
         "8. Learn from past news events to understand their impact on demand\n"
         "9. Balance between data-driven OR approach and news-driven/lead-time-adjusted insights\n"
-        "10. carry_over_insight RULES:\n"
-        "    - ONLY write when you observe a NEW, sustained change: demand mean/variance shift OR news impact.\n"
-        "    - MUST cite specific evidence: day numbers, old vs new averages, specific news.\n"
-        "    - IMPORTANT: Check if similar insight already exists in the observations above.\n"
-        "    - If the insight is essentially the SAME as what's already shown, return empty string \"\".\n"
+        "\n"
+        "CARRY-OVER INSIGHTS:\n"
+        "- If carry-over insights exist, they will appear at the TOP of your observation in a dedicated section.\n"
+        "- Focus on the MOST RECENT insights as trends evolve over time. Older insights may be outdated.\n"
+        "- Use insights as quick references, but always verify against current game data.\n"
+        "\n"
+        "STRICT RULES for writing carry_over_insight:\n"
+        "⚠️ DEFAULT: Return empty string \"\" (most days should have NO new insight)\n"
+        "\n"
+        "ONLY write a new insight when ALL of these conditions are met:\n"
+        "  1. You observe a SIGNIFICANT, SUSTAINED change (not temporary fluctuation):\n"
+        "     - Demand mean shift (e.g., sustained 30%+ change over 3+ days)\n"
+        "     - Variance pattern change (e.g., volatility doubled/halved)\n"
+        "     - Lead time structural change (e.g., changed from 2 to 4 days)\n"
+        "     - Major news impact with lasting effect\n"
+        "\n"
+        "  2. You have CONCRETE EVIDENCE with specific numbers:\n"
+        "     - Day ranges (e.g., \"Days 8-12 avg: 150 vs Days 1-7 avg: 100\")\n"
+        "     - Statistical measures (mean, std, lead_time values)\n"
+        "     - Specific news events and their timing\n"
+        "\n"
+        "  3. NO similar insight exists in CARRY-OVER INSIGHTS section above:\n"
+        "     - Check if the change is already documented\n"
+        "     - If updating an existing insight, reference the old one\n"
+        "     - If change is temporary/reversed, note that it ended\n"
+        "\n"
+        "  4. The insight will be USEFUL for future decisions (not just describing history)\n"
+        "\n"
+        "EXAMPLES of when to write:\n"
+        "  ✅ \"Demand increased 50% after Day 5 sports event; new baseline: 150 units (was 100)\"\n"
+        "  ✅ \"Lead time changed from 2 to 4 days starting Day 10 (observed in Days 10-13 arrivals)\"\n"
+        "  ✅ \"Variance doubled after Day 15; demand now fluctuates 80-220 (was 90-110)\"\n"
+        "  ❌ \"Today's demand was high\" (not sustained, no evidence)\n"
+        "  ❌ \"Sales continue as before\" (no change, unnecessary)\n"
+        "  ❌ \"Demand is volatile\" (already documented in previous insight)\n"
+        "\n"
+        "Remember: Insights are for PERSISTENT changes only. Temporary fluctuations go in rationale, not insights.\n"
         "\n"
         "Example decision process:\n"
         "- Step 1: Check recent arrivals to infer current lead_time (e.g., 'lead_time was 2 days')\n"
@@ -622,6 +713,8 @@ def main():
                        help='Path to CSV file with demand data')
     parser.add_argument('--promised-lead-time', type=int, default=0,
                        help='Promised lead time used by OR and shown to LLM (default: 0). Actual lead time in CSV may differ.')
+    parser.add_argument('--policy', type=str, choices=['vanilla', 'capped'], default='capped',
+                       help='OR policy type: vanilla (standard base-stock) or capped (smoothed orders). Default: capped')
     parser.add_argument('--human-feedback', action='store_true',
                        help='Enable daily human feedback on agent decisions (Mode 1)')
     parser.add_argument('--guidance-frequency', type=int, default=0,
@@ -682,7 +775,7 @@ def main():
         }
         for config in item_configs
     }
-    or_agent = ORAgent(or_items_config, initial_samples)
+    or_agent = ORAgent(or_items_config, initial_samples, policy=args.policy)
     
     # Create hybrid VM agent
     base_agent = make_hybrid_vm_agent(
@@ -758,12 +851,35 @@ def main():
                 done, _ = env.step(action=action)
                 continue
             
-            # Get OR recommendations
-            or_recommendations = or_agent.get_recommendation(observation)
+            # Get OR recommendations with statistics
+            or_recommendations, or_stats = or_agent.get_recommendation(observation)
             
-            # Format OR recommendations for display
+            # Print detailed OR statistics
+            print(f"\n{'='*70}")
+            print(f"OR ALGORITHM RECOMMENDATIONS ({args.policy.upper()} Policy):")
+            print(f"{'='*70}")
+            for item_id, item_stats in or_stats.items():
+                print(f"\n{item_id}:")
+                print(f"  Empirical mean: {item_stats['empirical_mean']:.2f}")
+                print(f"  Empirical std: {item_stats['empirical_std']:.2f}")
+                print(f"  Lead time (L): {item_stats['L']}")
+                _safe_print(f"  mu_hat (μ̂): {item_stats['mu_hat']:.2f}")
+                _safe_print(f"  sigma_hat (σ̂): {item_stats['sigma_hat']:.2f}")
+                print(f"  Critical fractile (q): {item_stats['q']:.4f}")
+                print(f"  z*: {item_stats['z_star']:.4f}")
+                print(f"  Base stock: {item_stats['base_stock']:.2f}")
+                print(f"  Current inventory: {item_stats['current_inventory']}")
+                if args.policy == 'capped':
+                    print(f"  Cap value: {item_stats['cap']:.2f}")
+                    print(f"  OR recommends (capped): {item_stats['order']}")
+                    print(f"  OR recommends (uncapped): {item_stats['order_uncapped']}")
+                else:
+                    print(f"  OR recommends: {item_stats['order']}")
+            print(f"{'='*70}\n")
+            
+            # Format OR recommendations for LLM
             or_text = "\n" + "="*60 + "\n"
-            or_text += "OR ALGORITHM RECOMMENDATIONS (for your reference):\n"
+            or_text += f"OR ALGORITHM RECOMMENDATIONS ({args.policy} policy):\n"
             for item_id, rec_qty in or_recommendations.items():
                 or_text += f"  {item_id}: {rec_qty} units\n"
             or_text += "\nNote: OR algorithm uses statistical base-stock policy based on historical demand.\n"
