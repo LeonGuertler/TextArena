@@ -1014,7 +1014,7 @@ def main():
                 _safe_print(f"\nDay {current_day} LLM->OR Decision:")
                 print("="*70)
                 print("LLM Rationale:")
-                print(params_json.get("rationale", "(no rationale provided)"))
+                _safe_print(params_json.get("rationale", "(no rationale provided)"))
                 
                 carry_memo = params_json.get("carry_over_insight")
                 if isinstance(carry_memo, str):
@@ -1024,7 +1024,7 @@ def main():
                 
                 if carry_memo:
                     carry_over_insights[current_day] = carry_memo
-                    print(f"\nCarry-over insight: {carry_memo}")
+                    _safe_print(f"\nCarry-over insight: {carry_memo}")
                 else:
                     if current_day in carry_over_insights:
                         del carry_over_insights[current_day]
@@ -1034,11 +1034,11 @@ def main():
                 
             except json.JSONDecodeError as e:
                 print(f"\nERROR: Failed to parse LLM output as JSON: {e}")
-                print(f"Raw output:\n{llm_response}")
+                _safe_print(f"Raw output:\n{llm_response}")
                 sys.exit(1)
             except ValueError as e:
                 print(f"\nERROR: Invalid parameter specification: {e}")
-                print(f"Raw output:\n{llm_response}")
+                _safe_print(f"Raw output:\n{llm_response}")
                 sys.exit(1)
             
             # Compute orders using OR formula with LLM-proposed parameters
@@ -1113,7 +1113,7 @@ def main():
                     h = config['holding_cost']
                     q = p / (p + h)
                     z_star = norm.ppf(q)
-                    print(f"  Critical fractile q = {q:.4f}, z* = {z_star:.4f}")
+                    _safe_print(f"  Critical fractile q = {q:.4f}, z* = {z_star:.4f}")
                     
                     # Compute base stock and order based on policy
                     base_stock = mu_hat + z_star * sigma_hat

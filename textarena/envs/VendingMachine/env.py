@@ -49,7 +49,7 @@ from textarena.state import TwoPlayerState
 
 # Global game parameters
 NUM_DAYS = 10
-INITIAL_INVENTORY_PER_ITEM = 5
+INITIAL_INVENTORY_PER_ITEM = 0
 
 
 class VendingMachineEnv(ta.Env):

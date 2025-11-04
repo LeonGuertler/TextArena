@@ -542,6 +542,8 @@ def main():
     # Set NUM_DAYS based on CSV
     from textarena.envs.VendingMachine import env as vm_env_module
     original_num_days = vm_env_module.NUM_DAYS
+    original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
+    vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
     vm_env_module.NUM_DAYS = csv_player.get_num_days()
     print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} based on CSV")
 
@@ -610,7 +612,7 @@ def main():
                 _safe_print(f"  sigma_hat (σ̂) from schedule: {item_stats['sigma_hat']:.2f}")
                 print(f"  Lead time (L): {item_stats['L']}")
                 print(f"  Critical fractile (q): {item_stats['q']:.4f}")
-                print(f"  z*: {item_stats['z_star']:.4f}")
+                _safe_print(f"  z*: {item_stats['z_star']:.4f}")
                 print(f"  Base stock: {item_stats['base_stock']:.2f}")
                 print(f"  Current inventory: {item_stats['current_inventory']}")
                 if args.policy == 'capped':
@@ -695,6 +697,7 @@ def main():
 
     # Restore original NUM_DAYS
     vm_env_module.NUM_DAYS = original_num_days
+    vm_env_module.INITIAL_INVENTORY_PER_ITEM = original_initial_inventory
 
 
 if __name__ == "__main__":

@@ -361,7 +361,7 @@ class ORAgent:
             print(f"  Lead time (L): {L}")
             print(f"  Profit (p): {p}, Holding cost (h): {h}")
             print(f"  Critical fractile (q): {q:.4f}")
-            print(f"  z* = Phi^(-1)(q): {z_star:.4f}")
+            _safe_print(f"  z* = Phi^(-1)(q): {z_star:.4f}")
             print(f"  Initial samples: {samples if samples else 'None (will learn from observed demands)'}")
     
     def _parse_inventory_from_observation(self, observation: str, item_id: str) -> int:
@@ -866,7 +866,7 @@ def main():
                 _safe_print(f"  mu_hat (μ̂): {item_stats['mu_hat']:.2f}")
                 _safe_print(f"  sigma_hat (σ̂): {item_stats['sigma_hat']:.2f}")
                 print(f"  Critical fractile (q): {item_stats['q']:.4f}")
-                print(f"  z*: {item_stats['z_star']:.4f}")
+                _safe_print(f"  z*: {item_stats['z_star']:.4f}")
                 print(f"  Base stock: {item_stats['base_stock']:.2f}")
                 print(f"  Current inventory: {item_stats['current_inventory']}")
                 if args.policy == 'capped':
@@ -918,7 +918,7 @@ def main():
                 
                 if carry_memo:
                     carry_over_insights[current_day] = carry_memo
-                    print(f"Carry-over insight: {carry_memo}")
+                    _safe_print(f"Carry-over insight: {carry_memo}")
                 else:
                     if current_day in carry_over_insights:
                         del carry_over_insights[current_day]

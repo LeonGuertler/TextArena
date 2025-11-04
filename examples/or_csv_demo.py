@@ -586,7 +586,7 @@ def main():
                 _safe_print(f"  mu_hat (μ̂): {item_stats['mu_hat']:.2f}")
                 _safe_print(f"  sigma_hat (σ̂): {item_stats['sigma_hat']:.2f}")
                 print(f"  Critical fractile (q): {item_stats['q']:.4f}")
-                print(f"  z*: {item_stats['z_star']:.4f}")
+                _safe_print(f"  z*: {item_stats['z_star']:.4f}")
                 print(f"  Base stock: {item_stats['base_stock']:.2f}")
                 print(f"  Current inventory: {item_stats['current_inventory']}")
                 if args.policy == 'capped':
