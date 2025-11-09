@@ -436,7 +436,7 @@ class VendingMachineEnv(ta.Env):
 
             # Announce day conclusion with role-specific visibility
             # VM sees: ordered, arrived (with lead_time calculation), starting inventory, demand, sold, ending inventory
-            vm_summary_lines = [f"Day {self.current_day} concluded:"]
+            vm_summary_lines = [f"Week {self.current_day} concluded:"]
             for item_id in self.items:
                 ordered = self.current_day_orders.get(item_id, 0)
                 arrival_list = arrivals[item_id]
@@ -451,9 +451,9 @@ class VendingMachineEnv(ta.Env):
                 if arrival_list:
                     arrival_parts = []
                     for qty, order_day in arrival_list:
-                        # Calculate lead_time: current_day - order_day
+                        # Calculate lead_time: current_week - order_week
                         actual_lead_time = self.current_day - order_day
-                        arrival_parts.append(f"{qty} units (ordered on Day {order_day}, lead_time was {actual_lead_time} days)")
+                        arrival_parts.append(f"{qty} units (ordered on Week {order_day}, lead_time was {actual_lead_time} weeks)")
                     arrival_str = ", ".join(arrival_parts)
                     item_line += f", arrived={arrival_str}"
                 else:
@@ -470,7 +470,7 @@ class VendingMachineEnv(ta.Env):
             )
             
             # Demand sees: demand, sold (no ordered, no stock)
-            demand_summary_lines = [f"Day {self.current_day} concluded:"]
+            demand_summary_lines = [f"Week {self.current_day} concluded:"]
             for item_id in self.items:
                 demand = purchases.get(item_id, 0)
                 sold = actual_sales.get(item_id, 0)

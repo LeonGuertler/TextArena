@@ -44,8 +44,11 @@ class SimulationTranscript:
 class CSVDemandPlayer:
     def __init__(self, csv_path: str):
         self.df = pd.read_csv(csv_path)
+        # Support both "week" and "day" column names
+        if "day" not in self.df.columns and "week" in self.df.columns:
+            self.df = self.df.rename(columns={"week": "day"})
         if "day" not in self.df.columns:
-            raise ValueError("CSV must contain a 'day' column")
+            raise ValueError("CSV must contain a 'day' or 'week' column")
         self.item_ids = self._extract_item_ids()
         if not self.item_ids:
             raise ValueError("CSV missing demand_* columns")
@@ -178,7 +181,7 @@ def _make_base_agent(
 
     system_parts: List[str] = [
         "You are the Vending Machine controller (VM). You manage multiple items, each with unit profit and holding costs.",
-        "Objective: Maximize total reward = sum of daily rewards R_t, where R_t = Profit\*Sold - HoldingCost\*EndingInventory.",
+        "Objective: Maximize total reward = sum of daily rewards R_t, where R_t = Profit*Sold - HoldingCost*EndingInventory.",
         "",
         f"AVAILABLE ITEMS: {items_str}",
         "CRITICAL: Use these exact item IDs (including parentheses/punctuation) in your action JSON.",
@@ -351,6 +354,8 @@ class SimulationSession:
         vm_env_module.NUM_DAYS = self._total_days
 
         self._setup_environment()
+        # Ensure day 1 item configurations reflect CSV (in case CSV changes between reset)
+        self._apply_day_item_configs(self.current_day)
         self._pid, initial_observation = self._env.get_observation()
         self._observation = _inject_carry_over_insights(initial_observation, self._carry_over_insights)
         if self._pid != 0:
@@ -445,6 +450,25 @@ class SimulationSession:
         self._env.reset(num_players=2)
         self._reset_ui_tracking()
 
+    def _apply_day_item_configs(self, day: int) -> None:
+        """Update environment item configs to match CSV for the specified day."""
+        # Guard against out-of-range (e.g., after simulation completes)
+        if day < 1 or day > self.csv_player.get_num_days():
+            return
+
+        for item_id in self.csv_player.get_item_ids():
+            try:
+                config = self.csv_player.get_day_item_config(day, item_id)
+            except ValueError:
+                continue
+            self._env.update_item_config(
+                item_id=item_id,
+                lead_time=config.get("lead_time"),
+                profit=config.get("profit"),
+                holding_cost=config.get("holding_cost"),
+                description=config.get("description"),
+            )
+
     def _bootstrap_mode1(self) -> None:
         self._conversation.clear()
         self.transcript.append("observation", {"day": self.current_day, "content": self._observation})
@@ -510,6 +534,8 @@ class SimulationSession:
             return self._finalize_session()
 
         self.current_day += 1
+        # Apply new day item configurations before fetching the next observation
+        self._apply_day_item_configs(self.current_day)
         self._pid, next_observation = self._env.get_observation()
         self._observation = _inject_carry_over_insights(next_observation, self._carry_over_insights)
         self.transcript.append(
@@ -641,10 +667,9 @@ class SimulationSession:
         for raw_log in env_logs[start:]:
             reward = float(raw_log.get("daily_reward", 0.0))
             self._running_reward += reward
-            self._ui_daily_logs.append(self._sanitize_day_log(raw_log))
+            self._ui_daily_logs.append(self._sanitize_day_log(raw_log, env_logs))
 
-    @staticmethod
-    def _sanitize_day_log(log: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_day_log(self, log: Dict[str, Any], all_logs: List[Dict[str, Any]]) -> Dict[str, Any]:
         sanitized: Dict[str, Any] = {
             "day": int(log.get("day", 0)),
             "news": log.get("news"),
@@ -661,6 +686,90 @@ class SimulationSession:
                 {"quantity": int(entry[0]), "order_day": int(entry[1])} for entry in entries
             ]
         sanitized["arrivals"] = arrivals
+        
+        # Build order_status: track each order's arrival status
+        order_status = []
+        orders = log.get("orders", {})
+        log_day = int(log.get("day", 0))
+        
+        # Get pending_orders from base_env to find lead_time and arrival_day
+        base_env = self._base_env
+        pending_orders = getattr(base_env, "pending_orders", [])
+        current_day = getattr(base_env, "current_day", self.current_day)
+        
+        # Build a map of orders by (order_day, item_id) for quick lookup
+        order_map = {}
+        for order in pending_orders:
+            order_day = order.get("order_day")
+            item_id = order.get("item_id")
+            if order_day == log_day:
+                order_map[item_id] = {
+                    "quantity": order.get("quantity", 0),
+                    "lead_time": order.get("original_lead_time", 0),
+                    "arrival_day": order.get("arrival_day", float("inf")),
+                }
+        
+        # Process each order from this day
+        for item_id, quantity in orders.items():
+            if quantity <= 0:
+                continue
+            
+            # Try to find order info from pending_orders
+            order_info = order_map.get(item_id)
+            lead_time = 0
+            arrival_day = float("inf")
+            
+            if order_info:
+                lead_time = order_info.get("lead_time", 0)
+                arrival_day = order_info.get("arrival_day", float("inf"))
+            else:
+                # Check if order arrived in the same day (lead_time=0 case)
+                # Check current log's arrivals
+                current_arrivals = log.get("arrivals", {})
+                item_arrivals = current_arrivals.get(item_id, [])
+                for arrival_entry in item_arrivals:
+                    if isinstance(arrival_entry, (list, tuple)) and len(arrival_entry) >= 2:
+                        arrival_order_day = int(arrival_entry[1])
+                        if arrival_order_day == log_day:
+                            # Order arrived on the same day (lead_time=0)
+                            arrival_day = log_day
+                            lead_time = 0
+                            break
+                
+                # If not found in current log, check subsequent logs
+                if arrival_day == float("inf"):
+                    for future_log in all_logs:
+                        future_day = int(future_log.get("day", 0))
+                        if future_day <= log_day:
+                            continue
+                        future_arrivals = future_log.get("arrivals", {})
+                        item_arrivals = future_arrivals.get(item_id, [])
+                        for arrival_entry in item_arrivals:
+                            if isinstance(arrival_entry, (list, tuple)) and len(arrival_entry) >= 2:
+                                arrival_order_day = int(arrival_entry[1])
+                                if arrival_order_day == log_day:
+                                    arrival_day = future_day
+                                    lead_time = future_day - log_day
+                                    break
+                        if arrival_day != float("inf"):
+                            break
+            
+            # Determine if order has arrived
+            # For lead_time=0, order arrives on the same day, so arrival_day = log_day
+            arrived = arrival_day != float("inf") and arrival_day <= current_day
+            arrival_week = int(arrival_day) if arrival_day != float("inf") and arrived else None
+            
+            order_status.append({
+                "item_id": item_id,
+                "quantity": int(quantity),
+                "order_day": log_day,
+                "lead_time": float(lead_time) if lead_time != float("inf") else 0.0,
+                "arrival_day": float(arrival_day) if arrival_day != float("inf") else None,
+                "arrived": arrived,
+                "arrival_week": arrival_week,
+            })
+        
+        sanitized["order_status"] = order_status
         return sanitized
 
     def _latest_agent_proposal(self) -> Optional[Dict[str, Any]]:

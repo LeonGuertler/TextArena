@@ -106,9 +106,9 @@ def start_run(
 ):
     _ensure_mode_choice(payload.mode, auth)
 
-    # Construct absolute path to demand.csv
+    # Construct absolute path to demand_case1_iid_normal.csv
     backend_dir = Path(__file__).resolve().parent
-    demand_csv_path = backend_dir.parent.parent / "demand.csv"
+    demand_csv_path = backend_dir.parent.parent / "demand_case1_iid_normal.csv"
     
     config = SimulationConfig(
         mode=payload.mode,  # type: ignore[arg-type]

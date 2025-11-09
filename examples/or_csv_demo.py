@@ -76,11 +76,11 @@ class CSVDemandPlayer:
         # Extract news if available
         self.has_news = 'news' in self.df.columns
         
-        print(f"Loaded CSV with {len(self.df)} days of demand data")
+        print(f"Loaded CSV with {len(self.df)} weeks of demand data")
         print(f"Detected {len(self.item_ids)} items: {self.item_ids}")
         if self.has_news:
-            news_days = self.df[self.df['news'].notna()]['day'].tolist()
-            print(f"News scheduled for days: {news_days}")
+            news_weeks = self.df[self.df['news'].notna()]['week'].tolist()
+            print(f"News scheduled for weeks: {news_weeks}")
     
     def _extract_item_ids(self) -> list:
         """Extract item IDs from CSV columns that start with 'demand_'."""
@@ -201,9 +201,9 @@ class CSVDemandPlayer:
         
         news_schedule = {}
         for _, row in self.df.iterrows():
-            day = int(row['day'])
+            week = int(row['week'])
             if pd.notna(row['news']) and str(row['news']).strip():
-                news_schedule[day] = str(row['news']).strip()
+                news_schedule[week] = str(row['news']).strip()
         
         return news_schedule
     
@@ -481,6 +481,8 @@ def main():
                        help='Promised lead time used by OR algorithm (default: 0). Actual lead time in CSV may differ.')
     parser.add_argument('--policy', type=str, choices=['vanilla', 'capped'], default='capped',
                        help='OR policy type: vanilla (standard base-stock) or capped (smoothed orders). Default: capped')
+    parser.add_argument('--real-instance-train', type=str, default=None,
+                       help='Path to train.csv for real instances (extracts initial samples from weeks 1-10). If not provided, uses default unified samples.')
     args = parser.parse_args()
     
     # Create environment
@@ -500,12 +502,29 @@ def main():
     for config in item_configs:
         env.add_item(**config)
     
-    # Generate initial demand samples for all items (unified across all products)
-    # Using the same historical samples regardless of item type
-    unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
-    initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
-    print(f"\nUsing unified initial samples for all items: {unified_samples}")
-    print(f"Promised lead time (used by OR algorithm): {args.promised_lead_time} days")
+    # Generate initial demand samples
+    if args.real_instance_train:
+        # Load from real instance train.csv
+        try:
+            train_df = pd.read_csv(args.real_instance_train)
+            # Use all weeks (1-10) from train.csv
+            train_samples = train_df[train_df['week_number'] >= 1]['demand'].tolist()
+            initial_samples = {item_id: train_samples for item_id in csv_player.get_item_ids()}
+            print(f"\nUsing initial samples from real instance train.csv: {args.real_instance_train}")
+            print(f"  Samples (weeks 1-10): {train_samples}")
+            print(f"  Mean: {sum(train_samples)/len(train_samples):.1f}, Count: {len(train_samples)}")
+        except Exception as e:
+            print(f"Error loading train.csv: {e}")
+            print("Falling back to default unified samples")
+            unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
+            initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
+    else:
+        # Use default unified samples for synthetic instances
+        unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
+        initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
+        print(f"\nUsing default unified initial samples: {unified_samples}")
+    
+    print(f"Promised lead time (used by OR algorithm): {args.promised_lead_time} weeks")
     print(f"Note: Actual lead times in CSV may differ, creating a test scenario for OR robustness.")
     
     # Set NUM_DAYS based on CSV
@@ -565,8 +584,8 @@ def main():
                 zero_orders = {item_id: 0 for item_id in csv_player.get_item_ids()}
                 action = json.dumps({"action": zero_orders}, indent=2)
                 
-                print(f"\nWARNING Day {current_day}: Supplier unavailable (lead_time=inf)")
-                print(f"Day {current_day} OR Decision: {action} (automatically set to 0)")
+                print(f"\nWARNING Week {current_day}: Supplier unavailable (lead_time=inf)")
+                print(f"Week {current_day} OR Decision: {action} (automatically set to 0)")
                 
                 # Skip to demand turn
                 done, _ = env.step(action=action)
@@ -576,7 +595,7 @@ def main():
             
             # Print detailed statistics for each item
             print(f"\n{'='*70}")
-            print(f"Day {current_day} OR Decision ({args.policy.upper()} Policy):")
+            print(f"Week {current_day} OR Decision ({args.policy.upper()} Policy):")
             print(f"{'='*70}")
             for item_id, item_stats in stats.items():
                 print(f"\n{item_id}:")
@@ -643,9 +662,9 @@ def main():
         print(f"  Profit/unit: ${profit}, Holding: ${holding_cost}/unit/day")
         print(f"  Total Profit: ${total_profit}")
     
-    # Daily breakdown
+    # Weekly breakdown
     print("\n" + "="*60)
-    print("Daily Breakdown:")
+    print("Weekly Breakdown:")
     print("="*60)
     for day_log in vm_info.get('daily_logs', []):
         day = day_log['day']
@@ -655,7 +674,7 @@ def main():
         reward = day_log['daily_reward']
         
         news_str = f" [NEWS: {news}]" if news else ""
-        print(f"Day {day}{news_str}: Profit=${profit:.2f}, Holding=${holding:.2f}, Reward=${reward:.2f}")
+        print(f"Week {day}{news_str}: Profit=${profit:.2f}, Holding=${holding:.2f}, Reward=${reward:.2f}")
     
     # Totals
     total_reward = vm_info.get('total_reward', 0)

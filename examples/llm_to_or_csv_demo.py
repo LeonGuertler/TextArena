@@ -27,7 +27,7 @@ import textarena as ta
 from textarena.core import Agent
 
 
-DAY_CONCLUDED_PATTERN = re.compile(r'^(\s*Day\s+(\d+)\s+concluded:)(.*)$')
+WEEK_CONCLUDED_PATTERN = re.compile(r'^(\s*Week\s+(\d+)\s+concluded:)(.*)$')
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -112,7 +112,7 @@ def inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> st
     if not insights:
         return observation
     
-    # Sort insights by day number
+    # Sort insights by week number
     sorted_insights = sorted(insights.items())
     
     # Build insights section at the top
@@ -120,8 +120,8 @@ def inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> st
     insights_section += "CARRY-OVER INSIGHTS (Key Discoveries):\n"
     insights_section += "=" * 70 + "\n"
     
-    for day_num, memo in sorted_insights:
-        insights_section += f"Day {day_num}: {memo}\n"
+    for week_num, memo in sorted_insights:
+        insights_section += f"Week {week_num}: {memo}\n"
     
     insights_section += "=" * 70 + "\n\n"
     
@@ -132,7 +132,7 @@ def inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> st
 class CSVDemandPlayer:
     """
     Simulates demand agent by reading from CSV file.
-    Supports dynamic item configurations that can change per day.
+    Supports dynamic item configurations that can change per week.
     """
     def __init__(self, csv_path: str, initial_samples: dict = None):
         """
@@ -160,11 +160,11 @@ class CSVDemandPlayer:
         # Extract news if available
         self.has_news = 'news' in self.df.columns
         
-        print(f"Loaded CSV with {len(self.df)} days of demand data")
+        print(f"Loaded CSV with {len(self.df)} weeks of demand data")
         print(f"Detected {len(self.item_ids)} items: {self.item_ids}")
         if self.has_news:
-            news_days = self.df[self.df['news'].notna()]['day'].tolist()
-            print(f"News scheduled for days: {news_days}")
+            news_weeks = self.df[self.df['news'].notna()]['week'].tolist()
+            print(f"News scheduled for weeks: {news_weeks}")
     
     def _extract_item_ids(self) -> list:
         """Extract item IDs from CSV columns that start with 'demand_'."""
@@ -240,17 +240,17 @@ class CSVDemandPlayer:
     
     def get_day_item_config(self, day: int, item_id: str) -> dict:
         """
-        Get item configuration for a specific day (supports dynamic changes).
+        Get item configuration for a specific week (supports dynamic changes).
         
         Args:
-            day: Day number (1-indexed)
+            day: Week number (1-indexed)
             item_id: Item identifier
             
         Returns:
             Dict with keys: description, lead_time, profit, holding_cost
         """
         if day < 1 or day > len(self.df):
-            raise ValueError(f"Day {day} out of range (1-{len(self.df)})")
+            raise ValueError(f"Week {day} out of range (1-{len(self.df)})")
         
         if item_id not in self.item_ids:
             raise ValueError(f"Unknown item_id: {item_id}")
@@ -285,9 +285,9 @@ class CSVDemandPlayer:
         
         news_schedule = {}
         for _, row in self.df.iterrows():
-            day = int(row['day'])
+            week = int(row['week'])
             if pd.notna(row['news']) and str(row['news']).strip():
-                news_schedule[day] = str(row['news']).strip()
+                news_schedule[week] = str(row['news']).strip()
         
         return news_schedule
     
@@ -366,17 +366,17 @@ def parse_arrivals_from_history(observation: str) -> Dict[str, List[int]]:
     """
     Parse observed lead times from arrival records in game history.
     
-    Looks for patterns like: "arrived=X units (ordered on Day Y, lead_time was Z days)"
+    Looks for patterns like: "arrived=X units (ordered on Week Y, lead_time was Z weeks)"
     
     Returns:
         Dict of {item_id: [list of observed lead times]}
     """
     observed_lead_times = {}
     
-    # Look for patterns like "chips(Regular): ordered=X, arrived=Y units (ordered on Day Z, lead_time was W days)"
+    # Look for patterns like "chips(Regular): ordered=X, arrived=Y units (ordered on Week Z, lead_time was W weeks)"
     # More specific pattern to avoid matching "concluded:" or other false positives
-    # Pattern: item_id: ordered=... lead_time was X days
-    pattern = r'(\S+?):\s+ordered=.*?lead_time was (\d+) day'
+    # Pattern: item_id: ordered=... lead_time was X weeks
+    pattern = r'(\S+?):\s+ordered=.*?lead_time was (\d+) week'
     
     matches = re.findall(pattern, observation)
     for item_id, lead_time_str in matches:
@@ -628,8 +628,8 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "Your role: Analyze the current situation and propose parameters for an OR algorithm.\n"
         "The OR algorithm will use your parameters to compute optimal orders.\n"
         "\n"
-        "Objective: Maximize total reward = sum of daily rewards R_t.\n"
-        "Daily reward: R_t = Profit × Sold - HoldingCost × EndingInventory.\n"
+        "Objective: Maximize total reward = sum of weekly rewards R_t.\n"
+        "Weekly reward: R_t = Profit × Sold - HoldingCost × EndingInventory.\n"
         "\n"
         "=== CURRENT ITEM CONFIGURATIONS ===\n"
     )
@@ -641,21 +641,32 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         description = config.get('description', item_id)
         
         system += f"\n{item_id} ({description}):\n"
-        system += f"  Supplier-promised lead time: {promised_lead_time} days\n"
+        system += f"  Supplier-promised lead time: {promised_lead_time} weeks\n"
         system += f"  Profit: ${profit}/unit\n"
-        system += f"  Holding cost: ${holding_cost}/unit/day\n"
+        system += f"  Holding cost: ${holding_cost}/unit/week\n"
     
     system += (
         "\n=== KEY MECHANICS ===\n"
         "- Actual lead time may differ from promised lead time and may change over time\n"
-        "- You can infer actual lead time from arrival records: 'arrived=X units (ordered on Day Y, lead_time was Z days)'\n"
+        "- You can infer actual lead time from arrival records: 'arrived=X units (ordered on Week Y, lead_time was Z weeks)'\n"
         "- Inventory visibility:\n"
-        "  * On-hand: Current inventory available for sale today\n"
+        "  * On-hand: Current inventory available for sale this week\n"
         "  * In-transit: Total units ordered that haven't arrived yet\n"
-        "  * ⚠️ Initial inventory on Day 1: Each item starts with 0 units on-hand\n"
-        "- Holding cost is charged on ending inventory each day\n"
-        "- Daily sequence: order submission happens first, then any scheduled shipments arrive, and customer demand is realized last\n"
+        "  * ⚠️ Initial inventory on Week 1: Each item starts with 0 units on-hand\n"
+        "- Holding cost is charged on ending inventory each week\n"
+        "- Weekly sequence: order submission happens first, then any scheduled shipments arrive, and customer demand is realized last\n"
         "- News events may affect future demand\n"
+        "\n"
+        "NEWS INFORMATION:\n"
+        "- The 'news' column may contain important contextual information:\n"
+        "  1. Holiday/Event information: Special events that may affect demand\n"
+        "     Examples: 'Holiday, National', 'Additional, National; Event, National'\n"
+        "  2. Weeks to Christmas: Countdown to Christmas season\n"
+        "     Format: 'X weeks to Christmas' or 'Holiday, National (X weeks to Christmas)'\n"
+        "- You must analyze whether these events correlate with demand changes\n"
+        "- Christmas proximity may influence consumer buying patterns\n"
+        "- Not all holidays/events necessarily impact demand - use historical data to assess\n"
+        "- If no news is present for a week, the field will be empty\n"
         "\n"
         "CARRY-OVER INSIGHTS:\n"
         "- If carry-over insights exist, they will appear at the TOP of your observation in a dedicated section.\n"
@@ -663,17 +674,17 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "- Use insights as quick references, but always verify against current game data.\n"
         "\n"
         "STRICT RULES for writing carry_over_insight:\n"
-        "⚠️ DEFAULT: Return empty string \"\" (most days should have NO new insight)\n"
+        "⚠️ DEFAULT: Return empty string \"\" (most weeks should have NO new insight)\n"
         "\n"
         "ONLY write a new insight when ALL of these conditions are met:\n"
         "  1. You observe a SIGNIFICANT, SUSTAINED change (not temporary fluctuation):\n"
-        "     - Demand mean shift (e.g., sustained 30%+ change over 3+ days)\n"
+        "     - Demand mean shift (e.g., sustained 30%+ change over 3+ weeks)\n"
         "     - Variance pattern change (e.g., volatility doubled/halved)\n"
-        "     - Lead time structural change (e.g., changed from 2 to 4 days)\n"
+        "     - Lead time structural change (e.g., changed from 2 to 4 weeks)\n"
         "     - Major news impact with lasting effect\n"
         "\n"
         "  2. You have CONCRETE EVIDENCE with specific numbers:\n"
-        "     - Day ranges (e.g., \"Days 8-12 avg: 150 vs Days 1-7 avg: 100\")\n"
+        "     - Week ranges (e.g., \"Weeks 8-12 avg: 150 vs Weeks 1-7 avg: 100\")\n"
         "     - Statistical measures (mean, std, lead_time values)\n"
         "     - Specific news events and their timing\n"
         "\n"
@@ -685,10 +696,10 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "  4. The insight will be USEFUL for future decisions (not just describing history)\n"
         "\n"
         "EXAMPLES of when to write:\n"
-        "  ✅ \"Demand increased 50% after Day 5 sports event; new baseline: 150 units (was 100)\"\n"
-        "  ✅ \"Lead time changed from 2 to 4 days starting Day 10 (observed in Days 10-13 arrivals)\"\n"
-        "  ✅ \"Variance doubled after Day 15; demand now fluctuates 80-220 (was 90-110)\"\n"
-        "  ❌ \"Today's demand was high\" (not sustained, no evidence)\n"
+        "  ✅ \"Demand increased 50% after Week 5 sports event; new baseline: 150 units (was 100)\"\n"
+        "  ✅ \"Lead time changed from 2 to 4 weeks starting Week 10 (observed in Weeks 10-13 arrivals)\"\n"
+        "  ✅ \"Variance doubled after Week 15; demand now fluctuates 80-220 (was 90-110)\"\n"
+        "  ❌ \"This week's demand was high\" (not sustained, no evidence)\n"
         "  ❌ \"Sales continue as before\" (no change, unnecessary)\n"
         "  ❌ \"Demand is volatile\" (already documented in previous insight)\n"
         "\n"
@@ -752,13 +763,13 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "\n"
         "STRATEGY for setting N when using recent_N:\n"
         "Step 1: Detect the most recent change-point for THIS parameter using simple heuristics:\n"
-        "        • For demand (mu_hat/sigma_hat): Look for mean/variance shifts (>30% sustained over 3+ days),\n"
+        "        • For demand (mu_hat/sigma_hat): Look for mean/variance shifts (>30% sustained over 3+ weeks),\n"
         "          news events with lasting impact, or trend reversals in demand patterns.\n"
         "        • For lead time (L): Look for sustained lead_time changes in arrival records\n"
-        "          (e.g., shifted from 2 to 4 days starting Day X).\n"
+        "          (e.g., shifted from 2 to 4 weeks starting Week X).\n"
         "\n"
         "Step 2: Calculate regime length using the formula:\n"
-        "        N = (current_day - changepoint_day) + 1\n"
+        "        N = (current_week - changepoint_week) + 1\n"
         "\n"
         "Step 3: Apply adaptive constraints:\n"
         "        • N = 3 (minimum) if regime_length < 3\n"
@@ -771,10 +782,10 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "        • The calculated N value and why\n"
         "\n"
         "Examples of N calculation:\n"
-        "  • Detected demand change at Day 15, current Day 20: regime_length = 6 → N = 6\n"
-        "  • Detected lead_time change at Day 10, current Day 25: regime_length = 16 → N = 16\n"
-        "  • Change at Day 5, current Day 5: regime_length = 1 → N = 3 (applied minimum)\n"
-        "  • Change at Day 1, current Day 30: regime_length = 30 → N = 20 (applied maximum)\n"
+        "  • Detected demand change at Week 15, current Week 20: regime_length = 6 → N = 6\n"
+        "  • Detected lead_time change at Week 10, current Week 25: regime_length = 16 → N = 16\n"
+        "  • Change at Week 5, current Week 5: regime_length = 1 → N = 3 (applied minimum)\n"
+        "  • Change at Week 1, current Week 30: regime_length = 30 → N = 20 (applied maximum)\n"
         "  • No clear change detected: Use N = 10 as default (balanced for stable periods)\n"
         "\n"
         "The OR algorithm will compute orders using:\n"
@@ -785,7 +796,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "1. Analyze current inventory (on-hand + in-transit)\n"
         "2. Review demand patterns from game history\n"
         "3. Infer actual lead time from arrival records\n"
-        "4. Consider today's news and its potential impact\n"
+        "4. Consider this week's news and its potential impact\n"
         "5. Choose appropriate parameter methods:\n"
         "   - Use 'default' or 'calculate' for stable conditions\n"
         "   - Use 'recent_N' to react to trend changes\n"
@@ -839,6 +850,8 @@ def main():
                        help='Enable daily human feedback on agent decisions (Mode 1)')
     parser.add_argument('--guidance-frequency', type=int, default=0,
                        help='Collect strategic guidance every N days (Mode 2). 0=disabled')
+    parser.add_argument('--real-instance-train', type=str, default=None,
+                       help='Path to train.csv for real instances (extracts initial samples from weeks 1-10). If not provided, uses default unified samples.')
     args = parser.parse_args()
     
     # Check API key
@@ -864,10 +877,28 @@ def main():
     for config in item_configs:
         env.add_item(**config)
     
-    # Generate initial demand samples for all items (unified across all products)
-    unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
-    initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
-    print(f"\nUsing unified initial samples for all items: {unified_samples}")
+    # Generate initial demand samples
+    if args.real_instance_train:
+        # Load from real instance train.csv
+        try:
+            train_df = pd.read_csv(args.real_instance_train)
+            # Use all weeks (1-10) from train.csv
+            train_samples = train_df[train_df['week_number'] >= 1]['demand'].tolist()
+            initial_samples = {item_id: train_samples for item_id in csv_player.get_item_ids()}
+            print(f"\nUsing initial samples from real instance train.csv: {args.real_instance_train}")
+            print(f"  Samples (weeks 1-10): {train_samples}")
+            print(f"  Mean: {sum(train_samples)/len(train_samples):.1f}, Count: {len(train_samples)}")
+        except Exception as e:
+            print(f"Error loading train.csv: {e}")
+            print("Falling back to default unified samples")
+            unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
+            initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
+    else:
+        # Use default unified samples for synthetic instances
+        unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
+        initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
+        print(f"\nUsing default unified initial samples: {unified_samples}")
+    
     print(f"Promised lead time (shown to LLM): {args.promised_lead_time} days")
     print(f"Note: Actual lead times in CSV may differ and will be inferred by LLM from arrivals.")
     
