@@ -45,19 +45,45 @@ def serve_frontend():
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Frontend not found")
 
 
+@app.get("/mode1_or.html")
+def serve_mode1_or():
+    mode1_or_path = FRONTEND_DIR / "mode1_or.html"
+    if mode1_or_path.exists():
+        return FileResponse(mode1_or_path)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode 1 OR page not found")
+
+
+@app.get("/mode1_llm.html")
+def serve_mode1_llm():
+    mode1_llm_path = FRONTEND_DIR / "mode1_llm.html"
+    if mode1_llm_path.exists():
+        return FileResponse(mode1_llm_path)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode 1 LLM page not found")
+
+
+@app.get("/mode2_llm.html")
+def serve_mode2_llm():
+    mode2_llm_path = FRONTEND_DIR / "mode2_llm.html"
+    if mode2_llm_path.exists():
+        return FileResponse(mode2_llm_path)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode 2 LLM page not found")
+
+
 @app.get("/mode1.html")
 def serve_mode1():
-    mode1_path = FRONTEND_DIR / "mode1.html"
-    if mode1_path.exists():
-        return FileResponse(mode1_path)
+    # Redirect to mode1_llm.html for backward compatibility
+    mode1_llm_path = FRONTEND_DIR / "mode1_llm.html"
+    if mode1_llm_path.exists():
+        return FileResponse(mode1_llm_path)
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode 1 page not found")
 
 
 @app.get("/mode2.html")
 def serve_mode2():
-    mode2_path = FRONTEND_DIR / "mode2.html"
-    if mode2_path.exists():
-        return FileResponse(mode2_path)
+    # Redirect to mode2_llm.html for backward compatibility
+    mode2_llm_path = FRONTEND_DIR / "mode2_llm.html"
+    if mode2_llm_path.exists():
+        return FileResponse(mode2_llm_path)
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode 2 page not found")
 
 
@@ -73,9 +99,10 @@ def config_js() -> Response:
 
 
 class StartRunPayload(BaseModel):
-    mode: str = Field(pattern="^(mode1|mode2)$")
+    mode: str = Field(pattern="^(mode1_or|mode1_llm|mode2_llm)$")
     promised_lead_time: int = 0
     guidance_frequency: Optional[int] = Field(default=5, ge=1)
+    enable_or: bool = True  # The convenient switch for OR on/off
 
 
 class MessagePayload(BaseModel):
@@ -115,6 +142,7 @@ def start_run(
         demand_file=str(demand_csv_path),
         promised_lead_time=payload.promised_lead_time,
         guidance_frequency=payload.guidance_frequency or 5,
+        enable_or=payload.enable_or,
     )
 
     session = load_simulation(config)
@@ -147,19 +175,19 @@ def send_message(
 
     message = (payload.message or "").strip()
 
-    if session.config.mode == "mode1":
+    if session.config.mode in ("mode1_or", "mode1_llm"):
         if not message:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Message cannot be empty",
             )
-        # Mode 1: Add human message to conversation, get AI response
+        # Mode 1 variants: Add human message to conversation, get AI response (or None for mode1_or)
         result = session.add_human_message(message)
         state = session.serialize_state()
         state["ai_response"] = result
         return state
     
-    # Mode 2: Submit guidance
+    # Mode 2 LLM: Submit guidance
     result = session.submit_guidance(message)
     if result.get("completed"):
         _maybe_persist(run_id, session, result, auth, supabase_logger)
@@ -177,8 +205,8 @@ def submit_final_action(
     _ensure_user_access(entry, auth)
     session = entry.session
 
-    if session.config.mode != "mode1":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Mode 1 supports final actions")
+    if session.config.mode not in ("mode1_or", "mode1_llm"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Mode 1 variants support final actions")
 
     result = session.submit_final_decision(payload.action_json)
     
@@ -198,7 +226,7 @@ def _get_entry(run_id: str) -> RunEntry:
 def _ensure_mode_choice(mode: str, auth: AuthContext) -> None:
     if not auth.user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing user context")
-    if mode not in {"mode1", "mode2"}:
+    if mode not in {"mode1_or", "mode1_llm", "mode2_llm"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid mode")
 
 
@@ -229,7 +257,7 @@ def _maybe_persist(
         mode=state.get("mode"),
         final_reward=final_reward,
         log_text=raw_output,
-        guidance_frequency=session.config.guidance_frequency if session.config.mode == "mode2" else None,
+        guidance_frequency=session.config.guidance_frequency if session.config.mode == "mode2_llm" else None,
         run_id=run_id,
     )
 

@@ -9,12 +9,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 from openai import OpenAI
+from scipy.stats import norm
 import textarena as ta
 
 
-ModeLiteral = Literal["mode1", "mode2"]
+ModeLiteral = Literal["mode1_or", "mode1_llm", "mode2_llm"]
 
 
 @dataclass
@@ -23,6 +25,7 @@ class SimulationConfig:
     demand_file: str
     promised_lead_time: int = 0
     guidance_frequency: int = 5
+    enable_or: bool = True  # Flag to enable/disable OR recommendations
 
 
 @dataclass
@@ -137,6 +140,201 @@ class CSVDemandPlayer:
         return int(numeric)
 
 
+class ORAgent:
+    """
+    OR algorithm baseline agent using base-stock policy.
+
+    Supports two policies:
+    1. Vanilla: order_quantity = max(base_stock - current_inventory, 0)
+       where base_stock = μ̂ + z*σ̂
+    2. Capped: order_quantity = max(min(base_stock - current_inventory, cap), 0)
+       where cap = μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
+
+    mu_hat = (1+L) * empirical_mean
+    sigma_hat = sqrt(1+L) * empirical_std
+    z* = Phi^(-1)(q), where q = profit / (profit + holding_cost)
+    """
+    
+    def __init__(self, items_config: Dict[str, Any], initial_samples: Optional[Dict[str, List[int]]] = None, policy: str = 'capped'):
+        """
+        Args:
+            items_config: Dict of {item_id: {'lead_time': L, 'profit': p, 'holding_cost': h}}
+            initial_samples: Optional dict of {item_id: [list of initial demand samples]}
+                           If None or empty, will use only observed demands
+            policy: 'vanilla' or 'capped' (default: 'capped')
+        """
+        self.items_config = items_config
+        self.initial_samples = initial_samples if initial_samples else {}
+        self.policy = policy
+        
+        # Store observed demands (will be updated each day)
+        # Format: {item_id: [demand_day1, demand_day2, ...]}
+        self.observed_demands: Dict[str, List[int]] = {item_id: [] for item_id in items_config}
+    
+    def _parse_inventory_from_observation(self, observation: str, item_id: str) -> int:
+        """
+        Parse current total inventory (on-hand + in-transit) from observation.
+        
+        Observation format:
+          chips(Regular) (...): Profit=$2/unit, Holding=$1/unit/day
+            On-hand: 5, In-transit: 10 units
+        
+        Returns:
+            Total inventory across all pipeline stages (on-hand + in-transit)
+        """
+        try:
+            lines = observation.split('\n')
+            for i, line in enumerate(lines):
+                # Find the item header line
+                if line.strip().startswith(f"{item_id}"):
+                    # Next line should have the inventory info
+                    if i + 1 < len(lines):
+                        inventory_line = lines[i + 1]
+                        
+                        # Parse: "  On-hand: 5, In-transit: 10 units"
+                        if "On-hand:" in inventory_line and "In-transit:" in inventory_line:
+                            # Extract on-hand value
+                            on_hand_start = inventory_line.find("On-hand:") + len("On-hand:")
+                            on_hand_end = inventory_line.find(",", on_hand_start)
+                            on_hand = int(inventory_line[on_hand_start:on_hand_end].strip())
+                            
+                            # Extract in-transit value: "In-transit: 10 units"
+                            in_transit_start = inventory_line.find("In-transit:") + len("In-transit:")
+                            # Find the end - look for "units" or end of line
+                            in_transit_str = inventory_line[in_transit_start:].strip()
+                            # Remove "units" if present
+                            in_transit_str = in_transit_str.replace("units", "").strip()
+                            in_transit = int(in_transit_str)
+                            
+                            total_inventory = on_hand + in_transit
+                            return total_inventory
+            
+            # If not found, return 0
+            return 0
+        except Exception:
+            return 0
+    
+    def _calculate_order(self, item_id: str, current_inventory: int) -> Dict[str, Any]:
+        """
+        Calculate order quantity using OR base-stock policy.
+        
+        Args:
+            item_id: Item identifier
+            current_inventory: Current total inventory (on-hand + in-transit)
+            
+        Returns:
+            Dict with keys: order, empirical_mean, empirical_std, mu_hat, sigma_hat, 
+                           L, z_star, q, base_stock, cap (if capped), order_uncapped (if capped)
+        """
+        config = self.items_config[item_id]
+        L = config['lead_time']
+        p = config['profit']
+        h = config['holding_cost']
+        
+        # Collect all demand samples
+        initial = self.initial_samples.get(item_id, [])
+        all_samples = initial + self.observed_demands[item_id]
+        
+        # If no samples yet, use a conservative default (order 0)
+        if not all_samples:
+            return {
+                'order': 0,
+                'empirical_mean': 0,
+                'empirical_std': 0,
+                'mu_hat': 0,
+                'sigma_hat': 0,
+                'L': L,
+                'z_star': 0,
+                'q': p / (p + h),
+                'base_stock': 0,
+                'current_inventory': current_inventory
+            }
+        
+        # Calculate empirical statistics
+        empirical_mean = float(np.mean(all_samples))
+        empirical_std = float(np.std(all_samples, ddof=1)) if len(all_samples) > 1 else 0.0
+        
+        # Calculate mu_hat and sigma_hat for lead time + review period
+        mu_hat = (1 + L) * empirical_mean
+        sigma_hat = np.sqrt(1 + L) * empirical_std
+        
+        # Calculate critical fractile and z*
+        q = p / (p + h)
+        z_star = float(norm.ppf(q))
+        
+        # Calculate base stock
+        base_stock = mu_hat + z_star * sigma_hat
+        
+        result: Dict[str, Any] = {
+            'empirical_mean': empirical_mean,
+            'empirical_std': empirical_std,
+            'mu_hat': mu_hat,
+            'sigma_hat': sigma_hat,
+            'L': L,
+            'z_star': z_star,
+            'q': q,
+            'base_stock': base_stock,
+            'current_inventory': current_inventory
+        }
+        
+        # Calculate order quantity based on policy
+        if self.policy == 'vanilla':
+            order = max(int(np.ceil(base_stock - current_inventory)), 0)
+            result['order'] = order
+        else:  # capped policy
+            # Vanilla order (for logging)
+            order_uncapped = max(int(np.ceil(base_stock - current_inventory)), 0)
+            
+            # Cap calculation: μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
+            cap_z = float(norm.ppf(0.95))
+            cap = mu_hat / (1 + L) + cap_z * sigma_hat / np.sqrt(1 + L)
+            
+            # Capped order
+            order = max(min(int(np.ceil(base_stock - current_inventory)), int(np.ceil(cap))), 0)
+            
+            result['order'] = order
+            result['order_uncapped'] = order_uncapped
+            result['cap'] = cap
+        
+        return result
+    
+    def update_demand_observation(self, item_id: str, observed_demand: int) -> None:
+        """
+        Update observed demand history for an item.
+        
+        Args:
+            item_id: Item identifier
+            observed_demand: The true demand observed on this day (requested quantity)
+        """
+        self.observed_demands[item_id].append(observed_demand)
+    
+    def get_recommendation(self, observation: str) -> Tuple[Dict[str, int], Dict[str, Dict[str, Any]]]:
+        """
+        Generate OR algorithm recommendations with detailed statistics.
+        
+        Args:
+            observation: Current game observation
+            
+        Returns:
+            Tuple of (recommendations_dict, statistics_dict)
+            recommendations_dict: {"item_id": order_quantity, ...}
+            statistics_dict: {"item_id": {calculation_details}, ...}
+        """
+        recommendations: Dict[str, int] = {}
+        statistics: Dict[str, Dict[str, Any]] = {}
+        
+        for item_id in self.items_config:
+            # Parse current inventory from observation
+            current_inventory = self._parse_inventory_from_observation(observation, item_id)
+            
+            # Calculate order quantity with full statistics
+            calc_result = self._calculate_order(item_id, current_inventory)
+            recommendations[item_id] = calc_result['order']
+            statistics[item_id] = calc_result
+        
+        return recommendations, statistics
+
+
 def _default_initial_samples(item_ids: Iterable[str]) -> Dict[str, List[int]]:
     historical = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
     return {item_id: historical.copy() for item_id in item_ids}
@@ -175,6 +373,7 @@ def _make_base_agent(
     promised_lead_time: int,
     human_feedback_enabled: bool,
     guidance_enabled: bool,
+    or_enabled: bool = False,
 ) -> ta.Agent:
     available_items = [str(item) for item in item_ids]
     items_str = ", ".join(f'"{item}"' for item in available_items) or "None"
@@ -197,6 +396,38 @@ def _make_base_agent(
         "- Daily news is revealed day by day; you cannot see future news.",
         "- Daily sequence: you submit the order first, previously scheduled shipments arrive next, and customer demand happens last.",
     ]
+
+    if or_enabled:
+        system_parts.extend(
+            [
+                "",
+                "OR ALGORITHM ASSISTANCE:",
+                "You will receive recommendations from an Operations Research (OR) algorithm each day.",
+                "The OR algorithm uses a base-stock policy based on statistical analysis:",
+                "- It calculates optimal orders using historical demand patterns",
+                f"- IMPORTANT: OR uses the PROMISED lead time ({promised_lead_time} days) in its calculations",
+                "- Uses profit and holding cost in its calculations",
+                "- Aims to balance service level (meeting demand) vs holding costs",
+                "- Works well for NORMAL, STABLE demand patterns",
+                "",
+                "IMPORTANT LIMITATIONS:",
+                "1. The OR algorithm CANNOT react to news events. It only looks at historical data.",
+                "2. The OR algorithm uses PROMISED lead time, not actual lead time.",
+                "This is where YOU come in!",
+                "",
+                "Your Strategy:",
+                "1. INFER actual lead time from arrival records in game history (look for 'lead_time was X days')",
+                "2. Compare inferred actual lead time with promised lead time to detect discrepancies",
+                "3. Track your own orders and when they should arrive based on inferred actual lead_time",
+                "4. Use 'In-transit' to see total goods coming, but remember you must infer WHEN they arrive",
+                "5. Use OR recommendation as your BASELINE for normal days (OR uses statistical analysis)",
+                "6. Adjust OR recommendations if actual lead time differs from promised lead time",
+                "7. React to THIS DAY'S NEWS as it happens, considering inferred actual lead time",
+                "8. Learn from past news events to understand their impact on demand",
+                "9. Balance between data-driven OR approach and news-driven/lead-time-adjusted insights",
+                "",
+            ]
+        )
 
     if human_feedback_enabled:
         system_parts.extend(
@@ -245,6 +476,25 @@ def _make_base_agent(
             "    * Cite concrete evidence (specific days, averages, or news).",
             "    * If the observation already exists, output an empty string \"\".",
             "- Keep rationale CONCISE, output only insights that materially affect decision.",
+        ]
+    )
+
+    if or_enabled:
+        system_parts.extend(
+            [
+                "",
+                "When OR recommendations are provided, explain your reasoning:",
+                "- Review OR algorithm recommendations",
+                "- Analyze current inventory (on-hand + in-transit) and demand patterns",
+                "- Evaluate this day's news and learn from past events",
+                "- Consider lead_time when adjusting OR recommendations (goods arrive after lead_time!)",
+                "- Decide: follow OR baseline or adjust based on news/analysis",
+                "- Explain your final ordering strategy",
+            ]
+        )
+
+    system_parts.extend(
+        [
             "",
             "RESPONSE FORMAT (valid JSON only):",
             "{",
@@ -333,14 +583,38 @@ class SimulationSession:
         self._ui_daily_logs: List[Dict[str, Any]] = []
         self._running_reward: float = 0.0
         self._initial_samples = _default_initial_samples(self.csv_player.get_item_ids())
+        
+        # Initialize OR agent if enabled
+        self._or_agent: Optional[ORAgent] = None
+        self._or_recommendations: Dict[str, int] = {}
+        self._or_statistics: Dict[str, Dict[str, Any]] = {}
+        
+        if config.enable_or and config.mode in ("mode1_or", "mode1_llm", "mode2_llm"):
+            # Create OR agent configuration using promised lead time
+            or_items_config = {}
+            for item_config in self.csv_player.get_initial_item_configs():
+                or_items_config[item_config['item_id']] = {
+                    'lead_time': config.promised_lead_time,
+                    'profit': item_config['profit'],
+                    'holding_cost': item_config['holding_cost']
+                }
+            self._or_agent = ORAgent(or_items_config, self._initial_samples, policy='capped')
 
-        self._agent = _make_base_agent(
-            item_ids=self.csv_player.get_item_ids(),
-            initial_samples=self._initial_samples,
-            promised_lead_time=config.promised_lead_time,
-            human_feedback_enabled=(config.mode == "mode1"),
-            guidance_enabled=(config.mode == "mode2"),
-        )
+        # Determine if we need LLM agent
+        need_llm = config.mode in ("mode1_llm", "mode2_llm")
+        
+        if need_llm:
+            self._agent = _make_base_agent(
+                item_ids=self.csv_player.get_item_ids(),
+                initial_samples=self._initial_samples,
+                promised_lead_time=config.promised_lead_time,
+                human_feedback_enabled=(config.mode == "mode1_llm"),
+                guidance_enabled=(config.mode == "mode2_llm"),
+                or_enabled=config.enable_or,
+            )
+        else:
+            # mode1_or doesn't need LLM agent
+            self._agent = None
 
         self._env = ta.make(env_id="VendingMachine-v0")
         self._base_env = self._resolve_base_env(self._env)
@@ -361,10 +635,12 @@ class SimulationSession:
         if self._pid != 0:
             raise RuntimeError("VM should act first")
 
-        if self.config.mode == "mode1":
-            self._bootstrap_mode1()
-        else:
-            self._bootstrap_mode2()
+        if self.config.mode == "mode1_or":
+            self._bootstrap_mode1_or()
+        elif self.config.mode == "mode1_llm":
+            self._bootstrap_mode1_llm()
+        else:  # mode2_llm
+            self._bootstrap_mode2_llm()
 
     # ------------------------------------------------------------------
     # Public API
@@ -385,10 +661,18 @@ class SimulationSession:
             "daily_logs": copy.deepcopy(self._ui_daily_logs),
             "news": self._build_news_schedule(),
         }
-        if self.config.mode == "mode1":
+        
+        # Add OR recommendations if available
+        if self._or_recommendations:
+            state["or_recommendation"] = {
+                "recommendations": self._or_recommendations,
+                "statistics": self._or_statistics
+            }
+        
+        if self.config.mode in ("mode1_or", "mode1_llm"):
             state["conversation"] = list(self._conversation)
             state["waiting_for_final_action"] = self._pid == 0 and not self.transcript.completed
-        else:
+        elif self.config.mode == "mode2_llm":
             state["waiting_for_guidance"] = self._pending_guidance_day is not None
             state["guidance_history"] = [
                 {"day": day, "message": message} for day, message in self._guidance_history
@@ -399,15 +683,20 @@ class SimulationSession:
         return state
 
     def add_human_message(self, message: str) -> Dict[str, Any]:
-        if self.config.mode != "mode1":
-            raise RuntimeError("Human chat only available in Mode 1")
+        if self.config.mode not in ("mode1_or", "mode1_llm"):
+            raise RuntimeError("Human chat only available in Mode 1 variants")
         self._conversation.append({"role": "human", "content": message})
         self.transcript.append("human_message", {"day": self.current_day, "content": message})
-        return self._agent_proposal_with_history()
+        
+        if self.config.mode == "mode1_llm":
+            return self._agent_proposal_with_history()
+        else:
+            # mode1_or: no agent, just return current state
+            return {"message_received": True}
 
     def submit_final_action(self, action_json: str) -> Dict[str, Any]:
-        if self.config.mode != "mode1":
-            raise RuntimeError("Final action only available in Mode 1")
+        if self.config.mode not in ("mode1_or", "mode1_llm"):
+            raise RuntimeError("Final action only available in Mode 1 variants")
         if self._pid != 0:
             raise RuntimeError("Not waiting for VM turn")
         action_dict, carry_memo = self._parse_action_json(action_json)
@@ -420,7 +709,7 @@ class SimulationSession:
         return self._advance_with_vm_action(payload)
 
     def submit_guidance(self, message: str) -> Dict[str, Any]:
-        if self.config.mode != "mode2":
+        if self.config.mode != "mode2_llm":
             raise RuntimeError("Guidance only available in Mode 2")
         if self._pending_guidance_day is None:
             raise RuntimeError("Not waiting for guidance")
@@ -469,14 +758,40 @@ class SimulationSession:
                 description=config.get("description"),
             )
 
-    def _bootstrap_mode1(self) -> None:
+    def _bootstrap_mode1_or(self) -> None:
+        """Bootstrap for OR-only mode."""
         self._conversation.clear()
         self.transcript.append("observation", {"day": self.current_day, "content": self._observation})
+        # Get OR recommendation
+        self._update_or_recommendation()
+    
+    def _bootstrap_mode1_llm(self) -> None:
+        """Bootstrap for OR + LLM mode."""
+        self._conversation.clear()
+        self.transcript.append("observation", {"day": self.current_day, "content": self._observation})
+        # Get OR recommendation first
+        if self._or_agent:
+            self._update_or_recommendation()
+        # Then get LLM proposal
         self._agent_proposal_with_history()
 
-    def _bootstrap_mode2(self) -> None:
+    def _bootstrap_mode2_llm(self) -> None:
+        """Bootstrap for Mode 2 with LLM and optional OR."""
         self.transcript.append("observation", {"day": self.current_day, "content": self._observation})
         self._run_until_pause_or_complete()
+    
+    def _update_or_recommendation(self) -> None:
+        """Update OR recommendations for current observation."""
+        if self._or_agent:
+            self._or_recommendations, self._or_statistics = self._or_agent.get_recommendation(self._observation)
+            self.transcript.append(
+                "or_recommendation",
+                {
+                    "day": self.current_day,
+                    "recommendations": self._or_recommendations,
+                    "statistics": self._or_statistics
+                }
+            )
 
     def _agent_proposal_with_history(self) -> Dict[str, Any]:
         prompt = self._format_prompt_with_conversation()
@@ -495,6 +810,25 @@ class SimulationSession:
 
     def _format_prompt_with_conversation(self) -> str:
         lines = ["CURRENT OBSERVATION:", self._observation.strip(), ""]
+        
+        # Add OR recommendations if available
+        if self._or_recommendations and self.config.enable_or:
+            lines.append("=" * 70)
+            lines.append("OR ALGORITHM RECOMMENDATIONS:")
+            lines.append("=" * 70)
+            for item_id, quantity in self._or_recommendations.items():
+                stats = self._or_statistics.get(item_id, {})
+                lines.append(f"{item_id}: {quantity} units")
+                if stats:
+                    lines.append(f"  Base stock level: {stats.get('base_stock', 0):.2f}")
+                    lines.append(f"  Current inventory (on-hand + in-transit): {stats.get('current_inventory', 0)}")
+                    lines.append(f"  Empirical mean demand: {stats.get('empirical_mean', 0):.2f}")
+                    lines.append(f"  Empirical std demand: {stats.get('empirical_std', 0):.2f}")
+                    if 'cap' in stats:
+                        lines.append(f"  Order cap: {stats.get('cap', 0):.2f}")
+            lines.append("=" * 70)
+            lines.append("")
+        
         if self._conversation:
             lines.append("CONVERSATION SO FAR:")
             for turn in self._conversation:
@@ -525,9 +859,16 @@ class SimulationSession:
             raise RuntimeError("Expected demand turn after VM action")
 
         demand_action = self.csv_player.get_demand_action(self.current_day)
+        demand_dict = json.loads(demand_action)
         self.transcript.append(
-            "demand_action", {"day": self.current_day, "content": json.loads(demand_action)}
+            "demand_action", {"day": self.current_day, "content": demand_dict}
         )
+        
+        # Update OR agent with observed demand
+        if self._or_agent:
+            for item_id, observed_demand in demand_dict.get("action", {}).items():
+                self._or_agent.update_demand_observation(item_id, observed_demand)
+        
         done, _ = self._env.step(action=demand_action)
         self._sync_ui_daily_logs()
         if done:
@@ -542,10 +883,18 @@ class SimulationSession:
             "observation", {"day": self.current_day, "content": self._observation}
         )
 
-        if self.config.mode == "mode1":
+        if self.config.mode in ("mode1_or", "mode1_llm"):
             self._conversation.clear()
-            proposal = self._agent_proposal_with_history()
-            return {"next_observation": self._observation, "proposal": proposal, "completed": False}
+            # Get OR recommendation for new day
+            if self._or_agent:
+                self._update_or_recommendation()
+            
+            if self.config.mode == "mode1_llm":
+                proposal = self._agent_proposal_with_history()
+                return {"next_observation": self._observation, "proposal": proposal, "completed": False}
+            else:
+                # mode1_or: just return state with OR recommendation
+                return {"next_observation": self._observation, "completed": False}
 
         self._run_until_pause_or_complete()
         return self.serialize_state()
@@ -555,7 +904,14 @@ class SimulationSession:
             guidance_day = self._guidance_due_for_day(self.current_day)
             if guidance_day is not None and guidance_day not in self._guidance_messages:
                 self._pending_guidance_day = guidance_day
+                # Get OR recommendation before pausing
+                if self._or_agent:
+                    self._update_or_recommendation()
                 break
+
+            # Get OR recommendation before LLM
+            if self._or_agent:
+                self._update_or_recommendation()
 
             prompt = self._format_guided_prompt()
             agent_output = self._agent(prompt)
@@ -580,6 +936,25 @@ class SimulationSession:
 
     def _format_guided_prompt(self) -> str:
         lines = ["CURRENT OBSERVATION:", self._observation.strip(), ""]
+        
+        # Add OR recommendations if available
+        if self._or_recommendations and self.config.enable_or:
+            lines.append("=" * 70)
+            lines.append("OR ALGORITHM RECOMMENDATIONS:")
+            lines.append("=" * 70)
+            for item_id, quantity in self._or_recommendations.items():
+                stats = self._or_statistics.get(item_id, {})
+                lines.append(f"{item_id}: {quantity} units")
+                if stats:
+                    lines.append(f"  Base stock level: {stats.get('base_stock', 0):.2f}")
+                    lines.append(f"  Current inventory (on-hand + in-transit): {stats.get('current_inventory', 0)}")
+                    lines.append(f"  Empirical mean demand: {stats.get('empirical_mean', 0):.2f}")
+                    lines.append(f"  Empirical std demand: {stats.get('empirical_std', 0):.2f}")
+                    if 'cap' in stats:
+                        lines.append(f"  Order cap: {stats.get('cap', 0):.2f}")
+            lines.append("=" * 70)
+            lines.append("")
+        
         if self._guidance_history:
             lines.append("HUMAN GUIDANCE HISTORY:")
             for day, message in self._guidance_history:
@@ -590,7 +965,7 @@ class SimulationSession:
         return "\n".join(lines)
 
     def _guidance_due_for_day(self, day: int) -> Optional[int]:
-        if self.config.mode != "mode2":
+        if self.config.mode != "mode2_llm":
             return None
         frequency = max(self.config.guidance_frequency, 1)
         if ((day - 1) % frequency) == 0:
@@ -847,10 +1222,11 @@ class SimulationSession:
         return {"today": today, "upcoming": [], "past": past}
 
 
-class Mode1Session(SimulationSession):
+class Mode1ORSession(SimulationSession):
+    """Mode 1 OR: OR recommendations only with human final decision."""
     def __init__(self, config: SimulationConfig):
-        if config.mode != "mode1":
-            raise ValueError("Mode1Session requires mode='mode1'")
+        if config.mode != "mode1_or":
+            raise ValueError("Mode1ORSession requires mode='mode1_or'")
         super().__init__(config)
 
     def submit_final_decision(self, action_json: str) -> Dict[str, Any]:
@@ -858,29 +1234,46 @@ class Mode1Session(SimulationSession):
         return self.serialize_state()
 
 
-class Mode2Session(SimulationSession):
+class Mode1LLMSession(SimulationSession):
+    """Mode 1 LLM: OR + LLM recommendations with human final decision."""
     def __init__(self, config: SimulationConfig):
-        if config.mode != "mode2":
-            raise ValueError("Mode2Session requires mode='mode2'")
+        if config.mode != "mode1_llm":
+            raise ValueError("Mode1LLMSession requires mode='mode1_llm'")
+        super().__init__(config)
+
+    def submit_final_decision(self, action_json: str) -> Dict[str, Any]:
+        self.submit_final_action(action_json)
+        return self.serialize_state()
+
+
+class Mode2LLMSession(SimulationSession):
+    """Mode 2 LLM: OR + LLM with periodic human guidance."""
+    def __init__(self, config: SimulationConfig):
+        if config.mode != "mode2_llm":
+            raise ValueError("Mode2LLMSession requires mode='mode2_llm'")
         super().__init__(config)
 
 
 def load_simulation(config: SimulationConfig) -> SimulationSession:
     if not os.path.exists(config.demand_file):
         raise FileNotFoundError(f"Demand file not found: {config.demand_file}")
-    if config.mode == "mode1":
-        return Mode1Session(config)
-    if config.mode == "mode2":
-        return Mode2Session(config)
+    if config.mode == "mode1_or":
+        return Mode1ORSession(config)
+    if config.mode == "mode1_llm":
+        return Mode1LLMSession(config)
+    if config.mode == "mode2_llm":
+        return Mode2LLMSession(config)
     raise ValueError(f"Unsupported mode: {config.mode}")
 
 
 __all__ = [
     "CSVDemandPlayer",
+    "ORAgent",
     "SimulationConfig",
     "SimulationTranscript",
     "SimulationSession",
-    "Mode1Session",
-    "Mode2Session",
+    "Mode1ORSession",
+    "Mode1LLMSession",
+    "Mode2LLMSession",
     "load_simulation",
 ]

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Mode 1 - Weekly Feedback</title>
+  <title>Mode 1 OR - Operations Research Only</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <script src="/config.js"></script>
@@ -488,6 +488,12 @@
       gap: 20px;
       align-items: start;
     }
+    .historical-inventory-container {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 20px;
+      align-items: start;
+    }
     .historical-demand-chart-wrapper,
     .historical-inventory-chart-wrapper {
       position: relative;
@@ -656,8 +662,8 @@
 </head>
 <body>
   <header>
-    <h1>🎮 Mode 1: Weekly Feedback (Human Decision)</h1>
-    <p>Chat with the AI advisor — you make the final decision.</p>
+    <h1>📊 Mode 1 OR: Operations Research Only (Human Decision)</h1>
+    <p>Use OR algorithm recommendations to make your final decision.</p>
   </header>
 
   <main>
@@ -735,15 +741,14 @@
             
             <div class="algorithm-recommendation-section">
               <div class="algorithm-recommendation-header">
-                <label class="input-label">Algorithm recommendation</label>
-                <button id="apply-proposal-btn" class="ghost" disabled>Apply to Form</button>
+                <label class="input-label">OR Algorithm Recommendation</label>
               </div>
               <div id="algorithm-recommendation-value" class="algorithm-recommendation-value">
                 <span class="placeholder">Waiting for AI recommendation...</span>
               </div>
             </div>
 
-            <div class="reasoning-section">
+            <div class="reasoning-section hidden">
               <label class="input-label">Reasoning:</label>
               <textarea id="reasoning-text" readonly class="reasoning-text" placeholder="AI reasoning will appear here..."></textarea>
             </div>
@@ -760,7 +765,7 @@
             <div id="decision-error" class="error"></div>
           </section>
 
-          <section class="panel conversation-panel">
+          <section class="panel conversation-panel hidden">
             <h3 class="panel-title">Chat History</h3>
             <div id="conversation-log" class="conversation-log">
               <p class="placeholder">No messages yet.</p>
@@ -801,8 +806,10 @@
         </div>
         <div class="historical-inventory-section">
           <h3 class="panel-title">Historical Inventory Status</h3>
-          <div class="historical-inventory-chart-wrapper">
-            <canvas id="historical-inventory-chart"></canvas>
+          <div class="historical-inventory-container">
+            <div class="historical-inventory-chart-wrapper">
+              <canvas id="historical-inventory-chart"></canvas>
+            </div>
           </div>
         </div>
       </section>
@@ -837,7 +844,6 @@
 
     const algorithmRecommendationEl = document.getElementById("algorithm-recommendation-value");
     const reasoningTextEl = document.getElementById("reasoning-text");
-    const applyProposalBtn = document.getElementById("apply-proposal-btn");
 
     const conversationLogEl = document.getElementById("conversation-log");
     const timelineListEl = document.getElementById("timeline-list");
@@ -895,8 +901,9 @@
         const response = await apiRequest("/runs", {
           method: "POST",
           body: JSON.stringify({
-            mode: "mode1",
+            mode: "mode1_or",
             promised_lead_time: Number.isFinite(promisedLeadTime) ? promisedLeadTime : 4,
+            enable_or: true,
           }),
         });
         currentRunId = response.run_id;
@@ -977,35 +984,13 @@
       }
     });
 
-    applyProposalBtn.addEventListener("click", () => {
-      if (!latestProposalAction || typeof latestProposalAction !== "object") {
-        return;
-      }
-      const entries = Object.entries(latestProposalAction);
-      if (!entries.length) {
-        return;
-      }
-      // Find the first matching item and apply to the order quantity input
-      // Keep regex matching for future multi-item support
-      for (const [itemId, qty] of entries) {
-        const value = Number.isFinite(Number(qty)) ? Number(qty) : "";
-        if (/regular/i.test(itemId)) {
-          orderQuantityInput.value = value;
-          break;
-        } else if (/bbq/i.test(itemId)) {
-          orderQuantityInput.value = value;
-          break;
-        }
-      }
-    });
-
     function updateUI(state) {
       if (!state) return;
       latestState = state;
       renderSnapshot(state);
       renderNews(state.news || {});
       renderHistory(state.daily_logs || []);
-      renderOrderDecision(state.transcript || []);
+      renderORRecommendation(state.or_recommendation);
       renderConversation(state.conversation || []);
       renderTranscript(state.transcript || []);
       renderHistoricalCharts(state.daily_logs || [], state.current_day || 1);
@@ -1267,6 +1252,46 @@
     window.addEventListener("resize", () => {
       requestAnimationFrame(syncColumnHeights);
     });
+
+    function renderORRecommendation(orRecommendation) {
+      if (!algorithmRecommendationEl) return;
+      
+      if (!orRecommendation || typeof orRecommendation !== 'object') {
+        algorithmRecommendationEl.innerHTML = '<span class="placeholder">Waiting for OR recommendation...</span>';
+        latestProposalAction = null;
+        orderQuantityInput.value = "";
+        return;
+      }
+
+      const recommendations = orRecommendation.recommendations || {};
+      const actionEntries = Object.entries(recommendations);
+      
+      latestProposalAction = actionEntries.length ? recommendations : null;
+
+      if (actionEntries.length > 0) {
+        algorithmRecommendationEl.innerHTML = actionEntries.map(([itemId, qty]) => `
+          <div class="recommendation-item">
+            <span>${escapeHtml(String(itemId))}</span>
+            <strong>${formatNumber(qty)}</strong>
+          </div>
+        `).join("");
+        
+        // Automatically populate order quantity input with OR recommendation
+        for (const [itemId, qty] of actionEntries) {
+          const value = Number.isFinite(Number(qty)) ? Number(qty) : "";
+          if (/regular/i.test(itemId)) {
+            orderQuantityInput.value = value;
+            break;
+          } else if (/bbq/i.test(itemId)) {
+            orderQuantityInput.value = value;
+            break;
+          }
+        }
+      } else {
+        algorithmRecommendationEl.innerHTML = '<span class="placeholder">No OR recommendation yet.</span>';
+        orderQuantityInput.value = "";
+      }
+    }
 
     function renderOrderDecision(transcript) {
       const proposal = findLatestProposal(transcript);

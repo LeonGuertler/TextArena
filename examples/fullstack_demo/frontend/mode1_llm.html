@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Mode 1 - Weekly Feedback</title>
+  <title>Mode 1 LLM - Weekly Feedback with OR+LLM</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <script src="/config.js"></script>
@@ -369,6 +369,15 @@
       align-items: center;
       margin-bottom: 8px;
     }
+    .or-recommendation-section {
+      margin-bottom: 20px;
+    }
+    .or-recommendation-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
     .algorithm-recommendation-value {
       background: var(--surface-muted);
       border-radius: 8px;
@@ -483,6 +492,12 @@
       gap: 12px;
     }
     .historical-demand-container {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 20px;
+      align-items: start;
+    }
+    .historical-inventory-container {
       display: grid;
       grid-template-columns: 1fr 280px;
       gap: 20px;
@@ -656,8 +671,8 @@
 </head>
 <body>
   <header>
-    <h1>🎮 Mode 1: Weekly Feedback (Human Decision)</h1>
-    <p>Chat with the AI advisor — you make the final decision.</p>
+    <h1>🎮 Mode 1 LLM: Weekly Feedback (OR+LLM → Human Decision)</h1>
+    <p>View OR recommendations, chat with the LLM advisor — you make the final decision.</p>
   </header>
 
   <main>
@@ -733,10 +748,18 @@
           <section class="panel decision-panel">
             <h3 class="panel-title">Order Decision</h3>
             
+            <div class="or-recommendation-section">
+              <div class="or-recommendation-header">
+                <label class="input-label">OR Algorithm Recommendation (baseline)</label>
+              </div>
+              <div id="or-recommendation-value" class="algorithm-recommendation-value">
+                <span class="placeholder">Waiting for OR recommendation...</span>
+              </div>
+            </div>
+
             <div class="algorithm-recommendation-section">
               <div class="algorithm-recommendation-header">
-                <label class="input-label">Algorithm recommendation</label>
-                <button id="apply-proposal-btn" class="ghost" disabled>Apply to Form</button>
+                <label class="input-label">LLM Recommendation (considers OR + news)</label>
               </div>
               <div id="algorithm-recommendation-value" class="algorithm-recommendation-value">
                 <span class="placeholder">Waiting for AI recommendation...</span>
@@ -801,8 +824,10 @@
         </div>
         <div class="historical-inventory-section">
           <h3 class="panel-title">Historical Inventory Status</h3>
-          <div class="historical-inventory-chart-wrapper">
-            <canvas id="historical-inventory-chart"></canvas>
+          <div class="historical-inventory-container">
+            <div class="historical-inventory-chart-wrapper">
+              <canvas id="historical-inventory-chart"></canvas>
+            </div>
           </div>
         </div>
       </section>
@@ -835,9 +860,9 @@
     const newsPastEl = document.getElementById("news-past");
     const historyListEl = document.getElementById("history-list");
 
+    const orRecommendationEl = document.getElementById("or-recommendation-value");
     const algorithmRecommendationEl = document.getElementById("algorithm-recommendation-value");
     const reasoningTextEl = document.getElementById("reasoning-text");
-    const applyProposalBtn = document.getElementById("apply-proposal-btn");
 
     const conversationLogEl = document.getElementById("conversation-log");
     const timelineListEl = document.getElementById("timeline-list");
@@ -895,8 +920,9 @@
         const response = await apiRequest("/runs", {
           method: "POST",
           body: JSON.stringify({
-            mode: "mode1",
+            mode: "mode1_llm",
             promised_lead_time: Number.isFinite(promisedLeadTime) ? promisedLeadTime : 4,
+            enable_or: true,
           }),
         });
         currentRunId = response.run_id;
@@ -977,34 +1003,13 @@
       }
     });
 
-    applyProposalBtn.addEventListener("click", () => {
-      if (!latestProposalAction || typeof latestProposalAction !== "object") {
-        return;
-      }
-      const entries = Object.entries(latestProposalAction);
-      if (!entries.length) {
-        return;
-      }
-      // Find the first matching item and apply to the order quantity input
-      // Keep regex matching for future multi-item support
-      for (const [itemId, qty] of entries) {
-        const value = Number.isFinite(Number(qty)) ? Number(qty) : "";
-        if (/regular/i.test(itemId)) {
-          orderQuantityInput.value = value;
-          break;
-        } else if (/bbq/i.test(itemId)) {
-          orderQuantityInput.value = value;
-          break;
-        }
-      }
-    });
-
     function updateUI(state) {
       if (!state) return;
       latestState = state;
       renderSnapshot(state);
       renderNews(state.news || {});
       renderHistory(state.daily_logs || []);
+      renderORRecommendation(state.or_recommendation);
       renderOrderDecision(state.transcript || []);
       renderConversation(state.conversation || []);
       renderTranscript(state.transcript || []);
@@ -1268,6 +1273,29 @@
       requestAnimationFrame(syncColumnHeights);
     });
 
+    function renderORRecommendation(orRecommendation) {
+      if (!orRecommendationEl) return;
+      
+      if (!orRecommendation || typeof orRecommendation !== 'object') {
+        orRecommendationEl.innerHTML = '<span class="placeholder">Waiting for OR recommendation...</span>';
+        return;
+      }
+
+      const recommendations = orRecommendation.recommendations || {};
+      const actionEntries = Object.entries(recommendations);
+
+      if (actionEntries.length > 0) {
+        orRecommendationEl.innerHTML = actionEntries.map(([itemId, qty]) => `
+          <div class="recommendation-item">
+            <span>${escapeHtml(String(itemId))}</span>
+            <strong>${formatNumber(qty)}</strong>
+          </div>
+        `).join("");
+      } else {
+        orRecommendationEl.innerHTML = '<span class="placeholder">No OR recommendation yet.</span>';
+      }
+    }
+
     function renderOrderDecision(transcript) {
       const proposal = findLatestProposal(transcript);
       
@@ -1277,8 +1305,8 @@
       if (!proposal) {
         algorithmRecommendationEl.innerHTML = '<span class="placeholder">Waiting for AI recommendation...</span>';
         latestProposalAction = null;
-        if (applyProposalBtn) applyProposalBtn.disabled = true;
         if (reasoningTextEl) reasoningTextEl.value = "";
+        orderQuantityInput.value = "";
         return;
       }
 
@@ -1288,9 +1316,6 @@
 
       const actionEntries = Object.entries(action);
       latestProposalAction = actionEntries.length ? action : null;
-      if (applyProposalBtn) {
-        applyProposalBtn.disabled = !actionEntries.length;
-      }
 
       // Display algorithm recommendation (item name and quantity)
       if (actionEntries.length > 0) {
@@ -1300,8 +1325,21 @@
             <strong>${formatNumber(qty)}</strong>
           </div>
         `).join("");
+        
+        // Automatically populate order quantity input with LLM recommendation
+        for (const [itemId, qty] of actionEntries) {
+          const value = Number.isFinite(Number(qty)) ? Number(qty) : "";
+          if (/regular/i.test(itemId)) {
+            orderQuantityInput.value = value;
+            break;
+          } else if (/bbq/i.test(itemId)) {
+            orderQuantityInput.value = value;
+            break;
+          }
+        }
       } else {
         algorithmRecommendationEl.innerHTML = '<span class="placeholder">No explicit order proposal yet.</span>';
+        orderQuantityInput.value = "";
       }
 
       // Display reasoning (read-only)
