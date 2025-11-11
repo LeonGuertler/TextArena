@@ -1,6 +1,7 @@
 import re
 from typing import Dict, Tuple, Any, Optional
 
+import numpy as np
 import textarena as ta
 from textarena.envs.Breakthrough.renderer import create_board_str
 
@@ -98,6 +99,53 @@ class BreakthroughEnv(ta.Env):
         if col < 0 or col >= self.board_size: return False
         return True
 
+    def _find_player_without_move(self):
+        board = np.array(self.state.game_state['board'])
+
+        white_has_move = False
+        for r, c in zip(*np.where(board == 'W')):
+            if r == board.shape[0] - 1:
+                continue
+
+            # Check 'W' forward (row +1)
+            if not board[r+1, c]:
+                white_has_move = True
+                break
+
+            # Check 'W' forward diagonally (row +1, col +/- 1)
+            if c > 0 and board[r+1, c-1] == 'B':
+                white_has_move = True
+                break
+
+            if c < board.shape[1] - 1 and board[r+1, c+1] == 'B':
+                white_has_move = True
+
+        if not white_has_move:
+            return 0
+
+        black_has_move = False
+        for r, c in zip(*np.where(board == 'B')):
+            if r == 0:
+                continue
+
+            # Check 'B' forward (row -1)
+            if not board[r-1, c]:
+                black_has_move = True
+                break
+
+            # Check 'B' forward diagonally (row -1, col +/- 1)
+            if c > 0 and board[r-1, c-1] == 'W':
+                black_has_move = True
+                break
+
+            if c < board.shape[1] - 1 and board[r-1, c+1] == 'W':
+                black_has_move = True
+
+        if not black_has_move:
+            return 1
+
+        return None
+
     def _check_winner(self):
         for c in range(self.board_size): # White
             if self.state.game_state["board"][self.board_size - 1][c] == "W":
@@ -110,8 +158,14 @@ class BreakthroughEnv(ta.Env):
         black_count = sum(self.state.game_state["board"][r][c] == "B" for r in range(self.board_size) for c in range(self.board_size))
         if white_count == 0:
             self.state.set_winner(player_id=1, reason="All White pieces captured."); return
+
         if black_count == 0:
             self.state.set_winner(player_id=0, reason="All Black pieces captured."); return
+
+        player_without_move = self._find_player_without_move()
+        if player_without_move is not None:
+            self.state.add_observation(message=self._render_board(), observation_type=ta.ObservationType.GAME_BOARD)
+            self.state.set_winner(player_id=1 - player_without_move, reason=f"Player {player_without_move} has no more moves.")
 
     def _augment_observations(self):
         if self.is_open and not self.state.done: self.state.add_observation(message=self._render_board(), observation_type=ta.ObservationType.GAME_BOARD)
