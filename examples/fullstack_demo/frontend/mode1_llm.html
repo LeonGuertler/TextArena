@@ -423,34 +423,6 @@
     .order-decision-section {
       margin-bottom: 16px;
     }
-    .conversation-log {
-      max-height: 260px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      padding-right: 4px;
-    }
-    .conversation-log .message {
-      border-radius: 12px;
-      padding: 12px 14px;
-      line-height: 1.45;
-      background: #eef1ff;
-      border: 1px solid rgba(102, 126, 234, 0.2);
-    }
-    .conversation-log .message.user {
-      background: #e7f4ff;
-      border-color: rgba(66, 165, 245, 0.35);
-    }
-    .conversation-log .message-role {
-      font-weight: 600;
-      margin-bottom: 6px;
-      color: #2b3054;
-    }
-    .conversation-log .message-body {
-      font-size: 14px;
-      color: #343652;
-    }
     .news-card {
       width: 100%;
       background: #fef2ff;
@@ -672,7 +644,7 @@
 <body>
   <header>
     <h1>🎮 Mode 1 LLM: Weekly Feedback (OR+LLM → Human Decision)</h1>
-    <p>View OR recommendations, chat with the LLM advisor — you make the final decision.</p>
+    <p>View OR recommendations and LLM analysis — you make the final decision.</p>
   </header>
 
   <main>
@@ -715,6 +687,16 @@
             </div>
           </section>
 
+          <section class="history-panel">
+            <h3>📘 Game History</h3>
+            <div id="history-list" class="history-list">
+              <p class="history-placeholder">Game history will appear here once the simulation progresses.</p>
+            </div>
+          </section>
+
+        </div>
+
+        <div class="column column-right">
           <section class="news-section">
             <div class="news-header">
               <h3>📰 News Outlook</h3>
@@ -736,15 +718,6 @@
             </div>
           </section>
 
-          <section class="history-panel">
-            <h3>📘 Game History</h3>
-            <div id="history-list" class="history-list">
-              <p class="history-placeholder">Game history will appear here once the simulation progresses.</p>
-            </div>
-          </section>
-        </div>
-
-        <div class="column column-right">
           <section class="panel decision-panel">
             <h3 class="panel-title">Order Decision</h3>
             
@@ -781,21 +754,6 @@
               <span id="decision-loading" class="loading-text hidden">Submitting decision...</span>
             </div>
             <div id="decision-error" class="error"></div>
-          </section>
-
-          <section class="panel conversation-panel">
-            <h3 class="panel-title">Chat History</h3>
-            <div id="conversation-log" class="conversation-log">
-              <p class="placeholder">No messages yet.</p>
-            </div>
-            <label class="input-label">Your Message to AI Advisor
-              <textarea id="user-message" placeholder="Ask questions, provide context, or discuss strategy with the AI..."></textarea>
-            </label>
-            <div class="button-row">
-              <button id="send-message-btn">Send Message</button>
-              <span id="chat-loading" class="loading-text hidden">AI is running...</span>
-              <span id="chat-error" class="error"></span>
-            </div>
           </section>
         </div>
       </div>
@@ -864,7 +822,6 @@
     const algorithmRecommendationEl = document.getElementById("algorithm-recommendation-value");
     const reasoningTextEl = document.getElementById("reasoning-text");
 
-    const conversationLogEl = document.getElementById("conversation-log");
     const timelineListEl = document.getElementById("timeline-list");
     const rawTranscriptEl = document.getElementById("raw-transcript");
     const toggleTranscriptBtn = document.getElementById("toggle-transcript-btn");
@@ -889,12 +846,8 @@
     }
 
     const startError = document.getElementById("start-error");
-    const chatError = document.getElementById("chat-error");
     const decisionError = document.getElementById("decision-error");
 
-    const userMessageInput = document.getElementById("user-message");
-    const sendMessageBtn = document.getElementById("send-message-btn");
-    const chatLoading = document.getElementById("chat-loading");
     const submitDecisionBtn = document.getElementById("submit-decision-btn");
     const decisionLoading = document.getElementById("decision-loading");
     const orderQuantityInput = document.getElementById("order-quantity");
@@ -902,7 +855,6 @@
     let historicalDemandChartInstance = null;
     let historicalInventoryChartInstance = null;
     let latestState = null;
-    let isChatSubmitting = false;
     let isDecisionSubmitting = false;
 
     // Authentication guard
@@ -932,34 +884,6 @@
         startPolling();
       } catch (err) {
         startError.textContent = err.message || "Failed to start game";
-      }
-    });
-
-    sendMessageBtn.addEventListener("click", async () => {
-      if (isChatSubmitting) return;
-      chatError.textContent = "";
-      const message = userMessageInput.value.trim();
-      if (!message) {
-        chatError.textContent = "Please enter a message";
-        return;
-      }
-
-      isChatSubmitting = true;
-      updateChatControls();
-
-      try {
-        const response = await apiRequest(`/runs/${currentRunId}/messages`, {
-          method: "POST",
-          body: JSON.stringify({ message }),
-        });
-        userMessageInput.value = "";
-        updateUI(response);
-        startPolling();
-      } catch (err) {
-        chatError.textContent = err.message || "Failed to send message";
-      } finally {
-        isChatSubmitting = false;
-        updateChatControls();
       }
     });
 
@@ -1011,7 +935,6 @@
       renderHistory(state.daily_logs || []);
       renderORRecommendation(state.or_recommendation);
       renderOrderDecision(state.transcript || []);
-      renderConversation(state.conversation || []);
       renderTranscript(state.transcript || []);
       renderHistoricalCharts(state.daily_logs || [], state.current_day || 1);
 
@@ -1020,7 +943,6 @@
         clearInterval(pollTimer);
         pollTimer = null;
       }
-      updateChatControls();
       updateDecisionControls();
       requestAnimationFrame(syncColumnHeights);
     }
@@ -1357,92 +1279,6 @@
         }
       }
       return null;
-    }
-
-    function renderConversation(conversation) {
-      if (!conversationLogEl) return;
-      if (!Array.isArray(conversation) || !conversation.length) {
-        conversationLogEl.innerHTML = `<p class="placeholder">No messages yet.</p>`;
-        return;
-      }
-
-      const recent = conversation.slice(-12);
-      conversationLogEl.innerHTML = recent.map((msg) => {
-        const roleClass = msg.role === "human" ? "user" : "assistant";
-        const roleLabel = msg.role === "human" ? "👤 You" : "🤖 AI Advisor";
-        const content = formatConversationContent(msg);
-        return `
-          <div class="message ${roleClass}">
-            <div class="message-role">${roleLabel}</div>
-            <div class="message-body">${content}</div>
-          </div>
-        `;
-      }).join("");
-
-      conversationLogEl.scrollTop = conversationLogEl.scrollHeight;
-    }
-
-    function formatConversationContent(message) {
-      const rawContent = message.content;
-      if (message.role !== "human") {
-        const parsed = coerceAgentPayload(rawContent);
-        if (parsed && typeof parsed === "object") {
-          const parts = [];
-          if (parsed.rationale) {
-            parts.push(`<strong>Rationale:</strong> ${escapeHtml(String(parsed.rationale)).replace(/\n/g, "<br>")}`);
-          }
-          const actionBlock = coerceActionObject(parsed.action);
-          if (actionBlock && Object.keys(actionBlock).length) {
-            parts.push(`<strong>Action:</strong> ${formatActionList(actionBlock)}`);
-          }
-          if (parsed.carry_over_insight) {
-            parts.push(`<em>Carry-over insight:</em> ${escapeHtml(String(parsed.carry_over_insight)).replace(/\n/g, "<br>")}`);
-          }
-          if (parts.length) {
-            return parts.join("<br><br>");
-          }
-        }
-      }
-
-      const content = tryExtractString(rawContent);
-      if (!content) return "";
-      try {
-        const parsed = JSON.parse(content);
-        if (parsed && typeof parsed === "object") {
-          const parts = [];
-          if (parsed.rationale) {
-            parts.push(`<strong>Rationale:</strong> ${escapeHtml(String(parsed.rationale)).replace(/\n/g, "<br>")}`);
-          }
-          if (parsed.action && typeof parsed.action === "object") {
-            parts.push(`<strong>Action:</strong> ${formatActionList(parsed.action)}`);
-          }
-          if (parts.length) {
-            return parts.join("<br><br>");
-          }
-          return escapeHtml(JSON.stringify(parsed, null, 2)).replace(/\n/g, "<br>");
-        }
-      } catch (err) {
-        // Not JSON, fall through
-      }
-
-      return escapeHtml(String(content)).replace(/\n/g, "<br>");
-    }
-
-    function formatActionList(actionObj) {
-      const entries = Object.entries(actionObj || {});
-      if (!entries.length) {
-        return "<em>No action proposed.</em>";
-      }
-      return `
-        <ul class="proposal-actions">
-          ${entries.map(([key, value]) => `
-            <li>
-              <span>${escapeHtml(String(key))}</span>
-              <strong>${formatNumber(value)}</strong>
-            </li>
-          `).join("")}
-        </ul>
-      `;
     }
 
     function renderTranscript(transcript) {
@@ -1943,14 +1779,6 @@
       return response.json();
     }
 
-    function updateChatControls() {
-      const completed = !!(latestState && latestState.completed);
-      const disableSend = completed || isChatSubmitting;
-      if (sendMessageBtn) sendMessageBtn.disabled = disableSend;
-      if (userMessageInput) userMessageInput.disabled = completed || isChatSubmitting;
-      if (chatLoading) chatLoading.classList.toggle("hidden", !isChatSubmitting);
-    }
-
     function updateDecisionControls() {
       const completed = latestState ? !!latestState.completed : false;
       const waiting = latestState ? !!latestState.waiting_for_final_action : false;
@@ -1961,7 +1789,6 @@
       if (decisionLoading) decisionLoading.classList.toggle("hidden", !isDecisionSubmitting);
     }
 
-    updateChatControls();
     updateDecisionControls();
 
     function formatCurrency(value) {

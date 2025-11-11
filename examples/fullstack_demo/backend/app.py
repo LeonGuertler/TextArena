@@ -105,10 +105,6 @@ class StartRunPayload(BaseModel):
     enable_or: bool = True  # The convenient switch for OR on/off
 
 
-class MessagePayload(BaseModel):
-    message: Optional[str] = None
-
-
 class FinalActionPayload(BaseModel):
     action_json: str = Field(min_length=2)
 
@@ -160,38 +156,6 @@ def get_run(run_id: str, auth: AuthContext = Depends(get_auth_context)):
     entry = _get_entry(run_id)
     _ensure_user_access(entry, auth)
     return entry.session.serialize_state()
-
-
-@app.post("/runs/{run_id}/messages")
-def send_message(
-    run_id: str,
-    payload: MessagePayload,
-    auth: AuthContext = Depends(get_auth_context),
-    supabase_logger: SupabaseLogger = Depends(get_supabase_logger),
-):
-    entry = _get_entry(run_id)
-    _ensure_user_access(entry, auth)
-    session = entry.session
-
-    message = (payload.message or "").strip()
-
-    if session.config.mode in ("mode1_or", "mode1_llm"):
-        if not message:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Message cannot be empty",
-            )
-        # Mode 1 variants: Add human message to conversation, get AI response (or None for mode1_or)
-        result = session.add_human_message(message)
-        state = session.serialize_state()
-        state["ai_response"] = result
-        return state
-    
-    # Mode 2 LLM: Submit guidance
-    result = session.submit_guidance(message)
-    if result.get("completed"):
-        _maybe_persist(run_id, session, result, auth, supabase_logger)
-    return result
 
 
 @app.post("/runs/{run_id}/final-action")

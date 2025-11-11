@@ -274,23 +274,26 @@ class VendingMachineEnv(ta.Env):
                     self.state.set_invalid_move(f"Negative quantity for {item_id}")
                     return self.state.step(rotate_player=False)
 
-            # Store orders for this turn (will be modified if lead_time=inf)
+            # Store orders for this turn
             self.current_day_orders = {}
             
             # Add orders to pending_orders with calculated arrival_day
-            # Force order=0 if lead_time=inf (cannot restock)
+            # If lead_time=inf, accept the order but it will never arrive (gets lost)
             for item_id, qty in orders.items():
                 lead_time = self.items[item_id]['lead_time']
                 
-                # Check if lead_time is infinite - cannot restock
-                if lead_time == float('inf'):
-                    self.current_day_orders[item_id] = 0  # Force to 0
-                    if qty > 0:
-                        print(f"⚠️  Day {self.current_day}: Cannot restock {item_id} (lead_time=inf). Order forced to 0 (requested: {qty})")
-                else:
-                    self.current_day_orders[item_id] = qty
-                    if qty > 0:
-                        # Calculate arrival_day = order_day + lead_time
+                # Record the order (even if lead_time=inf)
+                self.current_day_orders[item_id] = qty
+                
+                if qty > 0:
+                    # If lead_time is infinite, the order is accepted but never arrives
+                    # (Simulates order getting lost without agent knowing)
+                    if lead_time == float('inf'):
+                        # Don't add to pending_orders - order gets lost
+                        # Don't print warning - agent should not know about the issue
+                        pass
+                    else:
+                        # Normal processing: Calculate arrival_day = order_day + lead_time
                         arrival_day = self.current_day + lead_time
                         
                         # Add to pending_orders

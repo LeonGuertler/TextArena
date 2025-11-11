@@ -6,6 +6,8 @@ import copy
 import json
 import os
 import re
+import sys
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
@@ -14,6 +16,17 @@ import pandas as pd
 from openai import OpenAI
 from scipy.stats import norm
 import textarena as ta
+
+
+def _sanitize_text(text: str) -> str:
+    """Normalize to NFKC and escape remaining non-ASCII characters."""
+    normalized = unicodedata.normalize("NFKC", text)
+    return normalized.encode("ascii", "backslashreplace").decode("ascii")
+
+
+def _safe_print(text: str) -> None:
+    """Print text with encoding fallback for Windows."""
+    print(_sanitize_text(str(text)))
 
 
 ModeLiteral = Literal["mode1_or", "mode1_llm", "mode2_llm"]
@@ -575,7 +588,6 @@ class SimulationSession:
         self.transcript = SimulationTranscript()
 
         self.current_day = 1
-        self._conversation: List[Dict[str, str]] = []
         self._guidance_messages: Dict[int, str] = {}
         self._guidance_history: List[Tuple[int, str]] = []
         self._pending_guidance_day: Optional[int] = None
@@ -583,6 +595,19 @@ class SimulationSession:
         self._ui_daily_logs: List[Dict[str, Any]] = []
         self._running_reward: float = 0.0
         self._initial_samples = _default_initial_samples(self.csv_player.get_item_ids())
+        
+        # Print initialization info to terminal
+        print(f"\n{'='*70}")
+        print(f"SIMULATION INITIALIZATION - {config.mode.upper()}")
+        print(f"{'='*70}")
+        print(f"Total weeks: {self.csv_player.get_num_days()}")
+        print(f"Promised lead time: {config.promised_lead_time} days")
+        print(f"Items: {', '.join(self.csv_player.get_item_ids())}")
+        print(f"Initial samples: {self._initial_samples}")
+        if config.mode == "mode2_llm":
+            print(f"Guidance frequency: Every {config.guidance_frequency} weeks")
+        print(f"{'='*70}")
+        sys.stdout.flush()
         
         # Initialize OR agent if enabled
         self._or_agent: Optional[ORAgent] = None
@@ -599,6 +624,8 @@ class SimulationSession:
                     'holding_cost': item_config['holding_cost']
                 }
             self._or_agent = ORAgent(or_items_config, self._initial_samples, policy='capped')
+            print(f"\nOR Agent initialized with CAPPED policy")
+            sys.stdout.flush()
 
         # Determine if we need LLM agent
         need_llm = config.mode in ("mode1_llm", "mode2_llm")
@@ -670,7 +697,6 @@ class SimulationSession:
             }
         
         if self.config.mode in ("mode1_or", "mode1_llm"):
-            state["conversation"] = list(self._conversation)
             state["waiting_for_final_action"] = self._pid == 0 and not self.transcript.completed
         elif self.config.mode == "mode2_llm":
             state["waiting_for_guidance"] = self._pending_guidance_day is not None
@@ -682,18 +708,6 @@ class SimulationSession:
                 state["latest_agent_proposal"] = latest
         return state
 
-    def add_human_message(self, message: str) -> Dict[str, Any]:
-        if self.config.mode not in ("mode1_or", "mode1_llm"):
-            raise RuntimeError("Human chat only available in Mode 1 variants")
-        self._conversation.append({"role": "human", "content": message})
-        self.transcript.append("human_message", {"day": self.current_day, "content": message})
-        
-        if self.config.mode == "mode1_llm":
-            return self._agent_proposal_with_history()
-        else:
-            # mode1_or: no agent, just return current state
-            return {"message_received": True}
-
     def submit_final_action(self, action_json: str) -> Dict[str, Any]:
         if self.config.mode not in ("mode1_or", "mode1_llm"):
             raise RuntimeError("Final action only available in Mode 1 variants")
@@ -702,6 +716,20 @@ class SimulationSession:
         action_dict, carry_memo = self._parse_action_json(action_json)
         self._store_carry_over_insight(self.current_day, carry_memo)
         payload = json.dumps({"action": action_dict})
+        
+        # Print human decision to terminal
+        print(f"\n{'='*70}")
+        print(f"Week {self.current_day} - HUMAN DECISION:")
+        print(f"{'='*70}")
+        print(f"Human Action:")
+        for item_id, qty in action_dict.items():
+            or_rec = self._or_recommendations.get(item_id, "N/A") if self._or_recommendations else "N/A"
+            print(f"  {item_id}: {qty} units (OR recommended: {or_rec})")
+        if carry_memo:
+            print(f"\nCarry-over Insight: {carry_memo}")
+        print(f"{'='*70}")
+        sys.stdout.flush()
+        
         self.transcript.append(
             "final_action",
             {"day": self.current_day, "content": action_dict, "source": "human"},
@@ -716,6 +744,15 @@ class SimulationSession:
         trimmed = message.strip()
         self._guidance_messages[self._pending_guidance_day] = trimmed
         self._guidance_history.append((self._pending_guidance_day, trimmed))
+        
+        # Print human guidance to terminal
+        print(f"\n{'='*70}")
+        print(f"Week {self._pending_guidance_day} - HUMAN GUIDANCE:")
+        print(f"{'='*70}")
+        print(f"{trimmed}")
+        print(f"{'='*70}")
+        sys.stdout.flush()
+        
         self.transcript.append(
             "guidance",
             {"day": self._pending_guidance_day, "content": trimmed},
@@ -760,14 +797,12 @@ class SimulationSession:
 
     def _bootstrap_mode1_or(self) -> None:
         """Bootstrap for OR-only mode."""
-        self._conversation.clear()
         self.transcript.append("observation", {"day": self.current_day, "content": self._observation})
         # Get OR recommendation
         self._update_or_recommendation()
     
     def _bootstrap_mode1_llm(self) -> None:
         """Bootstrap for OR + LLM mode."""
-        self._conversation.clear()
         self.transcript.append("observation", {"day": self.current_day, "content": self._observation})
         # Get OR recommendation first
         if self._or_agent:
@@ -784,6 +819,31 @@ class SimulationSession:
         """Update OR recommendations for current observation."""
         if self._or_agent:
             self._or_recommendations, self._or_statistics = self._or_agent.get_recommendation(self._observation)
+            
+            # Print detailed OR statistics to terminal
+            print(f"\n{'='*70}")
+            print(f"Week {self.current_day} - OR ALGORITHM RECOMMENDATIONS (CAPPED Policy):")
+            print(f"{'='*70}")
+            for item_id, item_stats in self._or_statistics.items():
+                print(f"\n{item_id}:")
+                print(f"  Empirical mean: {item_stats['empirical_mean']:.2f}")
+                print(f"  Empirical std: {item_stats['empirical_std']:.2f}")
+                print(f"  Lead time (L): {item_stats['L']}")
+                _safe_print(f"  mu_hat (μ̂): {item_stats['mu_hat']:.2f}")
+                _safe_print(f"  sigma_hat (σ̂): {item_stats['sigma_hat']:.2f}")
+                print(f"  Critical fractile (q): {item_stats['q']:.4f}")
+                _safe_print(f"  z*: {item_stats['z_star']:.4f}")
+                print(f"  Base stock: {item_stats['base_stock']:.2f}")
+                print(f"  Current inventory: {item_stats['current_inventory']}")
+                if 'cap' in item_stats:
+                    print(f"  Cap value: {item_stats['cap']:.2f}")
+                    print(f"  OR recommends (capped): {item_stats['order']}")
+                    print(f"  OR recommends (uncapped): {item_stats['order_uncapped']}")
+                else:
+                    print(f"  OR recommends: {item_stats['order']}")
+            print(f"{'='*70}")
+            sys.stdout.flush()
+            
             self.transcript.append(
                 "or_recommendation",
                 {
@@ -794,21 +854,49 @@ class SimulationSession:
             )
 
     def _agent_proposal_with_history(self) -> Dict[str, Any]:
-        prompt = self._format_prompt_with_conversation()
+        """Generate agent proposal without conversation history (direct observation only)."""
+        prompt = self._format_prompt_without_conversation()
         action_text = self._agent(prompt)
         cleaned = self._clean_json(action_text)
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError:
             data = {"rationale": cleaned, "action": {}}
+        
+        # Print LLM reasoning to terminal
+        print(f"\n{'='*70}")
+        print(f"Week {self.current_day} - LLM DECISION:")
+        print(f"{'='*70}")
+        
+        rationale = data.get("rationale", "")
+        if rationale:
+            print(f"\nLLM Rationale:")
+            print(f"{rationale}")
+        
+        action = data.get("action", {})
+        if action:
+            print(f"\nLLM Action:")
+            for item_id, qty in action.items():
+                or_rec = self._or_recommendations.get(item_id, "N/A")
+                print(f"  {item_id}: {qty} units (OR recommended: {or_rec})")
+        
+        carry_over = data.get("carry_over_insight", "")
+        if carry_over:
+            print(f"\nCarry-over Insight: {carry_over}")
+        else:
+            print(f"\nCarry-over Insight: (empty)")
+        
+        print(f"{'='*70}")
+        sys.stdout.flush()
+        
         self._store_carry_over_insight(self.current_day, data.get("carry_over_insight"))
-        self._conversation.append({"role": "agent", "content": cleaned})
         self.transcript.append(
             "agent_proposal", {"day": self.current_day, "content": data}
         )
         return data
 
-    def _format_prompt_with_conversation(self) -> str:
+    def _format_prompt_without_conversation(self) -> str:
+        """Format prompt with current observation and OR recommendations only (no conversation history)."""
         lines = ["CURRENT OBSERVATION:", self._observation.strip(), ""]
         
         # Add OR recommendations if available
@@ -829,13 +917,7 @@ class SimulationSession:
             lines.append("=" * 70)
             lines.append("")
         
-        if self._conversation:
-            lines.append("CONVERSATION SO FAR:")
-            for turn in self._conversation:
-                role = turn["role"].upper()
-                lines.append(f"{role}: {turn['content']}")
-            lines.append("")
-        lines.append("Provide your next JSON proposal.")
+        lines.append("Provide your JSON proposal.")
         return "\n".join(lines)
 
     def _store_carry_over_insight(self, day: int, memo_value) -> None:
@@ -860,6 +942,16 @@ class SimulationSession:
 
         demand_action = self.csv_player.get_demand_action(self.current_day)
         demand_dict = json.loads(demand_action)
+        
+        # Print demand to terminal
+        print(f"\n{'='*70}")
+        print(f"Week {self.current_day} - ACTUAL DEMAND:")
+        print(f"{'='*70}")
+        for item_id, qty in demand_dict.get("action", {}).items():
+            print(f"  {item_id}: {qty} units")
+        print(f"{'='*70}")
+        sys.stdout.flush()
+        
         self.transcript.append(
             "demand_action", {"day": self.current_day, "content": demand_dict}
         )
@@ -884,7 +976,6 @@ class SimulationSession:
         )
 
         if self.config.mode in ("mode1_or", "mode1_llm"):
-            self._conversation.clear()
             # Get OR recommendation for new day
             if self._or_agent:
                 self._update_or_recommendation()
@@ -907,6 +998,10 @@ class SimulationSession:
                 # Get OR recommendation before pausing
                 if self._or_agent:
                     self._update_or_recommendation()
+                print(f"\n{'='*70}")
+                print(f"Week {guidance_day} - WAITING FOR HUMAN GUIDANCE")
+                print(f"{'='*70}")
+                sys.stdout.flush()
                 break
 
             # Get OR recommendation before LLM
@@ -920,6 +1015,33 @@ class SimulationSession:
                 data = json.loads(cleaned)
             except json.JSONDecodeError:
                 data = {"rationale": cleaned, "action": {}}
+            
+            # Print LLM decision for mode2
+            print(f"\n{'='*70}")
+            print(f"Week {self.current_day} - LLM AUTO-PLAY DECISION:")
+            print(f"{'='*70}")
+            
+            rationale = data.get("rationale", "")
+            if rationale:
+                print(f"\nLLM Rationale:")
+                print(f"{rationale}")
+            
+            action = data.get("action", {})
+            if action:
+                print(f"\nLLM Action:")
+                for item_id, qty in action.items():
+                    or_rec = self._or_recommendations.get(item_id, "N/A") if self._or_recommendations else "N/A"
+                    print(f"  {item_id}: {qty} units (OR recommended: {or_rec})")
+            
+            carry_over = data.get("carry_over_insight", "")
+            if carry_over:
+                print(f"\nCarry-over Insight: {carry_over}")
+            else:
+                print(f"\nCarry-over Insight: (empty)")
+            
+            print(f"{'='*70}")
+            sys.stdout.flush()
+            
             self._store_carry_over_insight(self.current_day, data.get("carry_over_insight"))
             self.transcript.append(
                 "agent_proposal", {"day": self.current_day, "content": data}
@@ -1006,6 +1128,18 @@ class SimulationSession:
         total_reward = vm_info.get("total_reward", 0.0)
         self.transcript.final_reward = float(total_reward)
         self.transcript.completed = True
+        
+        # Print final results to terminal
+        print(f"\n{'='*70}")
+        print(f"SIMULATION COMPLETED - {self.config.mode.upper()}")
+        print(f"{'='*70}")
+        print(f"\nTotal weeks completed: {self.current_day - 1}")
+        print(f"Total Profit from Sales: ${vm_info.get('total_sales_profit', 0.0):.2f}")
+        print(f"Total Holding Cost: ${vm_info.get('total_holding_cost', 0.0):.2f}")
+        print(f"\n>>> TOTAL REWARD: ${total_reward:.2f} <<<")
+        print(f"{'='*70}")
+        sys.stdout.flush()
+        
         self.transcript.append(
             "final_summary",
             {

@@ -658,14 +658,8 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "- News events may affect future demand\n"
         "\n"
         "NEWS INFORMATION:\n"
-        "- The 'news' column may contain important contextual information:\n"
-        "  1. Holiday/Event information: Special events that may affect demand\n"
-        "     Examples: 'Holiday, National', 'Additional, National; Event, National'\n"
-        "  2. Weeks to Christmas: Countdown to Christmas season\n"
-        "     Format: 'X weeks to Christmas' or 'Holiday, National (X weeks to Christmas)'\n"
         "- You must analyze whether these events correlate with demand changes\n"
-        "- Christmas proximity may influence consumer buying patterns\n"
-        "- Not all holidays/events necessarily impact demand - use historical data to assess\n"
+        "- Not all news necessarily impact demand - use historical data to assess\n"
         "- If no news is present for a week, the field will be empty\n"
         "\n"
         "CARRY-OVER INSIGHTS:\n"
@@ -970,7 +964,6 @@ def main():
         if pid == 0:  # VM agent (LLM→OR)
             observation = inject_carry_over_insights(observation, carry_over_insights)
             # Update item configurations for current day (supports dynamic changes)
-            has_inf_lead_time = False
             for item_id in csv_player.get_item_ids():
                 config = csv_player.get_day_item_config(current_day, item_id)
                 env.update_item_config(
@@ -982,27 +975,6 @@ def main():
                 )
                 # Update tracking
                 current_item_configs[item_id] = config
-                # Check if any item has lead_time=inf (supplier unavailable)
-                if config['lead_time'] == float('inf'):
-                    has_inf_lead_time = True
-            
-            # If supplier unavailable (lead_time=inf), skip LLM→OR decision
-            if has_inf_lead_time:
-                # Create action with order=0 for all items
-                zero_orders = {item_id: 0 for item_id in csv_player.get_item_ids()}
-                action = json.dumps({"action": zero_orders}, indent=2)
-                
-                print(f"\nWARNING Day {current_day}: Supplier unavailable (lead_time=inf)")
-                print("VM did not place order (automatically set to 0)")
-                print("\n" + "="*70)
-                print("Final Order Action:")
-                print(action)
-                print("="*70)
-                sys.stdout.flush()
-                
-                # Skip to demand turn
-                done, _ = env.step(action=action)
-                continue
             
             # Parse observed lead times from arrivals in history
             new_lead_times = parse_arrivals_from_history(observation)
