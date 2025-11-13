@@ -512,6 +512,7 @@ def _make_base_agent(
             "RESPONSE FORMAT (valid JSON only):",
             "{",
             '  "rationale": "Explain step by step: lead-time inference, inventory & demand analysis, news impact, final strategy.",',
+            '  "short_rationale_for_human": "Brief summary (1-3 sentences) explaining your key reasoning: why you adjusted OR recommendations or why you followed them unchanged.",',
             '  "carry_over_insight": "New sustained insight with evidence, or empty string \"\".",',
             f'  "action": {{{example_action}}}',
             "}",
