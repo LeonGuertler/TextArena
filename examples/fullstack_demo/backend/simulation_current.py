@@ -614,6 +614,7 @@ class SimulationSession:
         self._or_agent: Optional[ORAgent] = None
         self._or_recommendations: Dict[str, int] = {}
         self._or_statistics: Dict[str, Dict[str, Any]] = {}
+        self._final_inventory_snapshot: Optional[List[Dict[str, Any]]] = None
         
         if config.enable_or and config.mode in ("mode1_or", "mode1_llm", "mode2_llm"):
             # Create OR agent configuration using promised lead time
@@ -688,6 +689,7 @@ class SimulationSession:
             "status_cards": self._build_status_cards(),
             "daily_logs": copy.deepcopy(self._ui_daily_logs),
             "news": self._build_news_schedule(),
+            "initial_samples": self._initial_samples,
         }
         
         # Add OR recommendations if available
@@ -1124,6 +1126,10 @@ class SimulationSession:
 
     def _finalize_session(self) -> Dict[str, Any]:
         self._sync_ui_daily_logs()
+        
+        # Cache the final inventory snapshot before closing environment
+        self._final_inventory_snapshot = self._build_inventory_snapshot()
+        
         rewards, game_info = self._env.close()
         vm_info = game_info[0]
         total_reward = vm_info.get("total_reward", 0.0)
@@ -1316,6 +1322,10 @@ class SimulationSession:
         }
 
     def _build_inventory_snapshot(self) -> List[Dict[str, Any]]:
+        # If game is completed, return cached snapshot
+        if self.transcript.completed and self._final_inventory_snapshot is not None:
+            return self._final_inventory_snapshot
+        
         base_env = self._base_env
         items = getattr(base_env, "items", {})
         on_hand = getattr(base_env, "on_hand_inventory", {})
@@ -1365,7 +1375,10 @@ class Mode1ORSession(SimulationSession):
         super().__init__(config)
 
     def submit_final_decision(self, action_json: str) -> Dict[str, Any]:
-        self.submit_final_action(action_json)
+        result = self.submit_final_action(action_json)
+        # If game completed, return the finalized state; otherwise serialize current state
+        if result.get("completed"):
+            return self.serialize_state()
         return self.serialize_state()
 
 
@@ -1377,7 +1390,10 @@ class Mode1LLMSession(SimulationSession):
         super().__init__(config)
 
     def submit_final_decision(self, action_json: str) -> Dict[str, Any]:
-        self.submit_final_action(action_json)
+        result = self.submit_final_action(action_json)
+        # If game completed, return the finalized state; otherwise serialize current state
+        if result.get("completed"):
+            return self.serialize_state()
         return self.serialize_state()
 
 

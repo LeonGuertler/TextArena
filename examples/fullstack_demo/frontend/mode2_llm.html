@@ -480,6 +480,28 @@
         </div>
       </section>
 
+      <section id="initial-samples-panel" class="panel historical-charts-panel">
+        <h3 class="panel-title">Pre-Game Sample Demand For Reference</h3>
+        <div class="historical-demand-container">
+          <div class="historical-demand-chart-wrapper">
+            <canvas id="initial-samples-chart"></canvas>
+          </div>
+          <div class="historical-demand-statistics">
+            <h4>Sample Statistics</h4>
+            <div class="statistics-content">
+              <div class="statistic-item">
+                <span class="statistic-label">Average:</span>
+                <span class="statistic-value" id="initial-samples-average">—</span>
+              </div>
+              <div class="statistic-item">
+                <span class="statistic-label">Standard deviation:</span>
+                <span class="statistic-value" id="initial-samples-stddev">—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="panel transcript-panel">
         <div class="panel-title-row">
           <h3 class="panel-title">Detailed Transcript</h3>
@@ -524,6 +546,12 @@
     const historicalInventoryCanvas = document.getElementById("historical-inventory-chart");
     const demandAverageEl = document.getElementById("demand-average");
     const demandStdDevEl = document.getElementById("demand-stddev");
+
+    const initialSamplesPanel = document.getElementById("initial-samples-panel");
+    const initialSamplesCanvas = document.getElementById("initial-samples-chart");
+    const initialSamplesAverageEl = document.getElementById("initial-samples-average");
+    const initialSamplesStdDevEl = document.getElementById("initial-samples-stddev");
+    let initialSamplesChartInstance = null;
 
     document.getElementById("start-btn").addEventListener("click", startSimulation);
     submitGuidanceBtn.addEventListener("click", submitGuidance);
@@ -629,6 +657,7 @@
       renderGuidancePanel(state);
       renderTimeline(state.transcript || []);
       renderHistoricalCharts(state.daily_logs || [], state.current_day || 1);
+      renderInitialSamples(state.initial_samples || {});
 
       const completed = !!state.completed;
       if (submitGuidanceBtn) {
@@ -819,7 +848,8 @@
       }
       const sorted = dailyLogs.slice().sort((a, b) => Number(a.day || 0) - Number(b.day || 0));
       historyListEl.innerHTML = sorted.map(createHistoryEntry).join("");
-      historyListEl.scrollTop = historyListEl.scrollHeight;
+      // Removed auto-scroll to allow users to browse history freely
+      // historyListEl.scrollTop = historyListEl.scrollHeight;
     }
 
     function createHistoryEntry(log) {
@@ -1329,6 +1359,137 @@
         });
         // Store orderStatusData for tooltip access
         historicalInventoryChartInstance.orderStatusData = orderVisualStatus;
+      }
+    }
+
+    function renderInitialSamples(initialSamples) {
+      if (!initialSamplesPanel || !initialSamplesCanvas) return;
+      if (!initialSamples || typeof initialSamples !== 'object') {
+        initialSamplesPanel.style.display = "none";
+        return;
+      }
+
+      // Get the samples for the first (and only) item
+      const itemIds = Object.keys(initialSamples);
+      if (itemIds.length === 0) {
+        initialSamplesPanel.style.display = "none";
+        return;
+      }
+
+      const samples = initialSamples[itemIds[0]];
+      if (!Array.isArray(samples) || samples.length === 0) {
+        initialSamplesPanel.style.display = "none";
+        return;
+      }
+
+      initialSamplesPanel.style.display = "block";
+
+      // Prepare data
+      const labels = samples.map((_, index) => `Sample ${index + 1}`);
+      const data = samples;
+
+      // Calculate statistics
+      const average = data.reduce((sum, val) => sum + val, 0) / data.length;
+      const variance = data.reduce((sum, val) => sum + Math.pow(val - average, 2), 0) / data.length;
+      const stdDev = Math.sqrt(variance);
+
+      // Update statistics display
+      if (initialSamplesAverageEl) {
+        initialSamplesAverageEl.textContent = formatNumber(average, 1);
+      }
+      if (initialSamplesStdDevEl) {
+        initialSamplesStdDevEl.textContent = formatNumber(stdDev, 1);
+      }
+
+      // Ensure canvas dimensions
+      ensureCanvasDimensions(initialSamplesCanvas);
+
+      // Render chart
+      if (initialSamplesChartInstance) {
+        initialSamplesChartInstance.data.labels = labels;
+        initialSamplesChartInstance.data.datasets[0].data = data;
+        initialSamplesChartInstance.update();
+        initialSamplesChartInstance.resize();
+      } else if (window.Chart && initialSamplesCanvas.getContext) {
+        initialSamplesChartInstance = new Chart(initialSamplesCanvas.getContext("2d"), {
+          type: "line",
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: "demand",
+                data: data,
+                borderColor: "#000000",
+                backgroundColor: "transparent",
+                borderWidth: 2,
+                pointRadius: 4,
+                pointBackgroundColor: "#000000",
+                pointBorderColor: "#ffffff",
+                pointBorderWidth: 1,
+                tension: 0,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+              mode: "index",
+              intersect: false,
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                title: {
+                  display: true,
+                  text: "Units",
+                },
+                ticks: {
+                  callback: (value) => formatNumber(value),
+                },
+                grid: {
+                  color: "rgba(102, 126, 234, 0.15)",
+                },
+              },
+              x: {
+                grid: {
+                  color: "rgba(102, 126, 234, 0.08)",
+                },
+              },
+            },
+            plugins: {
+              legend: {
+                display: true,
+                position: "bottom",
+                labels: {
+                  usePointStyle: true,
+                  generateLabels: (chart) => {
+                    const original = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                    const labels = [];
+                    if (original[0]) {
+                      const lineLabel = { ...original[0] };
+                      lineLabel.fillStyle = "transparent";
+                      lineLabel.strokeStyle = "#000000";
+                      lineLabel.lineWidth = 2;
+                      lineLabel.pointStyle = "line";
+                      labels.push(lineLabel);
+                    }
+                    return labels;
+                  },
+                },
+              },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const label = ctx.dataset.label || "";
+                    const value = formatNumber(ctx.parsed.y);
+                    return `${label}: ${value}`;
+                  },
+                },
+              },
+            },
+          },
+        });
       }
     }
 
