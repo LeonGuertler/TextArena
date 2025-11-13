@@ -414,34 +414,6 @@
     .order-decision-section {
       margin-bottom: 16px;
     }
-    .conversation-log {
-      max-height: 260px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      padding-right: 4px;
-    }
-    .conversation-log .message {
-      border-radius: 12px;
-      padding: 12px 14px;
-      line-height: 1.45;
-      background: #eef1ff;
-      border: 1px solid rgba(102, 126, 234, 0.2);
-    }
-    .conversation-log .message.user {
-      background: #e7f4ff;
-      border-color: rgba(66, 165, 245, 0.35);
-    }
-    .conversation-log .message-role {
-      font-weight: 600;
-      margin-bottom: 6px;
-      color: #2b3054;
-    }
-    .conversation-log .message-body {
-      font-size: 14px;
-      color: #343652;
-    }
     .news-card {
       width: 100%;
       background: #fef2ff;
@@ -570,6 +542,33 @@
     .loading-text::before {
       content: "⏳";
       font-size: 14px;
+    }
+    .timer-display {
+      font-size: 16px;
+      font-weight: 700;
+      padding: 8px 16px;
+      border-radius: 8px;
+      background: #f0f3ff;
+      border: 2px solid #667eea;
+      color: #667eea;
+      min-width: 80px;
+      text-align: center;
+    }
+    .timer-display.warning {
+      background: #fff6e6;
+      border-color: #f39c12;
+      color: #f39c12;
+      animation: pulse 1s infinite;
+    }
+    .timer-display.danger {
+      background: #ffe6e6;
+      border-color: #e74c3c;
+      color: #e74c3c;
+      animation: pulse 0.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
     }
     .row {
       display: flex;
@@ -761,24 +760,10 @@
 
             <div class="button-row">
               <button id="submit-decision-btn">SUBMIT</button>
+              <span id="decision-timer" class="timer-display hidden">60s</span>
               <span id="decision-loading" class="loading-text hidden">Submitting decision...</span>
             </div>
             <div id="decision-error" class="error"></div>
-          </section>
-
-          <section class="panel conversation-panel hidden">
-            <h3 class="panel-title">Chat History</h3>
-            <div id="conversation-log" class="conversation-log">
-              <p class="placeholder">No messages yet.</p>
-            </div>
-            <label class="input-label">Your Message to AI Advisor
-              <textarea id="user-message" placeholder="Ask questions, provide context, or discuss strategy with the AI..."></textarea>
-            </label>
-            <div class="button-row">
-              <button id="send-message-btn">Send Message</button>
-              <span id="chat-loading" class="loading-text hidden">AI is running...</span>
-              <span id="chat-error" class="error"></span>
-            </div>
           </section>
         </div>
       </div>
@@ -834,6 +819,8 @@
     let currentRunId = null;
     let pollTimer = null;
     let latestProposalAction = null;
+    let decisionTimer = null;
+    let timeRemaining = 60;
 
     const setupSection = document.getElementById("setup-section");
     const gameSection = document.getElementById("game-section");
@@ -846,7 +833,6 @@
     const algorithmRecommendationEl = document.getElementById("algorithm-recommendation-value");
     const reasoningTextEl = document.getElementById("reasoning-text");
 
-    const conversationLogEl = document.getElementById("conversation-log");
     const timelineListEl = document.getElementById("timeline-list");
     const rawTranscriptEl = document.getElementById("raw-transcript");
     const toggleTranscriptBtn = document.getElementById("toggle-transcript-btn");
@@ -871,20 +857,16 @@
     }
 
     const startError = document.getElementById("start-error");
-    const chatError = document.getElementById("chat-error");
     const decisionError = document.getElementById("decision-error");
 
-    const userMessageInput = document.getElementById("user-message");
-    const sendMessageBtn = document.getElementById("send-message-btn");
-    const chatLoading = document.getElementById("chat-loading");
     const submitDecisionBtn = document.getElementById("submit-decision-btn");
     const decisionLoading = document.getElementById("decision-loading");
     const orderQuantityInput = document.getElementById("order-quantity");
+    const decisionTimerEl = document.getElementById("decision-timer");
 
     let historicalDemandChartInstance = null;
     let historicalInventoryChartInstance = null;
     let latestState = null;
-    let isChatSubmitting = false;
     let isDecisionSubmitting = false;
 
     // Authentication guard
@@ -917,34 +899,6 @@
       }
     });
 
-    sendMessageBtn.addEventListener("click", async () => {
-      if (isChatSubmitting) return;
-      chatError.textContent = "";
-      const message = userMessageInput.value.trim();
-      if (!message) {
-        chatError.textContent = "Please enter a message";
-        return;
-      }
-
-      isChatSubmitting = true;
-      updateChatControls();
-
-      try {
-        const response = await apiRequest(`/runs/${currentRunId}/messages`, {
-          method: "POST",
-          body: JSON.stringify({ message }),
-        });
-        userMessageInput.value = "";
-        updateUI(response);
-        startPolling();
-      } catch (err) {
-        chatError.textContent = err.message || "Failed to send message";
-      } finally {
-        isChatSubmitting = false;
-        updateChatControls();
-      }
-    });
-
     submitDecisionBtn.addEventListener("click", async () => {
       if (isDecisionSubmitting) return;
       decisionError.textContent = "";
@@ -967,6 +921,7 @@
       });
 
       isDecisionSubmitting = true;
+      stopDecisionTimer(); // Stop timer when user submits
       updateDecisionControls();
 
       try {
@@ -992,7 +947,6 @@
       renderNews(state.news || {});
       renderHistory(state.daily_logs || []);
       renderORRecommendation(state.or_recommendation);
-      renderConversation(state.conversation || []);
       renderTranscript(state.transcript || []);
       renderHistoricalCharts(state.daily_logs || [], state.current_day || 1);
 
@@ -1001,9 +955,95 @@
         clearInterval(pollTimer);
         pollTimer = null;
       }
-      updateChatControls();
       updateDecisionControls();
       requestAnimationFrame(syncColumnHeights);
+      
+      // Start timer when waiting for decision
+      const waiting = !!state.waiting_for_final_action;
+      if (waiting && !completed) {
+        startDecisionTimer();
+      } else {
+        stopDecisionTimer();
+      }
+    }
+
+    function startDecisionTimer() {
+      stopDecisionTimer(); // Clear any existing timer
+      timeRemaining = 60;
+      updateTimerDisplay();
+      
+      if (decisionTimerEl) {
+        decisionTimerEl.classList.remove("hidden");
+      }
+      
+      decisionTimer = setInterval(() => {
+        timeRemaining--;
+        updateTimerDisplay();
+        
+        if (timeRemaining <= 0) {
+          stopDecisionTimer();
+          autoSubmitDecision();
+        }
+      }, 1000);
+    }
+
+    function stopDecisionTimer() {
+      if (decisionTimer) {
+        clearInterval(decisionTimer);
+        decisionTimer = null;
+      }
+      if (decisionTimerEl) {
+        decisionTimerEl.classList.add("hidden");
+        decisionTimerEl.classList.remove("warning", "danger");
+      }
+    }
+
+    function updateTimerDisplay() {
+      if (!decisionTimerEl) return;
+      
+      decisionTimerEl.textContent = `${timeRemaining}s`;
+      decisionTimerEl.classList.remove("warning", "danger");
+      
+      if (timeRemaining <= 10) {
+        decisionTimerEl.classList.add("danger");
+      } else if (timeRemaining <= 30) {
+        decisionTimerEl.classList.add("warning");
+      }
+    }
+
+    async function autoSubmitDecision() {
+      if (isDecisionSubmitting) return;
+      
+      // Auto-submit with current input value (recommended value) or 0 as fallback
+      const orderQuantity = orderQuantityInput.value.trim();
+      let qty = parseInt(orderQuantity, 10);
+      
+      // If input is empty or invalid, use 0 as fallback
+      if (!Number.isInteger(qty) || qty < 0) {
+        qty = 0;
+      }
+      
+      const actionJson = JSON.stringify({
+        "chips(Regular)": qty,
+      });
+
+      isDecisionSubmitting = true;
+      updateDecisionControls();
+
+      try {
+        const response = await apiRequest(`/runs/${currentRunId}/final-action`, {
+          method: "POST",
+          body: JSON.stringify({ action_json: actionJson }),
+        });
+        orderQuantityInput.value = "";
+        updateUI(response);
+        startPolling();
+      } catch (err) {
+        decisionError.textContent = err.message || "Auto-submit failed";
+      } finally {
+        isDecisionSubmitting = false;
+        updateDecisionControls();
+      }
     }
 
     function renderSnapshot(state) {
@@ -1347,92 +1387,6 @@
       return null;
     }
 
-    function renderConversation(conversation) {
-      if (!conversationLogEl) return;
-      if (!Array.isArray(conversation) || !conversation.length) {
-        conversationLogEl.innerHTML = `<p class="placeholder">No messages yet.</p>`;
-        return;
-      }
-
-      const recent = conversation.slice(-12);
-      conversationLogEl.innerHTML = recent.map((msg) => {
-        const roleClass = msg.role === "human" ? "user" : "assistant";
-        const roleLabel = msg.role === "human" ? "👤 You" : "🤖 AI Advisor";
-        const content = formatConversationContent(msg);
-        return `
-          <div class="message ${roleClass}">
-            <div class="message-role">${roleLabel}</div>
-            <div class="message-body">${content}</div>
-          </div>
-        `;
-      }).join("");
-
-      conversationLogEl.scrollTop = conversationLogEl.scrollHeight;
-    }
-
-    function formatConversationContent(message) {
-      const rawContent = message.content;
-      if (message.role !== "human") {
-        const parsed = coerceAgentPayload(rawContent);
-        if (parsed && typeof parsed === "object") {
-          const parts = [];
-          if (parsed.rationale) {
-            parts.push(`<strong>Rationale:</strong> ${escapeHtml(String(parsed.rationale)).replace(/\n/g, "<br>")}`);
-          }
-          const actionBlock = coerceActionObject(parsed.action);
-          if (actionBlock && Object.keys(actionBlock).length) {
-            parts.push(`<strong>Action:</strong> ${formatActionList(actionBlock)}`);
-          }
-          if (parsed.carry_over_insight) {
-            parts.push(`<em>Carry-over insight:</em> ${escapeHtml(String(parsed.carry_over_insight)).replace(/\n/g, "<br>")}`);
-          }
-          if (parts.length) {
-            return parts.join("<br><br>");
-          }
-        }
-      }
-
-      const content = tryExtractString(rawContent);
-      if (!content) return "";
-      try {
-        const parsed = JSON.parse(content);
-        if (parsed && typeof parsed === "object") {
-          const parts = [];
-          if (parsed.rationale) {
-            parts.push(`<strong>Rationale:</strong> ${escapeHtml(String(parsed.rationale)).replace(/\n/g, "<br>")}`);
-          }
-          if (parsed.action && typeof parsed.action === "object") {
-            parts.push(`<strong>Action:</strong> ${formatActionList(parsed.action)}`);
-          }
-          if (parts.length) {
-            return parts.join("<br><br>");
-          }
-          return escapeHtml(JSON.stringify(parsed, null, 2)).replace(/\n/g, "<br>");
-        }
-      } catch (err) {
-        // Not JSON, fall through
-      }
-
-      return escapeHtml(String(content)).replace(/\n/g, "<br>");
-    }
-
-    function formatActionList(actionObj) {
-      const entries = Object.entries(actionObj || {});
-      if (!entries.length) {
-        return "<em>No action proposed.</em>";
-      }
-      return `
-        <ul class="proposal-actions">
-          ${entries.map(([key, value]) => `
-            <li>
-              <span>${escapeHtml(String(key))}</span>
-              <strong>${formatNumber(value)}</strong>
-            </li>
-          `).join("")}
-        </ul>
-      `;
-    }
-
     function renderTranscript(transcript) {
       if (!timelineListEl || !rawTranscriptEl) return;
       if (!Array.isArray(transcript) || !transcript.length) {
@@ -1606,25 +1560,33 @@
                 display: true,
                 position: "bottom",
                 labels: {
-                  usePointStyle: false,
+                  usePointStyle: true,
                   generateLabels: (chart) => {
                     const original = Chart.defaults.plugins.legend.labels.generateLabels(chart);
-                    return original.map((label, index) => {
-                      if (index === 0) {
-                        // Line chart legend: show as line with point
-                        label.fillStyle = "transparent";
-                        label.strokeStyle = "#000000";
-                        label.lineWidth = 2;
-                        label.pointStyle = "circle";
-                      } else if (index === 1) {
-                        // Bar chart legend: show as rectangle
-                        label.fillStyle = "rgba(102, 126, 234, 0.6)";
-                        label.strokeStyle = "rgba(102, 126, 234, 0.8)";
-                        label.lineWidth = 1;
-                        label.pointStyle = "rect";
-                      }
-                      return label;
-                    });
+                    const labels = [];
+                    // Chart.js orders 'original' by dataset.order property (ascending)
+                    // datasets[0]: demand (line, order:2), datasets[1]: demand fulfilled (bar, order:1)
+                    // So: original[0] = demand fulfilled (order:1), original[1] = demand (order:2)
+                    // Display order: demand (line) first (left), then demand fulfilled (bar) (right)
+                    if (original[1]) {
+                      // Line chart (demand) - from original[1] - show first (left)
+                      const lineLabel = { ...original[1] };
+                      lineLabel.fillStyle = "transparent";
+                      lineLabel.strokeStyle = "#000000";
+                      lineLabel.lineWidth = 2;
+                      lineLabel.pointStyle = "line";
+                      labels.push(lineLabel);
+                    }
+                    if (original[0]) {
+                      // Bar chart (demand fulfilled) - from original[0] - show second (right)
+                      const barLabel = { ...original[0] };
+                      barLabel.fillStyle = "rgba(102, 126, 234, 0.6)";
+                      barLabel.strokeStyle = "rgba(102, 126, 234, 0.8)";
+                      barLabel.lineWidth = 1;
+                      barLabel.pointStyle = "rect";
+                      labels.push(barLabel);
+                    }
+                    return labels;
                   },
                 },
               },
@@ -1769,17 +1731,17 @@
                 display: true,
                 position: "bottom",
                 labels: {
-                  usePointStyle: false,
+                  usePointStyle: true,
                   generateLabels: (chart) => {
                     const original = Chart.defaults.plugins.legend.labels.generateLabels(chart);
                     const labels = [];
                     // First: on-hand inventory (line chart, red)
                     if (original[0]) {
-                      const lineLabel = original[0];
+                      const lineLabel = { ...original[0] };
                       lineLabel.fillStyle = "transparent";
                       lineLabel.strokeStyle = "#e74c3c";
                       lineLabel.lineWidth = 2;
-                      lineLabel.pointStyle = "circle";
+                      lineLabel.pointStyle = "line";
                       labels.push(lineLabel);
                     }
                     // Second: order (received) - green filled
@@ -1931,14 +1893,6 @@
       return response.json();
     }
 
-    function updateChatControls() {
-      const completed = !!(latestState && latestState.completed);
-      const disableSend = completed || isChatSubmitting;
-      if (sendMessageBtn) sendMessageBtn.disabled = disableSend;
-      if (userMessageInput) userMessageInput.disabled = completed || isChatSubmitting;
-      if (chatLoading) chatLoading.classList.toggle("hidden", !isChatSubmitting);
-    }
-
     function updateDecisionControls() {
       const completed = latestState ? !!latestState.completed : false;
       const waiting = latestState ? !!latestState.waiting_for_final_action : false;
@@ -1949,7 +1903,6 @@
       if (decisionLoading) decisionLoading.classList.toggle("hidden", !isDecisionSubmitting);
     }
 
-    updateChatControls();
     updateDecisionControls();
 
     function formatCurrency(value) {

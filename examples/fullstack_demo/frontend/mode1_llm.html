@@ -552,6 +552,33 @@
       content: "⏳";
       font-size: 14px;
     }
+    .timer-display {
+      font-size: 16px;
+      font-weight: 700;
+      padding: 8px 16px;
+      border-radius: 8px;
+      background: #f0f3ff;
+      border: 2px solid #667eea;
+      color: #667eea;
+      min-width: 80px;
+      text-align: center;
+    }
+    .timer-display.warning {
+      background: #fff6e6;
+      border-color: #f39c12;
+      color: #f39c12;
+      animation: pulse 1s infinite;
+    }
+    .timer-display.danger {
+      background: #ffe6e6;
+      border-color: #e74c3c;
+      color: #e74c3c;
+      animation: pulse 0.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
     .row {
       display: flex;
       gap: 16px;
@@ -751,6 +778,7 @@
 
             <div class="button-row">
               <button id="submit-decision-btn">SUBMIT</button>
+              <span id="decision-timer" class="timer-display hidden">60s</span>
               <span id="decision-loading" class="loading-text hidden">Submitting decision...</span>
             </div>
             <div id="decision-error" class="error"></div>
@@ -809,6 +837,8 @@
     let currentRunId = null;
     let pollTimer = null;
     let latestProposalAction = null;
+    let decisionTimer = null;
+    let timeRemaining = 60;
 
     const setupSection = document.getElementById("setup-section");
     const gameSection = document.getElementById("game-section");
@@ -851,6 +881,7 @@
     const submitDecisionBtn = document.getElementById("submit-decision-btn");
     const decisionLoading = document.getElementById("decision-loading");
     const orderQuantityInput = document.getElementById("order-quantity");
+    const decisionTimerEl = document.getElementById("decision-timer");
 
     let historicalDemandChartInstance = null;
     let historicalInventoryChartInstance = null;
@@ -909,6 +940,7 @@
       });
 
       isDecisionSubmitting = true;
+      stopDecisionTimer(); // Stop timer when user submits
       updateDecisionControls();
 
       try {
@@ -945,6 +977,93 @@
       }
       updateDecisionControls();
       requestAnimationFrame(syncColumnHeights);
+      
+      // Start timer when waiting for decision
+      const waiting = !!state.waiting_for_final_action;
+      if (waiting && !completed) {
+        startDecisionTimer();
+      } else {
+        stopDecisionTimer();
+      }
+    }
+
+    function startDecisionTimer() {
+      stopDecisionTimer(); // Clear any existing timer
+      timeRemaining = 60;
+      updateTimerDisplay();
+      
+      if (decisionTimerEl) {
+        decisionTimerEl.classList.remove("hidden");
+      }
+      
+      decisionTimer = setInterval(() => {
+        timeRemaining--;
+        updateTimerDisplay();
+        
+        if (timeRemaining <= 0) {
+          stopDecisionTimer();
+          autoSubmitDecision();
+        }
+      }, 1000);
+    }
+
+    function stopDecisionTimer() {
+      if (decisionTimer) {
+        clearInterval(decisionTimer);
+        decisionTimer = null;
+      }
+      if (decisionTimerEl) {
+        decisionTimerEl.classList.add("hidden");
+        decisionTimerEl.classList.remove("warning", "danger");
+      }
+    }
+
+    function updateTimerDisplay() {
+      if (!decisionTimerEl) return;
+      
+      decisionTimerEl.textContent = `${timeRemaining}s`;
+      decisionTimerEl.classList.remove("warning", "danger");
+      
+      if (timeRemaining <= 10) {
+        decisionTimerEl.classList.add("danger");
+      } else if (timeRemaining <= 30) {
+        decisionTimerEl.classList.add("warning");
+      }
+    }
+
+    async function autoSubmitDecision() {
+      if (isDecisionSubmitting) return;
+      
+      // Auto-submit with current input value (recommended value) or 0 as fallback
+      const orderQuantity = orderQuantityInput.value.trim();
+      let qty = parseInt(orderQuantity, 10);
+      
+      // If input is empty or invalid, use 0 as fallback
+      if (!Number.isInteger(qty) || qty < 0) {
+        qty = 0;
+      }
+      
+      const actionJson = JSON.stringify({
+        "chips(Regular)": qty,
+      });
+
+      isDecisionSubmitting = true;
+      updateDecisionControls();
+
+      try {
+        const response = await apiRequest(`/runs/${currentRunId}/final-action`, {
+          method: "POST",
+          body: JSON.stringify({ action_json: actionJson }),
+        });
+        orderQuantityInput.value = "";
+        updateUI(response);
+        startPolling();
+      } catch (err) {
+        decisionError.textContent = err.message || "Auto-submit failed";
+      } finally {
+        isDecisionSubmitting = false;
+        updateDecisionControls();
+      }
     }
 
     function renderSnapshot(state) {
@@ -1454,25 +1573,33 @@
                 display: true,
                 position: "bottom",
                 labels: {
-                  usePointStyle: false,
+                  usePointStyle: true,
                   generateLabels: (chart) => {
                     const original = Chart.defaults.plugins.legend.labels.generateLabels(chart);
-                    return original.map((label, index) => {
-                      if (index === 0) {
-                        // Line chart legend: show as line with point
-                        label.fillStyle = "transparent";
-                        label.strokeStyle = "#000000";
-                        label.lineWidth = 2;
-                        label.pointStyle = "circle";
-                      } else if (index === 1) {
-                        // Bar chart legend: show as rectangle
-                        label.fillStyle = "rgba(102, 126, 234, 0.6)";
-                        label.strokeStyle = "rgba(102, 126, 234, 0.8)";
-                        label.lineWidth = 1;
-                        label.pointStyle = "rect";
-                      }
-                      return label;
-                    });
+                    const labels = [];
+                    // Chart.js orders 'original' by dataset.order property (ascending)
+                    // datasets[0]: demand (line, order:2), datasets[1]: demand fulfilled (bar, order:1)
+                    // So: original[0] = demand fulfilled (order:1), original[1] = demand (order:2)
+                    // Display order: demand (line) first (left), then demand fulfilled (bar) (right)
+                    if (original[1]) {
+                      // Line chart (demand) - from original[1] - show first (left)
+                      const lineLabel = { ...original[1] };
+                      lineLabel.fillStyle = "transparent";
+                      lineLabel.strokeStyle = "#000000";
+                      lineLabel.lineWidth = 2;
+                      lineLabel.pointStyle = "line";
+                      labels.push(lineLabel);
+                    }
+                    if (original[0]) {
+                      // Bar chart (demand fulfilled) - from original[0] - show second (right)
+                      const barLabel = { ...original[0] };
+                      barLabel.fillStyle = "rgba(102, 126, 234, 0.6)";
+                      barLabel.strokeStyle = "rgba(102, 126, 234, 0.8)";
+                      barLabel.lineWidth = 1;
+                      barLabel.pointStyle = "rect";
+                      labels.push(barLabel);
+                    }
+                    return labels;
                   },
                 },
               },
@@ -1617,17 +1744,17 @@
                 display: true,
                 position: "bottom",
                 labels: {
-                  usePointStyle: false,
+                  usePointStyle: true,
                   generateLabels: (chart) => {
                     const original = Chart.defaults.plugins.legend.labels.generateLabels(chart);
                     const labels = [];
                     // First: on-hand inventory (line chart, red)
                     if (original[0]) {
-                      const lineLabel = original[0];
+                      const lineLabel = { ...original[0] };
                       lineLabel.fillStyle = "transparent";
                       lineLabel.strokeStyle = "#e74c3c";
                       lineLabel.lineWidth = 2;
-                      lineLabel.pointStyle = "circle";
+                      lineLabel.pointStyle = "line";
                       labels.push(lineLabel);
                     }
                     // Second: order (received) - green filled

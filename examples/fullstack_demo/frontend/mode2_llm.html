@@ -432,8 +432,8 @@
             <div class="info-box hidden" id="guidance-info">
               The AI is waiting for your strategic guidance. Provide high-level direction for the next phase.
             </div>
-            <label>Your Strategic Guidance
-              <textarea id="guidance-text" placeholder="Example: 'Make relatively conservative decisions.'"></textarea>
+            <label>Your Strategic Guidance (optional - can be left blank)
+              <textarea id="guidance-text" placeholder="Example: 'Make relatively conservative decisions.' Or leave blank to let AI continue autonomously."></textarea>
             </label>
             <button id="submit-guidance-btn">Submit Guidance</button>
             <div id="guidance-error" class="error"></div>
@@ -577,10 +577,11 @@
 
     async function submitGuidance() {
       guidanceError.textContent = "";
+      // Allow empty/blank guidance - user can submit without text to let AI continue autonomously
       const guidance = guidanceText.value ?? "";
 
       try {
-        const response = await apiRequest(`/runs/${currentRunId}/messages`, {
+        const response = await apiRequest(`/runs/${currentRunId}/guidance`, {
           method: "POST",
           body: JSON.stringify({ message: guidance }),
         });
@@ -794,13 +795,17 @@
         .map(({ day, message }, index) => {
           const safeMessage = escapeHtml(String(message ?? ""))
             .replace(/\n/g, "<br>");
+          // If message is empty or only whitespace, show a friendly placeholder
+          const displayMessage = (message && message.trim()) 
+            ? safeMessage 
+            : "<em style='color: #9aa0c1;'>(No specific guidance - AI continues autonomously)</em>";
           return `
             <div class="guidance-entry">
               <header>
                 <span>Week ${formatNumber(day)} Guidance</span>
                 <span>#${index + 1}</span>
               </header>
-              <p>${safeMessage || "<em>No message recorded.</em>"}</p>
+              <p>${displayMessage}</p>
             </div>
           `;
         })
@@ -1085,25 +1090,33 @@
                 display: true,
                 position: "bottom",
                 labels: {
-                  usePointStyle: false,
+                  usePointStyle: true,
                   generateLabels: (chart) => {
                     const original = Chart.defaults.plugins.legend.labels.generateLabels(chart);
-                    return original.map((label, index) => {
-                      if (index === 0) {
-                        // Line chart legend: show as line with point
-                        label.fillStyle = "transparent";
-                        label.strokeStyle = "#000000";
-                        label.lineWidth = 2;
-                        label.pointStyle = "circle";
-                      } else if (index === 1) {
-                        // Bar chart legend: show as rectangle
-                        label.fillStyle = "rgba(102, 126, 234, 0.6)";
-                        label.strokeStyle = "rgba(102, 126, 234, 0.8)";
-                        label.lineWidth = 1;
-                        label.pointStyle = "rect";
-                      }
-                      return label;
-                    });
+                    const labels = [];
+                    // Chart.js orders 'original' by dataset.order property (ascending)
+                    // datasets[0]: demand (line, order:2), datasets[1]: demand fulfilled (bar, order:1)
+                    // So: original[0] = demand fulfilled (order:1), original[1] = demand (order:2)
+                    // Display order: demand (line) first (left), then demand fulfilled (bar) (right)
+                    if (original[1]) {
+                      // Line chart (demand) - from original[1] - show first (left)
+                      const lineLabel = { ...original[1] };
+                      lineLabel.fillStyle = "transparent";
+                      lineLabel.strokeStyle = "#000000";
+                      lineLabel.lineWidth = 2;
+                      lineLabel.pointStyle = "line";
+                      labels.push(lineLabel);
+                    }
+                    if (original[0]) {
+                      // Bar chart (demand fulfilled) - from original[0] - show second (right)
+                      const barLabel = { ...original[0] };
+                      barLabel.fillStyle = "rgba(102, 126, 234, 0.6)";
+                      barLabel.strokeStyle = "rgba(102, 126, 234, 0.8)";
+                      barLabel.lineWidth = 1;
+                      barLabel.pointStyle = "rect";
+                      labels.push(barLabel);
+                    }
+                    return labels;
                   },
                 },
               },
@@ -1248,17 +1261,17 @@
                 display: true,
                 position: "bottom",
                 labels: {
-                  usePointStyle: false,
+                  usePointStyle: true,
                   generateLabels: (chart) => {
                     const original = Chart.defaults.plugins.legend.labels.generateLabels(chart);
                     const labels = [];
                     // First: on-hand inventory (line chart, red)
                     if (original[0]) {
-                      const lineLabel = original[0];
+                      const lineLabel = { ...original[0] };
                       lineLabel.fillStyle = "transparent";
                       lineLabel.strokeStyle = "#e74c3c";
                       lineLabel.lineWidth = 2;
-                      lineLabel.pointStyle = "circle";
+                      lineLabel.pointStyle = "line";
                       labels.push(lineLabel);
                     }
                     // Second: order (received) - green filled

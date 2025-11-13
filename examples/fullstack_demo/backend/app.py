@@ -117,9 +117,6 @@ class RunEntry:
 
 RUN_STORE: Dict[str, RunEntry] = {}
 
-if FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
-
 
 @app.post("/runs")
 def start_run(
@@ -181,6 +178,33 @@ def submit_final_action(
     return result
 
 
+class GuidancePayload(BaseModel):
+    message: str = Field(min_length=0)  # Allow empty guidance - user can submit blank to let AI continue autonomously
+
+
+@app.post("/runs/{run_id}/guidance")
+def submit_guidance(
+    run_id: str,
+    payload: GuidancePayload,
+    auth: AuthContext = Depends(get_auth_context),
+    supabase_logger: SupabaseLogger = Depends(get_supabase_logger),
+):
+    entry = _get_entry(run_id)
+    _ensure_user_access(entry, auth)
+    session = entry.session
+
+    if session.config.mode != "mode2_llm":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Mode 2 LLM supports guidance")
+
+    result = session.submit_guidance(payload.message)
+    
+    # Only persist when game is completed
+    if result.get("completed"):
+        _maybe_persist(run_id, session, result, auth, supabase_logger)
+    
+    return result
+
+
 def _get_entry(run_id: str) -> RunEntry:
     if run_id not in RUN_STORE:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
@@ -225,3 +249,7 @@ def _maybe_persist(
         run_id=run_id,
     )
 
+
+# Mount static files after all API routes to avoid conflicts
+if FRONTEND_DIR.exists():
+    app.mount("/static", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")
