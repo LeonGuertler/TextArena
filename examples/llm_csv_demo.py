@@ -525,11 +525,11 @@ def main():
         except Exception as e:
             print(f"Error loading train.csv: {e}")
             print("Falling back to default unified samples")
-            unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
+            unified_samples = [112, 97, 116, 138, 94]
             initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
     else:
         # Use default unified samples for synthetic instances
-        unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
+        unified_samples = [112, 97, 116, 138, 94]
         initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
         print(f"\nUsing default unified initial samples: {unified_samples}")
     print(f"Promised lead time (shown to LLM): {args.promised_lead_time} days")

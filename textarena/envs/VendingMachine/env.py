@@ -228,9 +228,10 @@ class VendingMachineEnv(ta.Env):
                 on_hand = self.on_hand_inventory[item_id]
                 # Calculate total in-transit from pending_orders
                 # Include ALL orders that haven't arrived yet (arrival_day >= current_day)
+                # This includes orders with arrival_day=inf (lost orders still show as in-transit)
                 in_transit = sum(order['quantity'] for order in self.pending_orders 
                                 if order['item_id'] == item_id 
-                                and self.current_day <= order['arrival_day'] < float('inf'))
+                                and self.current_day <= order['arrival_day'])
                 board_lines.append(
                     f"{item_id} ({desc}): Profit=${profit}/unit, Holding=${holding_cost}/unit/day"
                 )
@@ -278,7 +279,7 @@ class VendingMachineEnv(ta.Env):
             self.current_day_orders = {}
             
             # Add orders to pending_orders with calculated arrival_day
-            # If lead_time=inf, accept the order but it will never arrive (gets lost)
+            # If lead_time=inf, order shows in in-transit but never arrives (gets lost)
             for item_id, qty in orders.items():
                 lead_time = self.items[item_id]['lead_time']
                 
@@ -286,26 +287,25 @@ class VendingMachineEnv(ta.Env):
                 self.current_day_orders[item_id] = qty
                 
                 if qty > 0:
-                    # If lead_time is infinite, the order is accepted but never arrives
-                    # (Simulates order getting lost without agent knowing)
+                    # Always count the order in total_ordered (even if it gets lost)
+                    self.total_ordered[item_id] += qty
+                    
+                    # Calculate arrival_day based on lead_time
+                    # If lead_time is infinite, arrival_day = inf (never arrives)
                     if lead_time == float('inf'):
-                        # Don't add to pending_orders - order gets lost
-                        # Don't print warning - agent should not know about the issue
-                        pass
+                        arrival_day = float('inf')
                     else:
-                        # Normal processing: Calculate arrival_day = order_day + lead_time
                         arrival_day = self.current_day + lead_time
-                        
-                        # Add to pending_orders
-                        self.pending_orders.append({
-                            'item_id': item_id,
-                            'quantity': qty,
-                            'order_day': self.current_day,
-                            'arrival_day': arrival_day,
-                            'original_lead_time': lead_time
-                        })
-                        
-                        self.total_ordered[item_id] += qty
+                    
+                    # Add to pending_orders (including inf orders - they show in in-transit)
+                    # Orders with arrival_day=inf will never be removed (永远在路上)
+                    self.pending_orders.append({
+                        'item_id': item_id,
+                        'quantity': qty,
+                        'order_day': self.current_day,
+                        'arrival_day': arrival_day,
+                        'original_lead_time': lead_time
+                    })
 
             # Advance to Demand
             return self.state.step(rotate_player=True)

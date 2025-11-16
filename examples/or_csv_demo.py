@@ -516,11 +516,11 @@ def main():
         except Exception as e:
             print(f"Error loading train.csv: {e}")
             print("Falling back to default unified samples")
-            unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
+            unified_samples = [112, 97, 116, 138, 94]
             initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
     else:
         # Use default unified samples for synthetic instances
-        unified_samples = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
+        unified_samples = [112, 97, 116, 138, 94]
         initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
         print(f"\nUsing default unified initial samples: {unified_samples}")
     
@@ -564,7 +564,6 @@ def main():
         
         if pid == 0:  # VM agent (OR algorithm)
             # Update item configurations for current day (supports dynamic changes)
-            has_inf_lead_time = False
             for item_id in csv_player.get_item_ids():
                 config = csv_player.get_day_item_config(current_day, item_id)
                 env.update_item_config(
@@ -574,23 +573,8 @@ def main():
                     holding_cost=config['holding_cost'],
                     description=config['description']
                 )
-                # Check if any item has lead_time=inf (supplier unavailable)
-                if config['lead_time'] == float('inf'):
-                    has_inf_lead_time = True
             
-            # If supplier unavailable (lead_time=inf), skip OR decision
-            if has_inf_lead_time:
-                # Create action with order=0 for all items
-                zero_orders = {item_id: 0 for item_id in csv_player.get_item_ids()}
-                action = json.dumps({"action": zero_orders}, indent=2)
-                
-                print(f"\nWARNING Week {current_day}: Supplier unavailable (lead_time=inf)")
-                print(f"Week {current_day} OR Decision: {action} (automatically set to 0)")
-                
-                # Skip to demand turn
-                done, _ = env.step(action=action)
-                continue
-            
+            # Get OR decision (even if lead_time=inf - OR doesn't know about supply issues)
             action, stats = or_agent.get_action(observation)
             
             # Print detailed statistics for each item
