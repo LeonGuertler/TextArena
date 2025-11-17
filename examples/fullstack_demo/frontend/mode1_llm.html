@@ -277,12 +277,12 @@
       background: #fff;
       border-radius: 8px;
       border: 1px dashed rgba(102, 126, 234, 0.25);
-      padding: 10px 12px;
-      font-family: 'Courier New', monospace;
-      font-size: 12px;
+      padding: 12px 14px;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 15px;
       color: #2f3158;
       white-space: pre-wrap;
-      line-height: 1.45;
+      line-height: 1.7;
     }
     .history-placeholder {
       color: var(--text-subtle);
@@ -519,6 +519,18 @@
       color: #2c3053;
       font-weight: 600;
       font-family: 'Courier New', monospace;
+    }
+    .statistics-group {
+      margin-bottom: 16px;
+    }
+    .statistics-group:last-child {
+      margin-bottom: 0;
+    }
+    .statistics-group h4 {
+      margin: 0 0 12px 0;
+      font-size: 16px;
+      color: #2c3053;
+      font-weight: 600;
     }
     .decision-panel {
       padding: 16px 18px;
@@ -794,15 +806,30 @@
               <canvas id="historical-demand-chart"></canvas>
             </div>
             <div class="historical-demand-statistics">
-              <h4>Historical Demand Statistics</h4>
-              <div class="statistics-content">
-                <div class="statistic-item">
-                  <span class="statistic-label">Average:</span>
-                  <span class="statistic-value" id="demand-average">—</span>
+              <div id="sample-statistics" class="statistics-group">
+                <h4>Sample Statistics</h4>
+                <div class="statistics-content">
+                  <div class="statistic-item">
+                    <span class="statistic-label">Average:</span>
+                    <span class="statistic-value" id="sample-average">—</span>
+                  </div>
+                  <div class="statistic-item">
+                    <span class="statistic-label">Standard deviation:</span>
+                    <span class="statistic-value" id="sample-stddev">—</span>
+                  </div>
                 </div>
-                <div class="statistic-item">
-                  <span class="statistic-label">Standard deviation:</span>
-                  <span class="statistic-value" id="demand-stddev">—</span>
+              </div>
+              <div id="historical-statistics" class="statistics-group hidden">
+                <h4>Historical Demand Statistics</h4>
+                <div class="statistics-content">
+                  <div class="statistic-item">
+                    <span class="statistic-label">Average:</span>
+                    <span class="statistic-value" id="demand-average">—</span>
+                  </div>
+                  <div class="statistic-item">
+                    <span class="statistic-label">Standard deviation:</span>
+                    <span class="statistic-value" id="demand-stddev">—</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -813,28 +840,6 @@
           <div class="historical-inventory-container">
             <div class="historical-inventory-chart-wrapper">
               <canvas id="historical-inventory-chart"></canvas>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="initial-samples-panel" class="panel historical-charts-panel">
-        <h3 class="panel-title">Pre-Game Sample Demand For Reference</h3>
-        <div class="historical-demand-container">
-          <div class="historical-demand-chart-wrapper">
-            <canvas id="initial-samples-chart"></canvas>
-          </div>
-          <div class="historical-demand-statistics">
-            <h4>Sample Statistics</h4>
-            <div class="statistics-content">
-              <div class="statistic-item">
-                <span class="statistic-label">Average:</span>
-                <span class="statistic-value" id="initial-samples-average">—</span>
-              </div>
-              <div class="statistic-item">
-                <span class="statistic-label">Standard deviation:</span>
-                <span class="statistic-value" id="initial-samples-stddev">—</span>
-              </div>
             </div>
           </div>
         </div>
@@ -883,12 +888,10 @@
     const historicalInventoryCanvas = document.getElementById("historical-inventory-chart");
     const demandAverageEl = document.getElementById("demand-average");
     const demandStdDevEl = document.getElementById("demand-stddev");
-
-    const initialSamplesPanel = document.getElementById("initial-samples-panel");
-    const initialSamplesCanvas = document.getElementById("initial-samples-chart");
-    const initialSamplesAverageEl = document.getElementById("initial-samples-average");
-    const initialSamplesStdDevEl = document.getElementById("initial-samples-stddev");
-    let initialSamplesChartInstance = null;
+    const sampleAverageEl = document.getElementById("sample-average");
+    const sampleStdDevEl = document.getElementById("sample-stddev");
+    const sampleStatisticsEl = document.getElementById("sample-statistics");
+    const historicalStatisticsEl = document.getElementById("historical-statistics");
 
     if (toggleTranscriptBtn) {
       toggleTranscriptBtn.addEventListener("click", () => {
@@ -996,8 +999,7 @@
       renderORRecommendation(state.or_recommendation);
       renderOrderDecision(state.transcript || []);
       renderTranscript(state.transcript || []);
-      renderHistoricalCharts(state.daily_logs || [], state.current_day || 1);
-      renderInitialSamples(state.initial_samples || {});
+      renderHistoricalCharts(state.daily_logs || [], state.current_day || 1, state.initial_samples || {});
 
       const completed = !!state.completed;
       if (completed && pollTimer) {
@@ -1271,7 +1273,7 @@
     }
 
     function buildHistoryLines(log) {
-      const lines = [`Week ${formatNumber(log.day)} concluded:`];
+      const lines = [];
       const items = [];
       const seen = new Set();
       const appendItemsFrom = (source) => {
@@ -1303,12 +1305,15 @@
                 .map((entry) => {
                   const qty = Number(entry.quantity ?? 0);
                   const orderDay = formatNumber(entry.order_day);
-                  return `${qty} (ordered Week ${orderDay})`;
+                  return `${qty} (from Week ${orderDay})`;
                 })
                 .join(", ");
-        lines.push(
-          `${itemId}: ordered=${ordered}, arrived=${arrivalText}, starting on-hand inventory=${starting}, demand=${demand}, sold=${sold}, ending on-hand inventory=${ending}`
-        );
+        
+        // Format: 3 lines for better readability
+        lines.push(`${itemId}:`);
+        lines.push(`  Order & Arrival: ${formatNumber(ordered)} ordered, ${arrivalText} arrived`);
+        lines.push(`  Demand & Sales: ${formatNumber(demand)} demand, ${formatNumber(sold)} sold`);
+        lines.push(`  Inventory: ${formatNumber(starting)} starting → ${formatNumber(ending)} ending`);
       });
       return lines;
     }
@@ -1476,9 +1481,28 @@
       return escapeHtml(JSON.stringify(event, null, 2)).replace(/\n/g, "<br>");
     }
 
-    function renderHistoricalCharts(dailyLogs, currentDay) {
+    function renderHistoricalCharts(dailyLogs, currentDay, initialSamples) {
       if (!historicalChartsPanel || !historicalDemandCanvas || !historicalInventoryCanvas) return;
-      if (!Array.isArray(dailyLogs) || dailyLogs.length === 0) {
+      
+      // Extract initial samples data
+      let sampleData = [];
+      let hasSamples = false;
+      if (initialSamples && typeof initialSamples === 'object') {
+        const itemIds = Object.keys(initialSamples);
+        if (itemIds.length > 0) {
+          const samples = initialSamples[itemIds[0]];
+          if (Array.isArray(samples) && samples.length > 0) {
+            sampleData = samples;
+            hasSamples = true;
+          }
+        }
+      }
+      
+      // Filter logs: only include weeks up to currentDay - 1
+      const filteredLogs = Array.isArray(dailyLogs) ? dailyLogs.filter((log) => log.day < currentDay) : [];
+      
+      // If no samples and no logs, hide the panel
+      if (!hasSamples && filteredLogs.length === 0) {
         if (historicalChartsPanel) historicalChartsPanel.style.display = "none";
         if (historicalDemandChartInstance) {
           historicalDemandChartInstance.destroy();
@@ -1493,62 +1517,112 @@
 
       historicalChartsPanel.style.display = "block";
 
-      // Filter logs: only include weeks up to currentDay - 1
-      const filteredLogs = dailyLogs.filter((log) => log.day < currentDay);
-      if (filteredLogs.length === 0) {
-        if (historicalChartsPanel) historicalChartsPanel.style.display = "none";
-        return;
-      }
-
       // Ensure canvas dimensions
       ensureCanvasDimensions(historicalDemandCanvas);
       ensureCanvasDimensions(historicalInventoryCanvas);
 
-      // Prepare data for Historical Demand chart
-      const demandLabels = filteredLogs.map((log) => `Week ${formatNumber(log.day)}`);
-      const demandData = filteredLogs.map((log) => {
+      // Prepare sample labels and data
+      const sampleLabels = sampleData.map((_, index) => `Sample ${index + 1}`);
+      const sampleDemandData = [...sampleData]; // Gray line for samples
+      
+      // Calculate sample statistics
+      let sampleAverage = 0;
+      let sampleStdDev = 0;
+      if (sampleData.length > 0) {
+        sampleAverage = sampleData.reduce((sum, val) => sum + val, 0) / sampleData.length;
+        const sampleVariance = sampleData.reduce((sum, val) => sum + Math.pow(val - sampleAverage, 2), 0) / sampleData.length;
+        sampleStdDev = Math.sqrt(sampleVariance);
+      }
+      
+      // Update sample statistics display
+      if (sampleAverageEl) {
+        sampleAverageEl.textContent = hasSamples ? formatNumber(sampleAverage, 1) : "—";
+      }
+      if (sampleStdDevEl) {
+        sampleStdDevEl.textContent = hasSamples ? formatNumber(sampleStdDev, 1) : "—";
+      }
+      if (sampleStatisticsEl) {
+        sampleStatisticsEl.style.display = hasSamples ? "block" : "none";
+      }
+
+      // Prepare week labels and data
+      const weekLabels = filteredLogs.map((log) => `Week ${formatNumber(log.day)}`);
+      const weekDemandData = filteredLogs.map((log) => {
         const requests = log.requests || {};
         return Object.values(requests).reduce((sum, value) => sum + Number(value || 0), 0);
       });
-      const demandFulfilledData = filteredLogs.map((log) => {
+      const weekDemandFulfilledData = filteredLogs.map((log) => {
         const sales = log.sales || {};
         return Object.values(sales).reduce((sum, value) => sum + Number(value || 0), 0);
       });
 
-      // Calculate statistics
-      const demandAverage = demandData.length > 0
-        ? demandData.reduce((sum, val) => sum + val, 0) / demandData.length
-        : 0;
-      const demandVariance = demandData.length > 0
-        ? demandData.reduce((sum, val) => sum + Math.pow(val - demandAverage, 2), 0) / demandData.length
-        : 0;
-      const demandStdDev = Math.sqrt(demandVariance);
+      // Calculate week demand statistics
+      let demandAverage = 0;
+      let demandStdDev = 0;
+      if (weekDemandData.length > 0) {
+        demandAverage = weekDemandData.reduce((sum, val) => sum + val, 0) / weekDemandData.length;
+        const demandVariance = weekDemandData.reduce((sum, val) => sum + Math.pow(val - demandAverage, 2), 0) / weekDemandData.length;
+        demandStdDev = Math.sqrt(demandVariance);
+      }
 
-      // Update statistics display
+      // Update historical demand statistics display
       if (demandAverageEl) {
-        demandAverageEl.textContent = formatNumber(demandAverage, 1);
+        demandAverageEl.textContent = weekDemandData.length > 0 ? formatNumber(demandAverage, 1) : "—";
       }
       if (demandStdDevEl) {
-        demandStdDevEl.textContent = formatNumber(demandStdDev, 1);
+        demandStdDevEl.textContent = weekDemandData.length > 0 ? formatNumber(demandStdDev, 1) : "—";
       }
+      if (historicalStatisticsEl) {
+        // Show historical statistics only if we have week data
+        if (weekDemandData.length > 0) {
+          historicalStatisticsEl.classList.remove("hidden");
+        } else {
+          historicalStatisticsEl.classList.add("hidden");
+        }
+      }
+
+      // Combine labels and data
+      const combinedLabels = [...sampleLabels, ...weekLabels];
+      // Sample demand: has values for samples, null for weeks
+      const combinedSampleDemand = [...sampleDemandData, ...Array(weekLabels.length).fill(null)];
+      // Week demand: null for samples, has values for weeks
+      const combinedWeekDemand = [...Array(sampleLabels.length).fill(null), ...weekDemandData];
+      // Week demand fulfilled: null for samples, has values for weeks
+      const combinedDemandFulfilled = [...Array(sampleLabels.length).fill(null), ...weekDemandFulfilledData];
 
       // Render Historical Demand chart
       if (historicalDemandChartInstance) {
-        historicalDemandChartInstance.data.labels = demandLabels;
-        historicalDemandChartInstance.data.datasets[0].data = demandData;
-        historicalDemandChartInstance.data.datasets[1].data = demandFulfilledData;
+        historicalDemandChartInstance.data.labels = combinedLabels;
+        historicalDemandChartInstance.data.datasets[0].data = combinedSampleDemand;
+        historicalDemandChartInstance.data.datasets[1].data = combinedWeekDemand;
+        historicalDemandChartInstance.data.datasets[2].data = combinedDemandFulfilled;
         historicalDemandChartInstance.update();
         historicalDemandChartInstance.resize();
       } else if (window.Chart && historicalDemandCanvas.getContext) {
         historicalDemandChartInstance = new Chart(historicalDemandCanvas.getContext("2d"), {
           type: "bar",
           data: {
-            labels: demandLabels,
+            labels: combinedLabels,
             datasets: [
               {
                 type: "line",
+                label: "sample",
+                data: combinedSampleDemand,
+                borderColor: "#9e9e9e",
+                backgroundColor: "transparent",
+                borderWidth: 2,
+                pointRadius: 4,
+                pointBackgroundColor: "#9e9e9e",
+                pointBorderColor: "#ffffff",
+                pointBorderWidth: 1,
+                tension: 0,
+                order: 3,
+                spanGaps: false,
+              },
+              {
+                type: "line",
                 label: "demand",
-                data: demandData,
+                data: combinedWeekDemand,
                 borderColor: "#000000",
                 backgroundColor: "transparent",
                 borderWidth: 2,
@@ -1558,11 +1632,12 @@
                 pointBorderWidth: 1,
                 tension: 0,
                 order: 2,
+                spanGaps: false,
               },
               {
                 type: "bar",
                 label: "demand fulfilled",
-                data: demandFulfilledData,
+                data: combinedDemandFulfilled,
                 backgroundColor: "rgba(102, 126, 234, 0.6)",
                 borderColor: "rgba(102, 126, 234, 0.8)",
                 borderWidth: 1,
@@ -1607,11 +1682,20 @@
                     const original = Chart.defaults.plugins.legend.labels.generateLabels(chart);
                     const labels = [];
                     // Chart.js orders 'original' by dataset.order property (ascending)
-                    // datasets[0]: demand (line, order:2), datasets[1]: demand fulfilled (bar, order:1)
-                    // So: original[0] = demand fulfilled (order:1), original[1] = demand (order:2)
-                    // Display order: demand (line) first (left), then demand fulfilled (bar) (right)
+                    // datasets[0]: sample (line, order:3), datasets[1]: demand (line, order:2), datasets[2]: demand fulfilled (bar, order:1)
+                    // So: original[0] = demand fulfilled (order:1), original[1] = demand (order:2), original[2] = sample (order:3)
+                    // Display order: sample (gray line), demand (black line), demand fulfilled (bar)
+                    if (original[2]) {
+                      // Sample line chart (gray) - from original[2] - show first (left)
+                      const sampleLabel = { ...original[2] };
+                      sampleLabel.fillStyle = "transparent";
+                      sampleLabel.strokeStyle = "#9e9e9e";
+                      sampleLabel.lineWidth = 2;
+                      sampleLabel.pointStyle = "line";
+                      labels.push(sampleLabel);
+                    }
                     if (original[1]) {
-                      // Line chart (demand) - from original[1] - show first (left)
+                      // Demand line chart (black) - from original[1] - show second
                       const lineLabel = { ...original[1] };
                       lineLabel.fillStyle = "transparent";
                       lineLabel.strokeStyle = "#000000";
@@ -1620,7 +1704,7 @@
                       labels.push(lineLabel);
                     }
                     if (original[0]) {
-                      // Bar chart (demand fulfilled) - from original[0] - show second (right)
+                      // Bar chart (demand fulfilled) - from original[0] - show third (right)
                       const barLabel = { ...original[0] };
                       barLabel.fillStyle = "rgba(102, 126, 234, 0.6)";
                       barLabel.strokeStyle = "rgba(102, 126, 234, 0.8)";
@@ -1646,16 +1730,19 @@
         });
       }
 
-      // Prepare data for Historical Inventory Status chart
-      const inventoryLabels = filteredLogs.map((log) => `Week ${formatNumber(log.day)}`);
-      const onHandData = filteredLogs.map((log) => {
+      // Prepare data for Historical Inventory Status chart (aligned with demand chart)
+      const weekOnHandData = filteredLogs.map((log) => {
         const ending = log.ending_inventory || {};
         return Object.values(ending).reduce((sum, value) => sum + Number(value || 0), 0);
       });
-      const orderData = filteredLogs.map((log) => {
+      const weekOrderData = filteredLogs.map((log) => {
         const orders = log.orders || {};
         return Object.values(orders).reduce((sum, value) => sum + Number(value || 0), 0);
       });
+      
+      // Combine with sample placeholders (null for sample positions)
+      const combinedOnHandData = [...Array(sampleLabels.length).fill(null), ...weekOnHandData];
+      const combinedOrderData = [...Array(sampleLabels.length).fill(null), ...weekOrderData];
 
       // Build order status data for bar styling
       const orderStatusData = filteredLogs.map((log) => {
@@ -1685,38 +1772,44 @@
         const arrivingToday = arrivalWeek !== null && arrivalWeek === currentDay;
         return { arrived: arrivedNow, arrivalWeek, arrivingToday };
       });
+      
+      // Combine order visual status with sample placeholders (null for sample positions)
+      const combinedOrderVisualStatus = [
+        ...Array(sampleLabels.length).fill({ arrived: false, arrivalWeek: null, arrivingToday: false }),
+        ...orderVisualStatus
+      ];
 
       // Render Historical Inventory Status chart
       // Store orderStatusData in chart instance for tooltip access
       if (historicalInventoryChartInstance) {
-        historicalInventoryChartInstance.data.labels = inventoryLabels;
+        historicalInventoryChartInstance.data.labels = combinedLabels;
         // Update line chart dataset (on-hand inventory)
-        historicalInventoryChartInstance.data.datasets[0].data = onHandData;
+        historicalInventoryChartInstance.data.datasets[0].data = combinedOnHandData;
         historicalInventoryChartInstance.data.datasets[0].borderColor = "#e74c3c";
         historicalInventoryChartInstance.data.datasets[0].pointBackgroundColor = "#e74c3c";
         // Update bar chart dataset (order)
-        const barBackgrounds = orderVisualStatus.map((status) =>
+        const barBackgrounds = combinedOrderVisualStatus.map((status) =>
           status.arrived ? "rgba(46, 204, 113, 0.6)" : "transparent"
         );
-        const barBorders = orderVisualStatus.map(() => "rgba(46, 204, 113, 0.8)");
-        historicalInventoryChartInstance.data.datasets[1].data = orderData;
+        const barBorders = combinedOrderVisualStatus.map(() => "rgba(46, 204, 113, 0.8)");
+        historicalInventoryChartInstance.data.datasets[1].data = combinedOrderData;
         historicalInventoryChartInstance.data.datasets[1].backgroundColor = barBackgrounds;
         historicalInventoryChartInstance.data.datasets[1].borderColor = barBorders;
         historicalInventoryChartInstance.data.datasets[1].borderWidth = 2;
         // Store orderStatusData for tooltip access
-        historicalInventoryChartInstance.orderStatusData = orderVisualStatus;
+        historicalInventoryChartInstance.orderStatusData = combinedOrderVisualStatus;
         historicalInventoryChartInstance.update();
         historicalInventoryChartInstance.resize();
       } else if (window.Chart && historicalInventoryCanvas.getContext) {
         historicalInventoryChartInstance = new Chart(historicalInventoryCanvas.getContext("2d"), {
           type: "bar",
           data: {
-            labels: inventoryLabels,
+            labels: combinedLabels,
             datasets: [
               {
                 type: "line",
                 label: "on-hand inventory",
-                data: onHandData,
+                data: combinedOnHandData,
                 borderColor: "#e74c3c",
                 backgroundColor: "transparent",
                 borderWidth: 2,
@@ -1730,11 +1823,11 @@
               {
                 type: "bar",
                 label: "order",
-                data: orderData,
-                backgroundColor: orderVisualStatus.map((status) =>
+                data: combinedOrderData,
+                backgroundColor: combinedOrderVisualStatus.map((status) =>
                   status.arrived ? "rgba(46, 204, 113, 0.6)" : "transparent"
                 ),
-                borderColor: orderVisualStatus.map(() => "rgba(46, 204, 113, 0.8)"),
+                borderColor: combinedOrderVisualStatus.map(() => "rgba(46, 204, 113, 0.8)"),
                 borderWidth: 2,
                 borderSkipped: false,
                 order: 2, // Show bar chart below line (higher order number = lower z-index)
@@ -1840,138 +1933,7 @@
           },
         });
         // Store orderStatusData for tooltip access
-        historicalInventoryChartInstance.orderStatusData = orderVisualStatus;
-      }
-    }
-
-    function renderInitialSamples(initialSamples) {
-      if (!initialSamplesPanel || !initialSamplesCanvas) return;
-      if (!initialSamples || typeof initialSamples !== 'object') {
-        initialSamplesPanel.style.display = "none";
-        return;
-      }
-
-      // Get the samples for the first (and only) item
-      const itemIds = Object.keys(initialSamples);
-      if (itemIds.length === 0) {
-        initialSamplesPanel.style.display = "none";
-        return;
-      }
-
-      const samples = initialSamples[itemIds[0]];
-      if (!Array.isArray(samples) || samples.length === 0) {
-        initialSamplesPanel.style.display = "none";
-        return;
-      }
-
-      initialSamplesPanel.style.display = "block";
-
-      // Prepare data
-      const labels = samples.map((_, index) => `Sample ${index + 1}`);
-      const data = samples;
-
-      // Calculate statistics
-      const average = data.reduce((sum, val) => sum + val, 0) / data.length;
-      const variance = data.reduce((sum, val) => sum + Math.pow(val - average, 2), 0) / data.length;
-      const stdDev = Math.sqrt(variance);
-
-      // Update statistics display
-      if (initialSamplesAverageEl) {
-        initialSamplesAverageEl.textContent = formatNumber(average, 1);
-      }
-      if (initialSamplesStdDevEl) {
-        initialSamplesStdDevEl.textContent = formatNumber(stdDev, 1);
-      }
-
-      // Ensure canvas dimensions
-      ensureCanvasDimensions(initialSamplesCanvas);
-
-      // Render chart
-      if (initialSamplesChartInstance) {
-        initialSamplesChartInstance.data.labels = labels;
-        initialSamplesChartInstance.data.datasets[0].data = data;
-        initialSamplesChartInstance.update();
-        initialSamplesChartInstance.resize();
-      } else if (window.Chart && initialSamplesCanvas.getContext) {
-        initialSamplesChartInstance = new Chart(initialSamplesCanvas.getContext("2d"), {
-          type: "line",
-          data: {
-            labels: labels,
-            datasets: [
-              {
-                label: "demand",
-                data: data,
-                borderColor: "#000000",
-                backgroundColor: "transparent",
-                borderWidth: 2,
-                pointRadius: 4,
-                pointBackgroundColor: "#000000",
-                pointBorderColor: "#ffffff",
-                pointBorderWidth: 1,
-                tension: 0,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-              mode: "index",
-              intersect: false,
-            },
-            scales: {
-              y: {
-                beginAtZero: true,
-                title: {
-                  display: true,
-                  text: "Units",
-                },
-                ticks: {
-                  callback: (value) => formatNumber(value),
-                },
-                grid: {
-                  color: "rgba(102, 126, 234, 0.15)",
-                },
-              },
-              x: {
-                grid: {
-                  color: "rgba(102, 126, 234, 0.08)",
-                },
-              },
-            },
-            plugins: {
-              legend: {
-                display: true,
-                position: "bottom",
-                labels: {
-                  usePointStyle: true,
-                  generateLabels: (chart) => {
-                    const original = Chart.defaults.plugins.legend.labels.generateLabels(chart);
-                    const labels = [];
-                    if (original[0]) {
-                      const lineLabel = { ...original[0] };
-                      lineLabel.fillStyle = "transparent";
-                      lineLabel.strokeStyle = "#000000";
-                      lineLabel.lineWidth = 2;
-                      lineLabel.pointStyle = "line";
-                      labels.push(lineLabel);
-                    }
-                    return labels;
-                  },
-                },
-              },
-              tooltip: {
-                callbacks: {
-                  label: (ctx) => {
-                    const label = ctx.dataset.label || "";
-                    const value = formatNumber(ctx.parsed.y);
-                    return `${label}: ${value}`;
-                  },
-                },
-              },
-            },
-          },
-        });
+        historicalInventoryChartInstance.orderStatusData = combinedOrderVisualStatus;
       }
     }
 
