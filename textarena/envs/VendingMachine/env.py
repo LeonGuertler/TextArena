@@ -200,14 +200,14 @@ class VendingMachineEnv(ta.Env):
         obs_list = self.state.get_current_player_observation()
 
         # Build game board with multi-item information
-        board_lines = [f"DAY {self.current_day} / {NUM_DAYS}"]
+        board_lines = [f"PERIOD {self.current_day} / {NUM_DAYS}"]
         
         # Add news - only show today's news and past news (no future news visibility)
         if self.news_schedule:
             # Today's news (if any)
             today_news = self.news_schedule.get(self.current_day, None)
             if today_news:
-                board_lines.append(f"\n=== TODAY'S NEWS (Day {self.current_day}) ===")
+                board_lines.append(f"\n=== CURRENT NEWS (Period {self.current_day}) ===")
                 board_lines.append(f"⚡ {today_news}")
             
             # Past news (for learning from history)
@@ -215,7 +215,7 @@ class VendingMachineEnv(ta.Env):
             if past_news:
                 board_lines.append("\n=== Past News ===")
                 for day in sorted(past_news.keys()):
-                    board_lines.append(f"Day {day}: {past_news[day]}")
+                    board_lines.append(f"Period {day}: {past_news[day]}")
         
         board_lines.append("\n=== ITEMS ===")
         
@@ -233,7 +233,7 @@ class VendingMachineEnv(ta.Env):
                                 if order['item_id'] == item_id 
                                 and self.current_day <= order['arrival_day'])
                 board_lines.append(
-                    f"{item_id} ({desc}): Profit=${profit}/unit, Holding=${holding_cost}/unit/day"
+                    f"{item_id} ({desc}): Profit=${profit}/unit, Holding=${holding_cost}/unit/period"
                 )
                 board_lines.append(f"  On-hand: {on_hand}, In-transit: {in_transit} units")
             else:  # Demand player - only show description
@@ -411,7 +411,7 @@ class VendingMachineEnv(ta.Env):
             self.daily_logs.append(day_log)
 
             # Print daily summary (console output) - unified format with LLM observation
-            print(f"\n=== Day {self.current_day} Summary ===")
+            print(f"\n=== Period {self.current_day} Summary ===")
             if self.current_day in self.news_schedule:
                 print(f"NEWS: {self.news_schedule[self.current_day]}")
             for item_id in self.items:
@@ -428,7 +428,7 @@ class VendingMachineEnv(ta.Env):
                     arrival_parts = []
                     for qty, order_day in arrival_list:
                         actual_lead_time = self.current_day - order_day
-                        arrival_parts.append(f"{qty} units (ordered on Day {order_day}, lead_time was {actual_lead_time} days)")
+                        arrival_parts.append(f"{qty} units (ordered on Period {order_day}, lead_time was {actual_lead_time} periods)")
                     arrival_str = f", arrived={', '.join(arrival_parts)}"
                 else:
                     arrival_str = ", arrived=0"
@@ -439,7 +439,7 @@ class VendingMachineEnv(ta.Env):
 
             # Announce day conclusion with role-specific visibility
             # VM sees: ordered, arrived (with lead_time calculation), starting inventory, demand, sold, ending inventory
-            vm_summary_lines = [f"Week {self.current_day} concluded:"]
+            vm_summary_lines = [f"Period {self.current_day} conclude:"]
             for item_id in self.items:
                 ordered = self.current_day_orders.get(item_id, 0)
                 arrival_list = arrivals[item_id]
@@ -456,7 +456,7 @@ class VendingMachineEnv(ta.Env):
                     for qty, order_day in arrival_list:
                         # Calculate lead_time: current_week - order_week
                         actual_lead_time = self.current_day - order_day
-                        arrival_parts.append(f"{qty} units (ordered on Week {order_day}, lead_time was {actual_lead_time} weeks)")
+                        arrival_parts.append(f"{qty} units (ordered on Period {order_day}, lead_time was {actual_lead_time} periods)")
                     arrival_str = ", ".join(arrival_parts)
                     item_line += f", arrived={arrival_str}"
                 else:
@@ -473,7 +473,7 @@ class VendingMachineEnv(ta.Env):
             )
             
             # Demand sees: demand, sold (no ordered, no stock)
-            demand_summary_lines = [f"Week {self.current_day} concluded:"]
+            demand_summary_lines = [f"Period {self.current_day} conclude:"]
             for item_id in self.items:
                 demand = purchases.get(item_id, 0)
                 sold = actual_sales.get(item_id, 0)

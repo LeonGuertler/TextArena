@@ -21,11 +21,11 @@ import unicodedata
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
+from typing import Dict, List, Tuple
 import textarena as ta
 from textarena.core import Agent
 
 
-WEEK_CONCLUDED_PATTERN = re.compile(r'^(\s*Week\s+(\d+)\s+concluded:)(.*)$')
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -110,7 +110,7 @@ def inject_carry_over_insights(observation: str, insights: dict) -> str:
     if not insights:
         return observation
     
-    # Sort insights by week number
+    # Sort insights by period index
     sorted_insights = sorted(insights.items())
     
     # Build insights section at the top
@@ -118,8 +118,8 @@ def inject_carry_over_insights(observation: str, insights: dict) -> str:
     insights_section += "CARRY-OVER INSIGHTS (Key Discoveries):\n"
     insights_section += "=" * 70 + "\n"
     
-    for week_num, memo in sorted_insights:
-        insights_section += f"Week {week_num}: {memo}\n"
+    for period_num, memo in sorted_insights:
+        insights_section += f"Period {period_num}: {memo}\n"
     
     insights_section += "=" * 70 + "\n\n"
     
@@ -127,10 +127,32 @@ def inject_carry_over_insights(observation: str, insights: dict) -> str:
     return insights_section + observation
 
 
+_TIMELINE_TERM_SUBS = [
+    (re.compile(r'\bWeek\s+(\d+)\s+concluded:'), r'Period \1 conclude:'),
+    (re.compile(r'\bweek\s+(\d+)\s+concluded:'), r'period \1 conclude:'),
+    (re.compile(r'\bWeeks\b'), 'Periods'),
+    (re.compile(r'\bweeks\b'), 'periods'),
+    (re.compile(r'\bWeek\b'), 'Period'),
+    (re.compile(r'\bweek\b'), 'period'),
+    (re.compile(r'\bDay\b'), 'Period'),
+    (re.compile(r'\bDays\b'), 'Periods'),
+]
+
+
+def _normalize_timeline_terms(text: str) -> str:
+    normalized = text
+    for pattern, replacement in _TIMELINE_TERM_SUBS:
+        normalized = pattern.sub(replacement, normalized)
+    return normalized
+
+
+
+
 class CSVDemandPlayer:
     """
     Simulates demand agent by reading from CSV file.
-    Supports dynamic item configurations that can change per day.
+    Supports dynamic item configurations that can change per period.
+    Uses exact dates (e.g., 2019-07-01) with 14-day periods.
     """
     def __init__(self, csv_path: str, initial_samples: dict = None):
         """
@@ -155,14 +177,13 @@ class CSVDemandPlayer:
         if initial_samples is not None:
             self._validate_initial_samples(initial_samples)
         
-        # Extract news if available
-        self.has_news = 'news' in self.df.columns
+        # Extract exact dates for each item
+        self.dates = self._extract_dates()
         
-        print(f"Loaded CSV with {len(self.df)} weeks of demand data")
+        print(f"Loaded CSV with {len(self.df)} periods of demand data (14-day periods)")
         print(f"Detected {len(self.item_ids)} items: {self.item_ids}")
-        if self.has_news:
-            news_weeks = self.df[self.df['news'].notna()]['week'].tolist()
-            print(f"News scheduled for weeks: {news_weeks}")
+        if self.dates:
+            print(f"Date range: {self.dates[0]} to {self.dates[-1]}")
     
     def _extract_item_ids(self) -> list:
         """Extract item IDs from CSV columns that start with 'demand_'."""
@@ -173,14 +194,27 @@ class CSVDemandPlayer:
                 item_ids.append(item_id)
         return item_ids
     
+    def _extract_dates(self) -> list:
+        """Extract dates from the first item's exact_dates column."""
+        if not self.item_ids:
+            return []
+        first_item = self.item_ids[0]
+        date_col = f'exact_dates_{first_item}'
+        if date_col in self.df.columns:
+            return self.df[date_col].tolist()
+        return []
+    
     def _validate_item_columns(self):
         """Validate that CSV has all required columns for each item."""
-        required_suffixes = ['demand', 'description', 'lead_time', 'profit', 'holding_cost']
+        # Required: exact_dates and demand columns
         for item_id in self.item_ids:
-            for suffix in required_suffixes:
-                col_name = f'{suffix}_{item_id}'
-                if col_name not in self.df.columns:
-                    raise ValueError(f"CSV missing required column: {col_name}")
+            if f'exact_dates_{item_id}' not in self.df.columns:
+                raise ValueError(f"CSV missing required column: exact_dates_{item_id}")
+            if f'demand_{item_id}' not in self.df.columns:
+                raise ValueError(f"CSV missing required column: demand_{item_id}")
+            
+            # Optional: description, lead_time, profit, holding_cost (only in test.csv)
+            # These are validated when accessed
     
     def _validate_initial_samples(self, initial_samples: dict):
         """Validate that initial_samples item_ids match CSV."""
@@ -236,74 +270,81 @@ class CSVDemandPlayer:
         
         return configs
     
-    def get_day_item_config(self, day: int, item_id: str) -> dict:
+    def get_period_item_config(self, period_index: int, item_id: str) -> dict:
         """
-        Get item configuration for a specific week (supports dynamic changes).
+        Get item configuration for a specific period (supports dynamic changes).
         
         Args:
-            day: Week number (1-indexed)
+            period_index: Period number (1-indexed)
             item_id: Item identifier
             
         Returns:
-            Dict with keys: description, lead_time, profit, holding_cost
+            Dict with keys: description, lead_time, profit, holding_cost, exact_date
         """
-        if day < 1 or day > len(self.df):
-            raise ValueError(f"Week {day} out of range (1-{len(self.df)})")
+        if period_index < 1 or period_index > len(self.df):
+            raise ValueError(f"Period {period_index} out of range (1-{len(self.df)})")
         
         if item_id not in self.item_ids:
             raise ValueError(f"Unknown item_id: {item_id}")
         
-        row = self.df.iloc[day - 1]
+        row = self.df.iloc[period_index - 1]
+        
+        # Get exact date
+        exact_date = str(row[f'exact_dates_{item_id}'])
         
         # Handle lead_time - could be int or "inf"
-        lead_time_val = row[f'lead_time_{item_id}']
-        if isinstance(lead_time_val, str) and lead_time_val.lower() == 'inf':
-            lead_time = float('inf')
-        elif isinstance(lead_time_val, float) and lead_time_val == float('inf'):
-            # pandas reads "inf" as numpy.float64 inf
-            lead_time = float('inf')
+        lead_time_col = f'lead_time_{item_id}'
+        if lead_time_col in row:
+            lead_time_val = row[lead_time_col]
+            if isinstance(lead_time_val, str) and lead_time_val.lower() == 'inf':
+                lead_time = float('inf')
+            elif isinstance(lead_time_val, float) and lead_time_val == float('inf'):
+                lead_time = float('inf')
+            else:
+                lead_time = int(lead_time_val)
         else:
-            lead_time = int(lead_time_val)
+            lead_time = 1  # Default if not specified
+        
+        # Get other configs (may not exist in train.csv)
+        description = str(row.get(f'description_{item_id}', item_id))
+        profit = float(row.get(f'profit_{item_id}', 2.0))
+        holding_cost = float(row.get(f'holding_cost_{item_id}', 1.0))
         
         return {
-            'description': str(row[f'description_{item_id}']),
+            'description': description,
             'lead_time': lead_time,
-            'profit': float(row[f'profit_{item_id}']),
-            'holding_cost': float(row[f'holding_cost_{item_id}'])
+            'profit': profit,
+            'holding_cost': holding_cost,
+            'exact_date': exact_date
         }
     
-    def get_num_days(self) -> int:
-        """Return number of days in CSV."""
+    def get_num_periods(self) -> int:
+        """Return number of periods in CSV."""
         return len(self.df)
     
-    def get_news_schedule(self) -> dict:
-        """Extract news schedule from CSV."""
-        if not self.has_news:
-            return {}
-        
-        news_schedule = {}
-        for _, row in self.df.iterrows():
-            week = int(row['week'])
-            if pd.notna(row['news']) and str(row['news']).strip():
-                news_schedule[week] = str(row['news']).strip()
-        
-        return news_schedule
+    def get_exact_date(self, period_index: int) -> str:
+        """Get exact date for a specific period."""
+        if period_index < 1 or period_index > len(self.df):
+            return f"Period_{period_index}"
+        if self.dates:
+            return str(self.dates[period_index - 1])
+        return f"Period_{period_index}"
     
-    def get_action(self, day: int) -> str:
+    def get_action(self, period_index: int) -> str:
         """
-        Generate buy action for given day based on CSV data in JSON format.
+        Generate buy action for given period based on CSV data in JSON format.
         
         Args:
-            day: Current day (1-indexed)
+            period_index: Current period (1-indexed)
             
         Returns:
-            JSON string like '{"action": {"chips(Regular)": 10, "chips(BBQ)": 5}}'
+            JSON string like '{"action": {"351484002": 622, ...}}'
         """
-        # Get row for this day (day is 1-indexed, df is 0-indexed)
-        if day < 1 or day > len(self.df):
-            raise ValueError(f"Day {day} out of range (1-{len(self.df)})")
+        # Get row for this period (period_index is 1-indexed, df is 0-indexed)
+        if period_index < 1 or period_index > len(self.df):
+            raise ValueError(f"Period {period_index} out of range (1-{len(self.df)})")
         
-        row = self.df.iloc[day - 1]
+        row = self.df.iloc[period_index - 1]
         
         # Extract demand for each item
         action_dict = {}
@@ -319,36 +360,29 @@ class CSVDemandPlayer:
 
 class ORAgent:
     """
-    OR algorithm baseline agent using base-stock policy.
-
-    Supports two policies:
-    1. Vanilla: order_quantity = max(base_stock - current_inventory, 0)
-       where base_stock = μ̂ + z*σ̂
-    2. Capped: order_quantity = max(min(base_stock - current_inventory, cap), 0)
-       where cap = μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
-
-    mu_hat = (1+L) * empirical_mean
-    sigma_hat = sqrt(1+L) * empirical_std
-    z* = Phi^(-1)(q), where q = profit / (profit + holding_cost)
+    OR algorithm baseline agent using a capped base-stock policy.
+    
+    order_quantity = max(min(base_stock - current_inventory, cap), 0)
+    where base_stock = μ̂ + z*σ̂,  cap = μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L),
+    μ̂ = (1+L) × empirical_mean,  σ̂ = sqrt(1+L) × empirical_std,  z* = Φ⁻¹(q),
+    q = profit / (profit + holding_cost).
     """
     
-    def __init__(self, items_config: dict, initial_samples: dict = None, policy: str = 'capped'):
+    def __init__(self, items_config: dict, initial_samples: dict = None):
         """
         Args:
             items_config: Dict of {item_id: {'lead_time': L, 'profit': p, 'holding_cost': h}}
             initial_samples: Optional dict of {item_id: [list of initial demand samples]}
                            If None or empty, will use only observed demands
-            policy: 'vanilla' or 'capped' (default: 'capped')
         """
         self.items_config = items_config
         self.initial_samples = initial_samples if initial_samples else {}
-        self.policy = policy
         
         # Store observed demands (will be updated each day)
         # Format: {item_id: [demand_day1, demand_day2, ...]}
         self.observed_demands = {item_id: [] for item_id in items_config}
         
-        print(f"\n=== OR Agent Initialized for recommendations (Policy: {policy.upper()}) ===")
+        print("\n=== OR Agent Initialized for recommendations (CAPPED POLICY) ===")
         for item_id, config in items_config.items():
             L = config['lead_time']
             p = config['profit']
@@ -369,7 +403,7 @@ class ORAgent:
         Parse current total inventory (on-hand + in-transit) from observation.
         
         Observation format:
-          chips(Regular) (...): Profit=$2/unit, Holding=$1/unit/day
+          chips(Regular) (...): Profit=$2/unit, Holding=$1/unit/period
             On-hand: 5, In-transit: 10 units
         
         Returns:
@@ -472,24 +506,15 @@ class ORAgent:
             'current_inventory': current_inventory
         }
         
-        # Calculate order quantity based on policy
-        if self.policy == 'vanilla':
-            order = max(int(np.ceil(base_stock - current_inventory)), 0)
-            result['order'] = order
-        else:  # capped policy
-            # Vanilla order (for logging)
-            order_uncapped = max(int(np.ceil(base_stock - current_inventory)), 0)
-            
-            # Cap calculation: μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
-            cap_z = norm.ppf(0.95)
-            cap = mu_hat / (1 + L) + cap_z * sigma_hat / np.sqrt(1 + L)
-            
-            # Capped order
-            order = max(min(int(np.ceil(base_stock - current_inventory)), int(np.ceil(cap))), 0)
-            
-            result['order'] = order
-            result['order_uncapped'] = order_uncapped
-            result['cap'] = cap
+        # Calculate order quantity (capped policy only)
+        order_uncapped = max(int(np.ceil(base_stock - current_inventory)), 0)
+        cap_z = norm.ppf(0.95)
+        cap = mu_hat / (1 + L) + cap_z * sigma_hat / np.sqrt(1 + L)
+        order = max(min(order_uncapped, int(np.ceil(cap))), 0)
+        
+        result['order'] = order
+        result['order_uncapped'] = order_uncapped
+        result['cap'] = cap
         
         return result
     
@@ -532,43 +557,56 @@ class ORAgent:
 
 def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
                          human_feedback_enabled: bool = False, guidance_enabled: bool = False):
-    """Create hybrid VM agent that considers both OR recommendations and news."""
+    """Create hybrid VM agent that considers OR recommendations with exact dates."""
     
     # Extract item IDs to show in prompt
     available_items = list(initial_samples.keys()) if initial_samples else []
     items_str = ", ".join([f'"{item}"' for item in available_items])
+    primary_item = available_items[0] if available_items else "item_id"
     
     system = (
-        "You are the Vending Machine controller (VM). "
-        "You manage multiple items, each with unit profit and holding costs. "
-        "Objective: Maximize total reward = sum of weekly rewards R_t. "
-        "Weekly reward: R_t = Profit * Sold - HoldingCost * EndingInventory. "
-        "\n\n"
-        f"AVAILABLE ITEMS: {items_str}\n"
-        "WARNING: You MUST use these EXACT item IDs (with parentheses and all special characters) in your action!\n"
+        "=== ROLE & OBJECTIVE ===\n"
+        f"You control the vending machine for a single SKU \"{primary_item}\" while collaborating with an OR baseline. "
+        "Maximize total reward R_t = Profit × units_sold − HoldingCost × ending_inventory each 14‑day period.\n"
         "\n"
-        "Key mechanics:\n"
-        f"- Supplier-promised lead time: {promised_lead_time} weeks\n"
-        "- Orders placed this week arrive after a LEAD TIME (number of weeks until delivery)\n"
-        "- IMPORTANT: Actual lead time may differ from promised and may change over time!\n"
-        "- Lead time is NOT directly revealed. You must INFER it from arrival records.\n"
-        "- When goods arrive, you'll see: 'arrived=X units (ordered on Week Y, lead_time was Z weeks)'\n"
-        "- Use this information to track actual lead time and adjust your strategy\n"
+        "=== CRITICAL: PERIOD SEQUENCING ===\n"
+        "Each period follows this strict order:\n"
+        "  1. YOU MAKE DECISION for Period N (this is when you see the observation)\n"
+        "  2. Arrivals occur (orders placed in Period N-LT arrive now)\n"
+        "  3. Demand occurs\n"
+        "  4. Period N concludes and is added to history\n"
         "\n"
-        "Inventory visibility:\n"
-        "- On-hand: Current inventory available for sale this week\n"
-        "- In-transit: Total units you ordered that haven't arrived yet (but you don't know WHEN they'll arrive)\n"
-        "- You must track your own orders and infer when they'll arrive based on inferred lead_time\n"
-        "- IMPORTANT: Initial inventory on Week 1: Each item starts with 0 units on-hand\n"
+        "IMPORTANT IMPLICATIONS:\n"
+        f"- When deciding for Period N, you CANNOT see Period N's arrivals yet (even with LT={promised_lead_time}).\n"
+        "- Example: If LT=1, an order placed in Period 5 arrives in Period 6, but you won't see it until Period 7's decision.\n"
+        "- DO NOT infer lead-time changes from missing current-period arrivals—that's normal sequencing!\n"
+        "- Only use PAST period conclusions (\"Period X conclude: ... arrived=Y\") to infer lead time.\n"
         "\n"
-        "- Holding cost is charged on ending inventory each week\n"
-        "- Weekly sequence: order submission happens first, then any scheduled shipments arrive, and customer demand is realized last\n"
-        "- News events may affect future demand\n"
+        "=== ENVIRONMENT SNAPSHOT ===\n"
+        "- Exact dates are provided; leverage world knowledge for seasonality and real events.\n"
+        "- On-hand inventory starts at 0 and incurs holding cost every period. \"In-transit\" shows total undelivered units, but you must infer ETAs.\n"
+        f"- Supplier-promised lead time is {promised_lead_time} period(s); actual lead time can drift and must be inferred from CONCLUDED periods only.\n"
+        "- Orders occasionally (rarely) get lost. If a shipment is overdue by 2+ periods beyond expected arrival in CONCLUDED history, "
+        "adjust your safety stock accordingly.\n"
         "\n"
-        "NEWS INFORMATION:\n"
-        "- You must analyze whether these events correlate with demand changes\n"
-        "- Not all news necessarily impact demand - use historical data to assess\n"
-        "- If no news is present for a week, the field will be empty\n"
+        "=== OR BASELINE (CAPPED) ===\n"
+        "- The OR agent sets base_stock = μ̂ + z*·σ̂ (z* = Φ⁻¹(q), q = profit/(profit+holding_cost)).\n"
+        "- It always applies the capped policy: order = min(base_stock − pipeline_inventory, μ̂/(1+L) + Φ⁻¹(0.95)·σ̂/√(1+L)).\n"
+        "- OR assumes the promised lead time and cannot see news, lost orders, or actual arrivals. Its recommendation is a data-driven baseline, not a mandate.\n"
+        "\n"
+        "=== COLLABORATION STRATEGY ===\n"
+        "1. Read the OR recommendation (quantity + stats) and treat it as the starting point.\n"
+        "2. Compare OR's assumptions to reality: news, inferred demand regimes, arrivals, and missing shipments.\n"
+        "3. Decide whether to follow, scale, or override OR's quantity. Explain the adjustment path explicitly in your rationale.\n"
+        "\n"
+        "=== DEMAND & LEAD-TIME REASONING ===\n"
+        "ONLY use \"Period X conclude: ... arrived=Y units (ordered on Period Z, lead_time was W)\" from history to infer lead time.\n"
+        "NEVER infer lead-time changes from current period's missing arrivals—you haven't seen them yet due to sequencing.\n"
+        "Example: In Period 6 decision, if history shows \"Period 5 conclude: ... arrived=900 (ordered on Period 4, lead_time was 1)\", then LT=1.\n"
+        "If an expected arrival is missing from a CONCLUDED period by 2+ periods, decide whether lead time increased or goods were lost.\n"
+        "- Use the SKU description plus exact date (no ongoing news feed) to confirm sustained demand mean/variance shifts before reacting.\n"
+        "- Historical samples provide initial intuition, but demand can change suddenly; confirm shifts quickly when evidence appears.\n"
+        "- Apply world knowledge whenever the SKU description and exact date imply known seasonal or cultural effects.\n"
         "\n"
     )
     
@@ -606,77 +644,19 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
             system += f"{item_id}:\n"
             system += f"  Past demands: {samples}\n"
             system += "\n"
-        system += "Use this data to inform your ordering decisions, especially on Week 1.\n\n"
+        system += "Use this data to inform your ordering decisions, especially in Period 1.\n\n"
     
     system += (
-        "OR ALGORITHM ASSISTANCE:\n"
-        "You will receive recommendations from an Operations Research (OR) algorithm each week.\n"
-        "The OR algorithm uses a base-stock policy based on statistical analysis:\n"
-        "- It calculates optimal orders using historical demand patterns\n"
-        f"- IMPORTANT: OR uses the PROMISED lead time ({promised_lead_time} weeks) in its calculations\n"
-        "- Uses profit and holding cost in its calculations\n"
-        "- Aims to balance service level (meeting demand) vs holding costs\n"
-        "- Works well for NORMAL, STABLE demand patterns\n"
+        "=== DECISION CHECKLIST ===\n"
+        "1. Interpret news/date signals and compare to historical demand for this SKU.\n"
+        "2. Reconcile on-hand + pipeline with expected arrivals; highlight overdue/lost shipments.\n"
+        "3. Inspect the OR recommendation (quantity + stats) and decide how to adapt it.\n"
+        "4. Justify your final quantity by tying it to demand outlook, lead-time belief, and OR's baseline.\n"
         "\n"
-        "IMPORTANT LIMITATIONS:\n"
-        "1. The OR algorithm CANNOT react to news events. It only looks at historical data.\n"
-        "2. The OR algorithm uses PROMISED lead time, not actual lead time.\n"
-        "This is where YOU come in!\n"
-        "\n"
-        "Your Strategy:\n"
-        "1. INFER actual lead time from arrival records in game history (look for 'lead_time was X weeks')\n"
-        "2. Compare inferred actual lead time with promised lead time to detect discrepancies\n"
-        "3. Track your own orders and when they should arrive based on inferred actual lead_time\n"
-        "4. Use 'In-transit' to see total goods coming, but remember you must infer WHEN they arrive\n"
-        "5. Use OR recommendation as your BASELINE for normal weeks (OR uses statistical analysis)\n"
-        "6. Adjust OR recommendations if actual lead time differs from promised lead time\n"
-        "7. React to THIS WEEK'S NEWS as it happens, considering inferred actual lead time\n"
-        "8. Learn from past news events to understand their impact on demand\n"
-        "9. Balance between data-driven OR approach and news-driven/lead-time-adjusted insights\n"
-        "\n"
-        "CARRY-OVER INSIGHTS:\n"
-        "- If carry-over insights exist, they will appear at the TOP of your observation in a dedicated section.\n"
-        "- Focus on the MOST RECENT insights as trends evolve over time. Older insights may be outdated.\n"
-        "- Use insights as quick references, but always verify against current game data.\n"
-        "\n"
-        "STRICT RULES for writing carry_over_insight:\n"
-        "⚠️ DEFAULT: Return empty string \"\" (most weeks should have NO new insight)\n"
-        "\n"
-        "ONLY write a new insight when ALL of these conditions are met:\n"
-        "  1. You observe a SIGNIFICANT, SUSTAINED change (not temporary fluctuation):\n"
-        "     - Demand mean shift (e.g., sustained 30%+ change over 3+ weeks)\n"
-        "     - Variance pattern change (e.g., volatility doubled/halved)\n"
-        "     - Lead time structural change (e.g., changed from 2 to 4 weeks)\n"
-        "     - Major news impact with lasting effect\n"
-        "\n"
-        "  2. You have CONCRETE EVIDENCE with specific numbers:\n"
-        "     - Week ranges (e.g., \"Weeks 8-12 avg: 150 vs Weeks 1-7 avg: 100\")\n"
-        "     - Statistical measures (mean, std, lead_time values)\n"
-        "     - Specific news events and their timing\n"
-        "\n"
-        "  3. NO similar insight exists in CARRY-OVER INSIGHTS section above:\n"
-        "     - Check if the change is already documented\n"
-        "     - If updating an existing insight, reference the old one\n"
-        "     - If change is temporary/reversed, note that it ended\n"
-        "\n"
-        "  4. The insight will be USEFUL for future decisions (not just describing history)\n"
-        "\n"
-        "EXAMPLES of when to write:\n"
-        "  ✅ \"Demand increased 50% after Week 5 sports event; new baseline: 150 units (was 100)\"\n"
-        "  ✅ \"Lead time changed from 2 to 4 weeks starting Week 10 (observed in Weeks 10-13 arrivals)\"\n"
-        "  ✅ \"Variance doubled after Week 15; demand now fluctuates 80-220 (was 90-110)\"\n"
-        "  ❌ \"This week's demand was high\" (not sustained, no evidence)\n"
-        "  ❌ \"Sales continue as before\" (no change, unnecessary)\n"
-        "  ❌ \"Demand is volatile\" (already documented in previous insight)\n"
-        "\n"
-        "Remember: Insights are for PERSISTENT changes only. Temporary fluctuations go in rationale, not insights.\n"
-        "\n"
-        "Example decision process:\n"
-        "- Step 1: Check recent arrivals to infer current lead_time (e.g., 'lead_time was 2 weeks')\n"
-        "- Step 2: Review OR recommends: 200 units\n"
-        "- Step 3: THIS WEEK'S NEWS: Major sports event finale\n"
-        "- Step 4: Your analysis: Sports events may increase demand significantly in 2 weeks (lead_time!)\n"
-        "- Step 5: Your decision: Adjust order upward based on your reasoning\n"
+        "=== CARRY-OVER INSIGHTS ===\n"
+        "- Only record NEW, non-duplicated insights for sustained, evidence-backed shifts (demand mean/variance, lead time, seasonality) that future decisions must remember.\n"
+        "- Stay conservative: if the observation is already captured or not yet material, leave the field empty instead of restating it.\n"
+        "- Provide concrete stats (date ranges, averages, lead-time values). List multiple insights separated by '; ' or newline. Remove insights once they stop being true. Default output is \"\".\n"
         "\n"
     )
     
@@ -689,24 +669,16 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         example_action = '"item_id": quantity, ...'
     
     system += (
-        "IMPORTANT: Think step by step, then decide.\n"
-        "You MUST respond with valid JSON in this exact format:\n"
+        "=== OUTPUT FORMAT ===\n"
+        "Return valid JSON only:\n"
         "{\n"
-        '  "rationale": "First, explain your reasoning: (1) infer current lead_time from recent arrivals, '
-        '(2) review OR algorithm recommendations, '
-        '(3) analyze current inventory (on-hand + in-transit) and demand patterns, '
-        '(4) evaluate this week\'s news and learn from past events, '
-        '(5) consider lead_time when adjusting OR recommendations (goods arrive after lead_time!), '
-        '(6) decide: follow OR baseline or adjust based on news/analysis, '
-        '(7) explain your final ordering strategy",\n'
-        '  "carry_over_insight": "Only if NEW sustained change observed with specific evidence; otherwise \"\" (must check if already exists above)",\n'
+        '  "rationale": "Explain (a) current date/news context, (b) demand/lead-time evidence, '
+        '(c) how you interpreted the OR recommendation, (d) why the final quantity meets service-level vs holding-cost goals.",\n'
+        '  "carry_over_insight": "Summaries of NEW sustained changes with evidence, or \\"\\".",\n'
         f'  "action": {{{example_action}}}\n'
         "}\n"
-        "\n"
-        f"REMEMBER: Use EXACT item IDs: {items_str}\n"
-        "\n"
-        "Think through your rationale BEFORE making the final order decision.\n"
-        "Do NOT include any other text outside the JSON."
+        f"Use the exact item ID(s) when writing \"action\" (current ID(s): {items_str or primary_item}). "
+        "No extra commentary outside the JSON."
     )
     # return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
     return GPT5MiniAgent(system_prompt=system)
@@ -717,15 +689,13 @@ def main():
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
     parser.add_argument('--promised-lead-time', type=int, default=0,
-                       help='Promised lead time used by OR and shown to LLM (default: 0). Actual lead time in CSV may differ.')
-    parser.add_argument('--policy', type=str, choices=['vanilla', 'capped'], default='capped',
-                       help='OR policy type: vanilla (standard base-stock) or capped (smoothed orders). Default: capped')
+                       help='Promised lead time used by OR and shown to LLM in periods (default: 0, where 1 period = 14 days). Actual lead time in CSV may differ.')
     parser.add_argument('--human-feedback', action='store_true',
-                       help='Enable daily human feedback on agent decisions (Mode 1)')
+                       help='Enable periodic human feedback on agent decisions (Mode 1)')
     parser.add_argument('--guidance-frequency', type=int, default=0,
-                       help='Collect strategic guidance every N days (Mode 2). 0=disabled')
+                       help='Collect strategic guidance every N periods (Mode 2). 0=disabled')
     parser.add_argument('--real-instance-train', type=str, default=None,
-                       help='Path to train.csv for real instances (extracts initial samples from weeks 1-10). If not provided, uses default unified samples.')
+                       help='Path to train.csv for real instances (extracts initial samples). If not provided, uses default unified samples.')
     args = parser.parse_args()
     
     # Check API key
@@ -756,12 +726,21 @@ def main():
         # Load from real instance train.csv
         try:
             train_df = pd.read_csv(args.real_instance_train)
-            # Use all weeks (1-10) from train.csv
-            train_samples = train_df[train_df['week_number'] >= 1]['demand'].tolist()
-            initial_samples = {item_id: train_samples for item_id in csv_player.get_item_ids()}
-            print(f"\nUsing initial samples from real instance train.csv: {args.real_instance_train}")
-            print(f"  Samples (weeks 1-10): {train_samples}")
-            print(f"  Mean: {sum(train_samples)/len(train_samples):.1f}, Count: {len(train_samples)}")
+            # Extract demand samples from train.csv (H&M format: exact_dates_{item_id}, demand_{item_id})
+            item_ids = csv_player.get_item_ids()
+            if item_ids:
+                first_item = item_ids[0]
+                demand_col = f'demand_{first_item}'
+                if demand_col in train_df.columns:
+                    train_samples = train_df[demand_col].tolist()
+                    initial_samples = {item_id: train_samples for item_id in item_ids}
+                    print(f"\nUsing initial samples from train.csv: {args.real_instance_train}")
+                    print(f"  Samples: {train_samples}")
+                    print(f"  Mean: {sum(train_samples)/len(train_samples):.1f}, Count: {len(train_samples)}")
+                else:
+                    raise ValueError(f"Column {demand_col} not found in train.csv")
+            else:
+                raise ValueError("No items detected in test CSV")
         except Exception as e:
             print(f"Error loading train.csv: {e}")
             print("Falling back to default unified samples")
@@ -773,22 +752,17 @@ def main():
         initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
         print(f"\nUsing default unified initial samples: {unified_samples}")
     
-    print(f"Promised lead time (used by OR, shown to LLM): {args.promised_lead_time} days")
+    print(f"Promised lead time (used by OR, shown to LLM): {args.promised_lead_time} periods (1 period = 14 days)")
     print(f"Note: OR uses promised lead time for recommendations. Actual lead times in CSV may differ.")
     print(f"      LLM must infer actual lead time from arrivals and adjust OR recommendations accordingly.")
     
-    # Set NUM_DAYS based on CSV
+    # Set NUM_DAYS based on CSV (each period = 14 days)
     from textarena.envs.VendingMachine import env as vm_env_module
     original_num_days = vm_env_module.NUM_DAYS
     original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
     vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
-    vm_env_module.NUM_DAYS = csv_player.get_num_days()
-    print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} based on CSV")
-    
-    # Add news from CSV
-    news_schedule = csv_player.get_news_schedule()
-    for day, news in news_schedule.items():
-        env.add_news(day, news)
+    vm_env_module.NUM_DAYS = csv_player.get_num_periods()
+    print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} periods based on CSV")
     
     # Create OR agent (for recommendations only - uses promised lead time)
     or_items_config = {
@@ -799,7 +773,7 @@ def main():
         }
         for config in item_configs
     }
-    or_agent = ORAgent(or_items_config, initial_samples, policy=args.policy)
+    or_agent = ORAgent(or_items_config, initial_samples)
     
     # Create hybrid VM agent
     base_agent = make_hybrid_vm_agent(
@@ -833,7 +807,7 @@ def main():
     
     # Run game
     done = False
-    current_day = 1
+    current_period = 1
     last_demand = {}  # Track demand to update OR agent
     carry_over_insights = {}
     
@@ -841,10 +815,29 @@ def main():
         pid, observation = env.get_observation()
         
         if pid == 0:  # VM agent (Hybrid: LLM + OR)
+            # Get exact date for current period
+            exact_date = csv_player.get_exact_date(current_period)
+            
+            # Inject exact date into observation's CURRENT STATUS section
+            observation = observation.replace(
+                f"PERIOD {current_period} / ",
+                f"PERIOD {current_period} (Date: {exact_date}) / "
+            )
+            
+            # Inject exact dates into GAME HISTORY section
+            if "=== GAME HISTORY ===" in observation:
+                for p in range(1, current_period):
+                    p_date = csv_player.get_exact_date(p)
+                    observation = observation.replace(
+                        f"Period {p} conclude:",
+                        f"Period {p} (Date: {p_date}) conclude:"
+                    )
+            
+            observation = _normalize_timeline_terms(observation)
             observation = inject_carry_over_insights(observation, carry_over_insights)
-            # Update item configurations for current day (supports dynamic changes)
+            # Update item configurations for current period (supports dynamic changes)
             for item_id in csv_player.get_item_ids():
-                config = csv_player.get_day_item_config(current_day, item_id)
+                config = csv_player.get_period_item_config(current_period, item_id)
                 env.update_item_config(
                     item_id=item_id,
                     lead_time=config['lead_time'],
@@ -858,7 +851,7 @@ def main():
             
             # Print detailed OR statistics
             print(f"\n{'='*70}")
-            print(f"OR ALGORITHM RECOMMENDATIONS ({args.policy.upper()} Policy):")
+            print(f"Period {current_period} ({exact_date}) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):")
             print(f"{'='*70}")
             for item_id, item_stats in or_stats.items():
                 print(f"\n{item_id}:")
@@ -871,21 +864,18 @@ def main():
                 _safe_print(f"  z*: {item_stats['z_star']:.4f}")
                 print(f"  Base stock: {item_stats['base_stock']:.2f}")
                 print(f"  Current inventory: {item_stats['current_inventory']}")
-                if args.policy == 'capped':
-                    print(f"  Cap value: {item_stats['cap']:.2f}")
-                    print(f"  OR recommends (capped): {item_stats['order']}")
-                    print(f"  OR recommends (uncapped): {item_stats['order_uncapped']}")
-                else:
-                    print(f"  OR recommends: {item_stats['order']}")
+                print(f"  Cap value: {item_stats['cap']:.2f}")
+                print(f"  OR recommends (capped): {item_stats['order']}")
+                print(f"  OR recommends (uncapped): {item_stats['order_uncapped']}")
             print(f"{'='*70}\n")
             
             # Format OR recommendations for LLM
             or_text = "\n" + "="*60 + "\n"
-            or_text += f"OR ALGORITHM RECOMMENDATIONS ({args.policy} policy):\n"
+            or_text += "OR ALGORITHM RECOMMENDATIONS (capped policy):\n"
             for item_id, rec_qty in or_recommendations.items():
                 or_text += f"  {item_id}: {rec_qty} units\n"
-            or_text += "\nNote: OR algorithm uses statistical base-stock policy based on historical demand.\n"
-            or_text += "It does NOT consider news events. You should adjust if needed.\n"
+            or_text += "\nNote: OR uses the promised lead time and historical demand only.\n"
+            or_text += "It cannot see news, lost shipments, or actual lead-time shifts—adjust accordingly.\n"
             or_text += "="*60 + "\n"
             
             # Enhance observation with OR recommendations
@@ -895,7 +885,7 @@ def main():
             action = vm_agent(enhanced_observation)
             
             # Print complete JSON output with proper formatting
-            print(f"\nDay {current_day} Hybrid Decision:")
+            print(f"\nPeriod {current_period} ({exact_date}) Hybrid Decision:")
             print("="*60)
             try:
                 # Remove markdown code block markers if present
@@ -919,11 +909,11 @@ def main():
                     carry_memo = None
                 
                 if carry_memo:
-                    carry_over_insights[current_day] = carry_memo
+                    carry_over_insights[current_period] = carry_memo
                     _safe_print(f"Carry-over insight: {carry_memo}")
                 else:
-                    if current_day in carry_over_insights:
-                        del carry_over_insights[current_day]
+                    if current_period in carry_over_insights:
+                        del carry_over_insights[current_period]
                     print("Carry-over insight: (empty)")
                 
                 # Flush to ensure complete output to file
@@ -937,19 +927,20 @@ def main():
             print(f"  (OR recommended: {or_recommendations})")
             sys.stdout.flush()
         else:  # Demand from CSV
-            action = csv_player.get_action(current_day)
+            exact_date = csv_player.get_exact_date(current_period)
+            action = csv_player.get_action(current_period)
             
             # Parse demand to update OR agent's history
             demand_data = json.loads(action)
             last_demand = demand_data['action']
             
-            print(f"\nDay {current_day} Demand: {action}")
+            print(f"\nPeriod {current_period} ({exact_date}) Demand: {action}")
             
             # Update OR agent with observed demand
             for item_id, qty in last_demand.items():
                 or_agent.update_demand_observation(item_id, qty)
             
-            current_day += 1
+            current_period += 1
         
         done, _ = env.step(action=action)
     
@@ -978,22 +969,21 @@ def main():
         total_profit = profit * sold
         print(f"\n{item_id} ({item_info['description']}):")
         print(f"  Ordered: {ordered}, Sold: {sold}, Ending: {ending}")
-        print(f"  Profit/unit: ${profit}, Holding: ${holding_cost}/unit/day")
+        print(f"  Profit/unit: ${profit}, Holding: ${holding_cost}/unit/period")
         print(f"  Total Profit: ${total_profit}")
     
-    # Daily breakdown
+    # Period breakdown
     print("\n" + "="*60)
-    print("Daily Breakdown:")
+    print("Period Breakdown:")
     print("="*60)
     for day_log in vm_info.get('daily_logs', []):
-        day = day_log['day']
-        news = day_log.get('news', None)
+        period = day_log['day']
+        exact_date = csv_player.get_exact_date(period)
         profit = day_log['daily_profit']
         holding = day_log['daily_holding_cost']
         reward = day_log['daily_reward']
         
-        news_str = f" [NEWS: {news}]" if news else ""
-        print(f"Day {day}{news_str}: Profit=${profit:.2f}, Holding=${holding:.2f}, Reward=${reward:.2f}")
+        print(f"Period {period} ({exact_date}): Profit=${profit:.2f}, Holding=${holding:.2f}, Reward=${reward:.2f}")
     
     # Totals
     total_reward = vm_info.get('total_reward', 0)

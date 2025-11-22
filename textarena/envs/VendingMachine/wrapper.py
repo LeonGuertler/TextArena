@@ -82,7 +82,7 @@ class VendingMachineObservationWrapper(ObservationWrapper):
             if obs_type == ObservationType.GAME_ACTION_DESCRIPTION and sender_id == ta.GAME_ID:
                 # Capture day conclusions: visible to both players
                 # Note: "VM ordered" messages are removed as ordering info is now in day conclusion
-                if 'concluded' in message:
+                if 'conclude' in message:
                     daily_events.append(message)
         
         return daily_events

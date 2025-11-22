@@ -20,6 +20,7 @@ import sys
 import argparse
 import json
 import unicodedata
+import re
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
@@ -45,10 +46,30 @@ def _safe_print(text: str) -> None:
     print(_sanitize_text(str(text)))
 
 
+_TIMELINE_TERM_SUBS = [
+    (re.compile(r'\bWeek\s+(\d+)\s+concluded:'), r'Period \1 conclude:'),
+    (re.compile(r'\bweek\s+(\d+)\s+concluded:'), r'period \1 conclude:'),
+    (re.compile(r'\bWeeks\b'), 'Periods'),
+    (re.compile(r'\bweeks\b'), 'periods'),
+    (re.compile(r'\bWeek\b'), 'Period'),
+    (re.compile(r'\bweek\b'), 'period'),
+    (re.compile(r'\bDay\b'), 'Period'),
+    (re.compile(r'\bDays\b'), 'Periods'),
+]
+
+
+def _normalize_timeline_terms(text: str) -> str:
+    normalized = text
+    for pattern, replacement in _TIMELINE_TERM_SUBS:
+        normalized = pattern.sub(replacement, normalized)
+    return normalized
+
+
 class CSVDemandPlayer:
     """
     Simulates demand agent by reading from CSV file.
-    Supports dynamic item configurations that can change per day.
+    Supports dynamic item configurations that can change per period.
+    Uses exact dates (e.g., 2019-07-01) with 14-day periods.
     """
     def __init__(self, csv_path: str, initial_samples: dict = None):
         """
@@ -73,14 +94,13 @@ class CSVDemandPlayer:
         if initial_samples is not None:
             self._validate_initial_samples(initial_samples)
         
-        # Extract news if available
-        self.has_news = 'news' in self.df.columns
+        # Extract exact dates for each item
+        self.dates = self._extract_dates()
         
-        print(f"Loaded CSV with {len(self.df)} weeks of demand data")
+        print(f"Loaded CSV with {len(self.df)} periods of demand data (14-day periods)")
         print(f"Detected {len(self.item_ids)} items: {self.item_ids}")
-        if self.has_news:
-            news_weeks = self.df[self.df['news'].notna()]['week'].tolist()
-            print(f"News scheduled for weeks: {news_weeks}")
+        if self.dates:
+            print(f"Date range: {self.dates[0]} to {self.dates[-1]}")
     
     def _extract_item_ids(self) -> list:
         """Extract item IDs from CSV columns that start with 'demand_'."""
@@ -91,14 +111,27 @@ class CSVDemandPlayer:
                 item_ids.append(item_id)
         return item_ids
     
+    def _extract_dates(self) -> list:
+        """Extract dates from the first item's exact_dates column."""
+        if not self.item_ids:
+            return []
+        first_item = self.item_ids[0]
+        date_col = f'exact_dates_{first_item}'
+        if date_col in self.df.columns:
+            return self.df[date_col].tolist()
+        return []
+    
     def _validate_item_columns(self):
         """Validate that CSV has all required columns for each item."""
-        required_suffixes = ['demand', 'description', 'lead_time', 'profit', 'holding_cost']
+        # Required: exact_dates and demand columns
         for item_id in self.item_ids:
-            for suffix in required_suffixes:
-                col_name = f'{suffix}_{item_id}'
-                if col_name not in self.df.columns:
-                    raise ValueError(f"CSV missing required column: {col_name}")
+            if f'exact_dates_{item_id}' not in self.df.columns:
+                raise ValueError(f"CSV missing required column: exact_dates_{item_id}")
+            if f'demand_{item_id}' not in self.df.columns:
+                raise ValueError(f"CSV missing required column: demand_{item_id}")
+            
+            # Optional: description, lead_time, profit, holding_cost (only in test.csv)
+            # These are validated when accessed
     
     def _validate_initial_samples(self, initial_samples: dict):
         """Validate that initial_samples item_ids match CSV."""
@@ -154,74 +187,81 @@ class CSVDemandPlayer:
         
         return configs
     
-    def get_day_item_config(self, day: int, item_id: str) -> dict:
+    def get_period_item_config(self, period_index: int, item_id: str) -> dict:
         """
-        Get item configuration for a specific day (supports dynamic changes).
+        Get item configuration for a specific period (supports dynamic changes).
         
         Args:
-            day: Day number (1-indexed)
+            period_index: Period number (1-indexed)
             item_id: Item identifier
             
         Returns:
-            Dict with keys: description, lead_time, profit, holding_cost
+            Dict with keys: description, lead_time, profit, holding_cost, exact_date
         """
-        if day < 1 or day > len(self.df):
-            raise ValueError(f"Day {day} out of range (1-{len(self.df)})")
+        if period_index < 1 or period_index > len(self.df):
+            raise ValueError(f"Period {period_index} out of range (1-{len(self.df)})")
         
         if item_id not in self.item_ids:
             raise ValueError(f"Unknown item_id: {item_id}")
         
-        row = self.df.iloc[day - 1]
+        row = self.df.iloc[period_index - 1]
+        
+        # Get exact date
+        exact_date = str(row[f'exact_dates_{item_id}'])
         
         # Handle lead_time - could be int or "inf"
-        lead_time_val = row[f'lead_time_{item_id}']
-        if isinstance(lead_time_val, str) and lead_time_val.lower() == 'inf':
-            lead_time = float('inf')
-        elif isinstance(lead_time_val, float) and lead_time_val == float('inf'):
-            # pandas reads "inf" as numpy.float64 inf
-            lead_time = float('inf')
+        lead_time_col = f'lead_time_{item_id}'
+        if lead_time_col in row:
+            lead_time_val = row[lead_time_col]
+            if isinstance(lead_time_val, str) and lead_time_val.lower() == 'inf':
+                lead_time = float('inf')
+            elif isinstance(lead_time_val, float) and lead_time_val == float('inf'):
+                lead_time = float('inf')
+            else:
+                lead_time = int(lead_time_val)
         else:
-            lead_time = int(lead_time_val)
+            lead_time = 1  # Default if not specified
+        
+        # Get other configs (may not exist in train.csv)
+        description = str(row.get(f'description_{item_id}', item_id))
+        profit = float(row.get(f'profit_{item_id}', 2.0))
+        holding_cost = float(row.get(f'holding_cost_{item_id}', 1.0))
         
         return {
-            'description': str(row[f'description_{item_id}']),
+            'description': description,
             'lead_time': lead_time,
-            'profit': float(row[f'profit_{item_id}']),
-            'holding_cost': float(row[f'holding_cost_{item_id}'])
+            'profit': profit,
+            'holding_cost': holding_cost,
+            'exact_date': exact_date
         }
     
-    def get_num_days(self) -> int:
-        """Return number of days in CSV."""
+    def get_num_periods(self) -> int:
+        """Return number of periods in CSV."""
         return len(self.df)
     
-    def get_news_schedule(self) -> dict:
-        """Extract news schedule from CSV."""
-        if not self.has_news:
-            return {}
-        
-        news_schedule = {}
-        for _, row in self.df.iterrows():
-            week = int(row['week'])
-            if pd.notna(row['news']) and str(row['news']).strip():
-                news_schedule[week] = str(row['news']).strip()
-        
-        return news_schedule
+    def get_exact_date(self, period_index: int) -> str:
+        """Get exact date for a specific period."""
+        if period_index < 1 or period_index > len(self.df):
+            return f"Period_{period_index}"
+        if self.dates:
+            return str(self.dates[period_index - 1])
+        return f"Period_{period_index}"
     
-    def get_action(self, day: int) -> str:
+    def get_action(self, period_index: int) -> str:
         """
-        Generate buy action for given day based on CSV data in JSON format.
+        Generate buy action for given period based on CSV data in JSON format.
         
         Args:
-            day: Current day (1-indexed)
+            period_index: Current period (1-indexed)
             
         Returns:
-            JSON string like '{"action": {"chips(Regular)": 10, "chips(BBQ)": 5}}'
+            JSON string like '{"action": {"351484002": 622, ...}}'
         """
-        # Get row for this day (day is 1-indexed, df is 0-indexed)
-        if day < 1 or day > len(self.df):
-            raise ValueError(f"Day {day} out of range (1-{len(self.df)})")
+        # Get row for this period (period_index is 1-indexed, df is 0-indexed)
+        if period_index < 1 or period_index > len(self.df):
+            raise ValueError(f"Period {period_index} out of range (1-{len(self.df)})")
         
-        row = self.df.iloc[day - 1]
+        row = self.df.iloc[period_index - 1]
         
         # Extract demand for each item
         action_dict = {}
@@ -287,7 +327,7 @@ class ORAgent:
         Parse current total inventory (on-hand + in-transit) from observation.
         
         Observation format:
-          chips(Regular) (...): Profit=$2/unit, Holding=$1/unit/day
+          chips(Regular) (...): Profit=$2/unit, Holding=$1/unit/period
             On-hand: 5, In-transit: 10 units
         
         Returns:
@@ -478,11 +518,11 @@ def main():
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
     parser.add_argument('--promised-lead-time', type=int, default=0,
-                       help='Promised lead time used by OR algorithm (default: 0). Actual lead time in CSV may differ.')
+                       help='Promised lead time used by OR algorithm in periods (default: 0, where 1 period = 14 days). Actual lead time in CSV may differ.')
     parser.add_argument('--policy', type=str, choices=['vanilla', 'capped'], default='capped',
                        help='OR policy type: vanilla (standard base-stock) or capped (smoothed orders). Default: capped')
     parser.add_argument('--real-instance-train', type=str, default=None,
-                       help='Path to train.csv for real instances (extracts initial samples from weeks 1-10). If not provided, uses default unified samples.')
+                       help='Path to train.csv for real instances (extracts initial samples). If not provided, uses default unified samples.')
     args = parser.parse_args()
     
     # Create environment
@@ -507,12 +547,21 @@ def main():
         # Load from real instance train.csv
         try:
             train_df = pd.read_csv(args.real_instance_train)
-            # Use all weeks (1-10) from train.csv
-            train_samples = train_df[train_df['week_number'] >= 1]['demand'].tolist()
-            initial_samples = {item_id: train_samples for item_id in csv_player.get_item_ids()}
-            print(f"\nUsing initial samples from real instance train.csv: {args.real_instance_train}")
-            print(f"  Samples (weeks 1-10): {train_samples}")
-            print(f"  Mean: {sum(train_samples)/len(train_samples):.1f}, Count: {len(train_samples)}")
+            # Extract demand samples from train.csv (H&M format: exact_dates_{item_id}, demand_{item_id})
+            item_ids = csv_player.get_item_ids()
+            if item_ids:
+                first_item = item_ids[0]
+                demand_col = f'demand_{first_item}'
+                if demand_col in train_df.columns:
+                    train_samples = train_df[demand_col].tolist()
+                    initial_samples = {item_id: train_samples for item_id in item_ids}
+                    print(f"\nUsing initial samples from train.csv: {args.real_instance_train}")
+                    print(f"  Samples: {train_samples}")
+                    print(f"  Mean: {sum(train_samples)/len(train_samples):.1f}, Count: {len(train_samples)}")
+                else:
+                    raise ValueError(f"Column {demand_col} not found in train.csv")
+            else:
+                raise ValueError("No items detected in test CSV")
         except Exception as e:
             print(f"Error loading train.csv: {e}")
             print("Falling back to default unified samples")
@@ -524,21 +573,16 @@ def main():
         initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
         print(f"\nUsing default unified initial samples: {unified_samples}")
     
-    print(f"Promised lead time (used by OR algorithm): {args.promised_lead_time} weeks")
+    print(f"Promised lead time (used by OR algorithm): {args.promised_lead_time} periods (1 period = 14 days)")
     print(f"Note: Actual lead times in CSV may differ, creating a test scenario for OR robustness.")
     
-    # Set NUM_DAYS based on CSV
+    # Set NUM_DAYS based on CSV (each period = 14 days)
     from textarena.envs.VendingMachine import env as vm_env_module
     original_num_days = vm_env_module.NUM_DAYS
     original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
     vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
-    vm_env_module.NUM_DAYS = csv_player.get_num_days()
-    print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} based on CSV")
-    
-    # Add news from CSV
-    news_schedule = csv_player.get_news_schedule()
-    for day, news in news_schedule.items():
-        env.add_news(day, news)
+    vm_env_module.NUM_DAYS = csv_player.get_num_periods()
+    print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} periods based on CSV")
     
     # Create OR agent (uses promised lead time, not actual CSV lead time)
     or_items_config = {
@@ -556,16 +600,20 @@ def main():
     
     # Run game
     done = False
-    current_day = 1
+    current_period = 1
     last_demand = {}  # Track demand to update OR agent
     
     while not done:
         pid, observation = env.get_observation()
+        observation = _normalize_timeline_terms(observation)
         
         if pid == 0:  # VM agent (OR algorithm)
-            # Update item configurations for current day (supports dynamic changes)
+            # Get exact date for current period
+            exact_date = csv_player.get_exact_date(current_period)
+            
+            # Update item configurations for current period (supports dynamic changes)
             for item_id in csv_player.get_item_ids():
-                config = csv_player.get_day_item_config(current_day, item_id)
+                config = csv_player.get_period_item_config(current_period, item_id)
                 env.update_item_config(
                     item_id=item_id,
                     lead_time=config['lead_time'],
@@ -579,7 +627,7 @@ def main():
             
             # Print detailed statistics for each item
             print(f"\n{'='*70}")
-            print(f"Week {current_day} OR Decision ({args.policy.upper()} Policy):")
+            print(f"Period {current_period} ({exact_date}) OR Decision ({args.policy.upper()} Policy):")
             print(f"{'='*70}")
             for item_id, item_stats in stats.items():
                 print(f"\n{item_id}:")
@@ -602,19 +650,20 @@ def main():
             _safe_print(f"\n{action}")
             print(f"{'='*70}")
         else:  # Demand from CSV
-            action = csv_player.get_action(current_day)
+            exact_date = csv_player.get_exact_date(current_period)
+            action = csv_player.get_action(current_period)
             
             # Parse demand to update OR agent's history
             demand_data = json.loads(action)
             last_demand = demand_data['action']
             
-            print(f"\nDay {current_day} Demand: {action}")
+            print(f"\nPeriod {current_period} ({exact_date}) Demand: {action}")
             
             # Update OR agent with observed demand
             for item_id, qty in last_demand.items():
                 or_agent.update_demand_observation(item_id, qty)
             
-            current_day += 1
+            current_period += 1
         
         done, _ = env.step(action=action)
     
@@ -643,22 +692,21 @@ def main():
         total_profit = profit * sold
         print(f"\n{item_id} ({item_info['description']}):")
         print(f"  Ordered: {ordered}, Sold: {sold}, Ending: {ending}")
-        print(f"  Profit/unit: ${profit}, Holding: ${holding_cost}/unit/day")
+        print(f"  Profit/unit: ${profit}, Holding: ${holding_cost}/unit/period")
         print(f"  Total Profit: ${total_profit}")
     
-    # Weekly breakdown
+    # Period breakdown
     print("\n" + "="*60)
-    print("Weekly Breakdown:")
+    print("Period Breakdown:")
     print("="*60)
     for day_log in vm_info.get('daily_logs', []):
-        day = day_log['day']
-        news = day_log.get('news', None)
+        period = day_log['day']
+        exact_date = csv_player.get_exact_date(period)
         profit = day_log['daily_profit']
         holding = day_log['daily_holding_cost']
         reward = day_log['daily_reward']
         
-        news_str = f" [NEWS: {news}]" if news else ""
-        print(f"Week {day}{news_str}: Profit=${profit:.2f}, Holding=${holding:.2f}, Reward=${reward:.2f}")
+        print(f"Period {period} ({exact_date}): Profit=${profit:.2f}, Holding=${holding:.2f}, Reward=${reward:.2f}")
     
     # Totals
     total_reward = vm_info.get('total_reward', 0)
