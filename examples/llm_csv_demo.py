@@ -394,7 +394,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- On-hand inventory starts at 0 in Period 1 and is charged holding cost every period.\n"
         "- \"In-transit\" shows total units not yet delivered; you must infer when each shipment should arrive.\n"
         f"- Supplier-promised lead time is {promised_lead_time} period(s), but actual lead time can drift and must be inferred from CONCLUDED periods only.\n"
-        "- Orders may also never CONCLUDE."
+        "- Orders may also never CONCLUDE.\n"
         "\n"
         "=== DEMAND REASONING ===\n"
         "- Treat the SKU description plus exact date as anchors for applying seasonality/world knowledge.\n"
