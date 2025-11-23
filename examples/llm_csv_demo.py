@@ -23,6 +23,10 @@ import unicodedata
 import pandas as pd
 import textarena as ta
 from textarena.core import Agent
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 
@@ -493,6 +497,8 @@ def main():
                        help='Collect strategic guidance every N periods (Mode 2). 0=disabled')
     parser.add_argument('--real-instance-train', type=str, default=None,
                        help='Path to train.csv for real instances (extracts initial samples). If not provided, uses default unified samples.')
+    parser.add_argument('--max-periods', type=int, default=None,
+                       help='Maximum number of periods to run (limits NUM_DAYS). If None, uses all periods from CSV.')
     args = parser.parse_args()
     
     # Check API key
@@ -556,8 +562,12 @@ def main():
     original_num_days = vm_env_module.NUM_DAYS
     original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
     vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
-    vm_env_module.NUM_DAYS = csv_player.get_num_periods()
-    print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} periods based on CSV")
+    num_periods = csv_player.get_num_periods()
+    if args.max_periods is not None:
+        num_periods = min(args.max_periods, num_periods)
+    vm_env_module.NUM_DAYS = num_periods
+    print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} periods based on CSV" + 
+          (f" (limited from {csv_player.get_num_periods()})" if args.max_periods is not None else ""))
     
     # Create VM agent with historical data
     base_agent = make_vm_agent(
