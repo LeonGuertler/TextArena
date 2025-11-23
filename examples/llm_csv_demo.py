@@ -393,6 +393,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- Example: If LT=1, an order placed in Period 5 arrives in Period 6, but you won't see it until Period 7's decision.\n"
         "- Remember that shipments can arrive AFTER your ordering decision and BEFORE the demand for the period. If the inventory you ordered yesterday (with a promised lead time of 1) has not arrived yet, it does not necessarily mean that it will be delayed and won't arrive today.\n"
         "- Only use PAST period conclusions (\"Period X conclude: ... arrived=Y\") to infer lead time.\n"
+        "- Your order decision in every round should be made such that the order quantity + on-hand inventory + in-transit inventory covers L+1 periods worth of demand. It is L+1 and not L because the current round's demand realizes after you make your order decision. For example, if L = 1, then your order quantity + on-hand inventory + in-transit inventory should cover 2 periods worth of demand.\n"
         "\n"
         "=== INVENTORY & ORDERS ===\n"
         "- On-hand inventory starts at 0 in Period 1 and is charged holding cost every period.\n"
@@ -409,7 +410,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "ONLY use \"Period X conclude: ... arrived=Y units (ordered on Period Z, lead_time was W)\" from history to infer lead time.\n"
         "NEVER infer lead-time changes from current period's missing arrivals—you haven't seen them yet due to sequencing.\n"
         "Example: In Period 6 decision, if history shows \"Period 5 conclude: ... arrived=900 (ordered on Period 4, lead_time was 1)\", then LT=1.\n"
-        "If an expected arrival is missing from a CONCLUDED period by 2+ periods, consider the order lost or lead time increased.\n"
+        "If the order does not arrive for many periods longer than the promised lead time, then it may be lost.\n"
         "\n"
     )
     

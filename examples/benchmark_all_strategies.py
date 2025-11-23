@@ -19,13 +19,15 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 from typing import Dict, List, Tuple
 
+# Get the current Python executable
+PYTHON_EXECUTABLE = sys.executable
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Scripts to benchmark
 SCRIPTS = {
     "llm": "examples/llm_csv_demo.py",
-    "llm_to_or": "examples/llm_to_or_csv_demo.py",
     "or": "examples/or_csv_demo.py",
     "or_to_llm": "examples/or_to_llm_csv_demo.py",
 }
@@ -100,7 +102,7 @@ def run_script(script_path: str, instance_id: str, run_num: int, script_name: st
         return None, f"Train file not found: {train_file}", ""
     
     cmd = [
-        "uv", "run", "python", script_path,
+        PYTHON_EXECUTABLE, script_path,
         "--demand-file", test_file,
         "--promised-lead-time", str(promised_lead_time),
         "--real-instance-train", train_file,
@@ -147,14 +149,20 @@ def run_script(script_path: str, instance_id: str, run_num: int, script_name: st
 
 def get_all_instances() -> List[str]:
     """Get all instance IDs from H&M_instances directory."""
+    # Only test these specific instances
+    target_instances = ["706016001", "568601006", "599580017"]
+    
     instances = []
     if not H_M_INSTANCES_DIR.exists():
         print(f"Error: H&M_instances directory not found at {H_M_INSTANCES_DIR}")
         return instances
     
-    for item in H_M_INSTANCES_DIR.iterdir():
-        if item.is_dir() and (item / "test.csv").exists():
-            instances.append(item.name)
+    for instance_id in target_instances:
+        instance_path = H_M_INSTANCES_DIR / instance_id
+        if instance_path.exists() and instance_path.is_dir() and (instance_path / "test.csv").exists():
+            instances.append(instance_id)
+        else:
+            print(f"Warning: Instance {instance_id} not found or missing test.csv")
     
     return sorted(instances)
 
@@ -176,7 +184,7 @@ def benchmark_all(max_periods=None, max_workers=None):
         return
     
     # Determine which scripts use LLM (for parallel processing)
-    llm_scripts = {"llm", "llm_to_or", "or_to_llm"}
+    llm_scripts = {"llm", "or_to_llm"}
     or_scripts = {"or"}
     
     # Set default max_workers for LLM scripts
@@ -188,7 +196,9 @@ def benchmark_all(max_periods=None, max_workers=None):
     print(f"Total runs: {len(instances) * len(SCRIPTS) * NUM_RUNS}")
     if max_periods:
         print(f"Limiting to {max_periods} periods per run")
-    print(f"Parallel processing: {max_workers} workers for LLM scripts (llm, llm_to_or, or_to_llm)")
+    else:
+        print(f"Running all periods from test files (no limit)")
+    print(f"Parallel processing: {max_workers} workers for LLM scripts (llm, or_to_llm)")
     print("=" * 80)
     
     # Results structure: results[script_name][instance_id] = [reward1, reward2, ...]
@@ -214,7 +224,7 @@ def benchmark_all(max_periods=None, max_workers=None):
     # Run all LLM scripts in parallel
     if all_llm_tasks:
         print(f"\nRunning {len(all_llm_tasks)} LLM tasks in parallel ({max_workers} workers)...")
-        print("This includes: llm, llm_to_or, and or_to_llm across all instances\n")
+        print("This includes: llm and or_to_llm across all instances\n")
         
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             future_to_task = {executor.submit(run_single_task, task): task for task in all_llm_tasks}
@@ -384,9 +394,9 @@ def benchmark_all(max_periods=None, max_workers=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Benchmark all strategies across H&M instances')
     parser.add_argument('--max-periods', type=int, default=None,
-                       help='Maximum number of periods to run (default: None, uses all periods)')
+                       help='Maximum number of periods to run per test. Default: None (runs all periods from test files)')
     parser.add_argument('--max-workers', type=int, default=None,
-                       help='Maximum number of parallel workers for LLM scripts (default: min(10, CPU count))')
+                       help='Maximum number of parallel workers for LLM scripts. Default: min(15, CPU_count * 3)')
     args = parser.parse_args()
     
     benchmark_all(max_periods=args.max_periods, max_workers=args.max_workers)
