@@ -2,13 +2,13 @@ Loaded CSV with 21 periods of demand data (14-day periods)
 Detected 1 items: ['568601006']
 Date range: 2019-03-18 to 2019-12-23
 
-Using initial samples from train.csv: /Users/tianyipeng/Documents/Operations_Research_Code/25-11-supply-chain-agent/OR_Agent/examples/H&M_instances/568601006/train.csv
+Using initial samples from train.csv: /shared/share_malatown/OR_Agent/examples/H&M_instances/568601006/train.csv
   Samples: [306, 375, 413, 482, 429]
   Mean: 401.0, Count: 5
 Promised lead time (used by OR, shown to LLM): 1 periods (1 period = 14 days)
 Note: OR uses promised lead time for recommendations. Actual lead times in CSV may differ.
       LLM must infer actual lead time from arrivals and adjust OR recommendations accordingly.
-Set NUM_DAYS to 1 periods based on CSV (limited from 21)
+Set NUM_DAYS to 21 periods based on CSV
 
 === OR Agent Initialized for recommendations (CAPPED POLICY) ===
 568601006:
@@ -41,7 +41,7 @@ Period 1 (2019-03-18) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
 Period 1 (2019-03-18) Hybrid Decision:
 ============================================================
 {
-  "rationale": "Date 2019-03-18 (start of spring season) \u2014 no news indicating a demand shift. Historical sample mean demand \u2248401 units/period (samples: 306,375,413,482,429). On-hand=0, in-transit=0 so pipeline_inventory=0. OR capped recommendation = 509. OR's base_stock implicitly accounts for service level from profit/(profit+holding)=2/3; its cap limits extreme orders. Given no evidence of lead-time drift or lost shipments and seasonality (spring) that doesn't contradict historical demand, I accept the OR recommendation. Ordering 509 balances the desire to meet expected demand (~401) plus safety stock to cover variability while following the OR's capped risk tradeoff (minimizes stockouts vs holding cost).",
+  "rationale": "Date 2019-03-18 (no special seasonality). Historical mean demand \u2248401 units/period (samples: 306,375,413,482,429). Promised lead time = 1; no past concluded periods to contradict it. Current on-hand=0, in-transit=0 so pipeline_inventory=0. OR capped recommendation = 509 units; OR uses the promised LT and historical demand to set a higher base-stock to achieve the target service level. Given profit $2 vs holding $1 (q\u22480.667 \u2192 z*\u22480.43) I favor the OR recommendation: it stocks ~1.27\xd7 mean to cover demand variability and desired service level while balancing holding cost. I therefore follow OR's quantity exactly to avoid stockouts in Period 1 (we have zero inventory) and because there is no evidence to down-weight the OR baseline.",
   "carry_over_insight": "",
   "action": {
     "568601006": 509
@@ -62,6 +62,886 @@ Period 1 (2019-03-18) Demand: {
 Daily Profit: $0.00, Daily Holding Cost: $0.00
 Daily Reward (R_t): $0.00
 
+======================================================================
+Period 2 (2019-04-01) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 401.00
+  Empirical std: 58.63
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 802.00
+  sigma_hat (\u03c3\u0302): 82.92
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 837.72
+  Current inventory: 509
+  Cap value: 497.45
+  OR recommends (capped): 329
+  OR recommends (uncapped): 329
+======================================================================
+
+
+Period 2 (2019-04-01) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-04-01 (spring); no news indicating demand shift. Historical sample mean \u2248401 units/period (past demands [306,375,413,482,429]). History: Period 1 concluded showing the order of 509 is in-transit (on-hand 0, in-transit 509); no concluded evidence that lead time has increased (we would only see arrival info for that order in a future concluded period). OR recommends 329 but it ignores the large pipeline. With ~509 units already in pipeline vs expected demand ~401, placing additional stock now would raise holding cost ($1/unit/period) unnecessarily. To balance service level and holding cost, I will not order this period (order 0) and rely on the arriving pipeline to meet demand.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 0
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 329})
+
+Period 2 (2019-04-01) Demand: {
+  "action": {
+    "568601006": 427
+  }
+}
+
+=== Period 2 Summary ===
+568601006: ordered=0, arrived=509 units (ordered on Period 1, lead_time was 1 periods), starting on-hand inventory=509, demand=427, sold=427, ending on-hand inventory=82
+Daily Profit: $854.00, Daily Holding Cost: $82.00
+Daily Reward (R_t): $772.00
+
+======================================================================
+Period 3 (2019-04-15) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 404.71
+  Empirical std: 54.42
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 809.43
+  sigma_hat (\u03c3\u0302): 76.96
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 842.58
+  Current inventory: 82
+  Cap value: 494.23
+  OR recommends (capped): 495
+  OR recommends (uncapped): 761
+======================================================================
+
+
+Period 3 (2019-04-15) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-04-15 (Period 3). Historical mean demand for SKU 568601006 \u2248 401 (samples: 306,375,413,482,429; recent periods: 401,427). History shows Period 2 concluded: 509 arrived (ordered in Period 1) \u2192 confirmed realized lead time = 1. Current on-hand = 82, in-transit = 0. Sequencing: an order placed now (Period 3) will NOT arrive before Period 3 demand \u2014 it will arrive in Period 4 \u2014 so the 82 on-hand will be consumed against Period 3 demand and is unlikely to carry into Period 4 (expected leftover \u2248 max(82\u2212\u03bc,0)=0). OR recommends 495 (capped baseline using promised LT and safety stock). I treat OR as starting point but reduce its large safety buffer because current on-hand will be depleted by Period 3 demand and we should target expected demand in Period 4 rather than stacking extra inventory that incurs holding cost. Therefore order = expected next-period demand \u2248 401 units to meet mean demand with minimal extra holding. This balances service (meet expected sales) vs holding cost (holding=$1/unit/period) and acknowledges LT=1 confirmed by arrivals history.",
+  "carry_over_insight": "Confirmed realized lead time = 1 period (evidence: Period 2 conclude: 509 arrived, ordered on Period 1; lead_time was 1).",
+  "action": {
+    "568601006": 401
+  }
+}
+Carry-over insight: Confirmed realized lead time = 1 period (evidence: Period 2 conclude: 509 arrived, ordered on Period 1; lead_time was 1).
+============================================================
+  (OR recommended: {'568601006': 495})
+
+Period 3 (2019-04-15) Demand: {
+  "action": {
+    "568601006": 257
+  }
+}
+
+=== Period 3 Summary ===
+568601006: ordered=401, arrived=0, starting on-hand inventory=82, demand=257, sold=82, ending on-hand inventory=0
+Daily Profit: $164.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $164.00
+
+======================================================================
+Period 4 (2019-04-29) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 386.25
+  Empirical std: 72.57
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 772.50
+  sigma_hat (\u03c3\u0302): 102.62
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 816.70
+  Current inventory: 401
+  Cap value: 505.61
+  OR recommends (capped): 416
+  OR recommends (uncapped): 416
+======================================================================
+
+
+Period 4 (2019-04-29) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date/news: 2019-04-29 (no special seasonality). Demand evidence: historical sample mean \u2248401 units/period (samples: 306,375,413,482,429). Lead-time evidence: Period 2\u21923 showed LT=1 confirmed; in-transit=401 (order from Period 3) is expected to arrive after my decision and before demand. OR recommended base/capped target = 416 units. Interpretation & adjustment: with expected pipeline (on-hand 0 + in-transit 401) roughly equal to the demand mean, I only need a small top-up to reach OR's target and maintain service while minimizing holding cost. Final qty balances service-level (cover \u2248mean + small safety stock per OR) vs $1/unit holding cost and $2/unit profit.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 15
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 416})
+
+Period 4 (2019-04-29) Demand: {
+  "action": {
+    "568601006": 351
+  }
+}
+
+=== Period 4 Summary ===
+568601006: ordered=15, arrived=401 units (ordered on Period 3, lead_time was 1 periods), starting on-hand inventory=401, demand=351, sold=351, ending on-hand inventory=50
+Daily Profit: $702.00, Daily Holding Cost: $50.00
+Daily Reward (R_t): $652.00
+
+======================================================================
+Period 5 (2019-05-13) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 382.33
+  Empirical std: 68.89
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 764.67
+  sigma_hat (\u03c3\u0302): 97.42
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 806.63
+  Current inventory: 65
+  Cap value: 495.65
+  OR recommends (capped): 496
+  OR recommends (uncapped): 742
+======================================================================
+
+
+Period 5 (2019-05-13) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date/news: Period 5 (2019-05-13) \u2014 no external news or seasonality signals. Demand evidence: historical sample mean = 401, sd \u2248 59; recent demands: 427,257,351, so still centered ~400 but some volatility. Lead-time evidence: confirmed LT = 1 from history (Period 2 arrival of Period 1 order; Period 4 arrival of Period 3 order). Inventory reconciliation: on-hand = 50, in-transit = 15 (the 15 was ordered in Period 4 and, given LT=1, is expected to arrive this period but is still part of pipeline when deciding). OR recommended 496 units (capped policy). Interpretation & adjustment: OR's recommendation implies a much larger base-stock than the demand statistics justify (OR used promised LT and historical demand but its cap likely produced a high number). Using observed mean (401) and safety z\u22480.43 (q = profit/(profit+holding) = 2/3), base-stock \u2248 426. With pipeline \u224865, that implies an order \u2248361. To balance service level vs holding cost, I round slightly down for conservatism given recent volatile low demand (257). Final order set to 360, which plus pipeline (~65) targets on-hand \u2248425\u2014close to the statistically justified base-stock and lower than OR's 496 to avoid excessive holding costs.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 360
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 496})
+
+Period 5 (2019-05-13) Demand: {
+  "action": {
+    "568601006": 339
+  }
+}
+
+=== Period 5 Summary ===
+568601006: ordered=360, arrived=15 units (ordered on Period 4, lead_time was 1 periods), starting on-hand inventory=65, demand=339, sold=65, ending on-hand inventory=0
+Daily Profit: $130.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $130.00
+
+======================================================================
+Period 6 (2019-05-27) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 378.00
+  Empirical std: 66.38
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 756.00
+  sigma_hat (\u03c3\u0302): 93.87
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 796.43
+  Current inventory: 360
+  Cap value: 487.18
+  OR recommends (capped): 437
+  OR recommends (uncapped): 437
+======================================================================
+
+
+Period 6 (2019-05-27) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-05-27: history confirms realized lead time = 1 (Period 2 and Period 4 arrivals); in-transit=360 (order placed in Period 5) will arrive this period but is NOT visible at decision time except as pipeline. Recent realized demands average ~351 (Periods 2\u20135) though longer-run mean \u2248401. OR recommended 437 (starts point) but appears to ignore current large pipeline. Using OR's base-stock logic (\u03bc\u2248401, z*\u22480.43 \u2192 base_stock \u2248427) minus pipeline_inventory 360 \u2192 incremental order \u224867. This balances service (covers expected demand spike) vs holding cost given high in-transit. I therefore scale the OR recommendation down from 437 to 67 units to avoid excess holding while keeping a modest safety buffer.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 67
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 437})
+
+Period 6 (2019-05-27) Demand: {
+  "action": {
+    "568601006": 286
+  }
+}
+
+=== Period 6 Summary ===
+568601006: ordered=67, arrived=360 units (ordered on Period 5, lead_time was 1 periods), starting on-hand inventory=360, demand=286, sold=286, ending on-hand inventory=74
+Daily Profit: $572.00, Daily Holding Cost: $74.00
+Daily Reward (R_t): $498.00
+
+======================================================================
+Period 7 (2019-06-10) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 369.64
+  Empirical std: 68.81
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 739.27
+  sigma_hat (\u03c3\u0302): 97.31
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 781.19
+  Current inventory: 141
+  Cap value: 482.82
+  OR recommends (capped): 483
+  OR recommends (uncapped): 641
+======================================================================
+
+
+Period 7 (2019-06-10) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date/news: 2019-06-10 \u2014 no special news/seasonality detected for this blazer. Demand evidence: historical sample mean \u2248401 units/period, sd \u224858.6; recent realized demands (Periods 2\u20136) average ~341 but include one high 427 and 351, so I'll rely on the longer-run mean \u2248401. Lead time evidence: confirmed LT=1 from history (Period 2 arrival of order placed in Period 1). OR recommendation: baseline suggests 483 units (base-stock approach). I treat that as a starting target but adjust for current pipeline. Inventory position now = on-hand 74 + in-transit 67 = 141. Using the OR-style base_stock computed from demand mean and service z (~\u03a6\u22121(2/3)=0.431) gives target \u2248426 units. Order = target \u2212 pipeline = 426 \u2212 141 = 285. Rationale vs objectives: this raises inventory to a conservative base-stock to cover expected ~401 demand while limiting holding cost (holding=$1/ unit/period) versus profit ($2), so I scale OR downward from 483 to 285 to account for substantial current pipeline and avoid excess end\u2010period holding costs while preserving service level under LT=1.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 285
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 483})
+
+Period 7 (2019-06-10) Demand: {
+  "action": {
+    "568601006": 261
+  }
+}
+
+=== Period 7 Summary ===
+568601006: ordered=285, arrived=67 units (ordered on Period 6, lead_time was 1 periods), starting on-hand inventory=141, demand=261, sold=141, ending on-hand inventory=0
+Daily Profit: $282.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $282.00
+
+======================================================================
+Period 8 (2019-06-24) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 360.58
+  Empirical std: 72.72
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 721.17
+  sigma_hat (\u03c3\u0302): 102.84
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 765.46
+  Current inventory: 285
+  Cap value: 480.20
+  OR recommends (capped): 481
+  OR recommends (uncapped): 481
+======================================================================
+
+
+Period 8 (2019-06-24) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date/news: Period 8 (2019-06-24), no special seasonal news. Demand evidence: recent concluded demands show a down-tick from spring highs: last 7 period demands = [401,427,257,351,339,286,261], recent mean \u2248 319 with noticeable variance. Lead time evidence: confirmed realized LT = 1 from history (Period 2 & others). OR recommendation: 481 units (uses promised LT and historical stats) \u2014 this would create large overstock given current pipeline. Inventory math at decision time: on-hand=0, in-transit=285 (from Period 7 order expected with LT\u22481). My read: expected next-period demand \u2248320\xb170; pipeline already covers most of that. Ordering the full OR qty risks high holding cost ($1/unit/period) relative to profit ($2/unit). Action: top-up to cover mean demand plus modest safety stock: target available before demand \u2248 435 units (\u2248 mean + ~1\u03c3 buffer). With 285 in transit, order = 150 to reach that target. This balances service level (low stockouts) against holding cost exposure.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 150
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 481})
+
+Period 8 (2019-06-24) Demand: {
+  "action": {
+    "568601006": 189
+  }
+}
+
+=== Period 8 Summary ===
+568601006: ordered=150, arrived=285 units (ordered on Period 7, lead_time was 1 periods), starting on-hand inventory=285, demand=189, sold=189, ending on-hand inventory=96
+Daily Profit: $378.00, Daily Holding Cost: $96.00
+Daily Reward (R_t): $282.00
+
+======================================================================
+Period 9 (2019-07-08) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 347.38
+  Empirical std: 84.33
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 694.77
+  sigma_hat (\u03c3\u0302): 119.27
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 746.14
+  Current inventory: 246
+  Cap value: 486.10
+  OR recommends (capped): 487
+  OR recommends (uncapped): 501
+======================================================================
+
+
+Period 9 (2019-07-08) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date/news: 2019-07-08 (summer) \u2014 recent realized demand has trended down from spring highs into June. Evidence: last 5 concluded period demands = [351,339,286,261,189] -> recent mean \u2248 285 units/period. Lead time evidence: confirmed LT=1 from history (Period 2/3/4/5/6/7/8 all show 1). Pipeline reconciliation: on-hand 96 + in-transit 150 = 246 units expected available for upcoming demand. OR recommended 487 (uses longer-run demand mean and promised LT); that is aggressive given the recent downward demand trend and sizable pipeline. Decision rule: target enough pipeline to cover expected demand over LT+1 with modest safety but avoid excessive holding (holding cost = $1/unit > half profit). Expected next-period demand \u2248285; target pipeline \u2248 (1+L)*\u03bc \u2248 2*285 = 570. Required order = target_pipeline \u2212 current_pipeline = 570 \u2212 246 = 324. I scale slightly down to be conservative on holding cost given downward trend and demand uncertainty. Final order balances service level vs holding cost.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 324
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 487})
+
+Period 9 (2019-07-08) Demand: {
+  "action": {
+    "568601006": 240
+  }
+}
+
+=== Period 9 Summary ===
+568601006: ordered=324, arrived=150 units (ordered on Period 8, lead_time was 1 periods), starting on-hand inventory=246, demand=240, sold=240, ending on-hand inventory=6
+Daily Profit: $480.00, Daily Holding Cost: $6.00
+Daily Reward (R_t): $474.00
+
+======================================================================
+Period 10 (2019-07-22) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 339.71
+  Empirical std: 85.96
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 679.43
+  sigma_hat (\u03c3\u0302): 121.56
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 731.79
+  Current inventory: 330
+  Cap value: 481.10
+  OR recommends (capped): 402
+  OR recommends (uncapped): 402
+======================================================================
+
+
+Period 10 (2019-07-22) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-07-22. Historical demand mean \u2248401 units/period (samples: 306,375,413,482,429; \u03c3\u224859). Confirmed realized lead time = 1 (from history). Current physicals: on-hand=6, in-transit=324 \u2192 pipeline\u2248330 (those 324 were ordered in Period 9 and will arrive this period before demand, though I can't observe them until next decision). OR baseline recommends ordering 402 (base_stock logic). I treat OR as starting point but adjust: target base_stock \u2248 \u03bc\u0302 + z*\u03c3 \u2248 401 + 0.431\xb759 \u2248 426. To bring pipeline (330) up to base_stock (\u2248426) requires \u224896 units. Ordering ~96 balances service level (cover expected demand next period \u2248401) vs holding cost (high relative to profit), avoiding the large OR order which would create excess holding. Final order = 96 units.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 96
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 402})
+
+Period 10 (2019-07-22) Demand: {
+  "action": {
+    "568601006": 157
+  }
+}
+
+=== Period 10 Summary ===
+568601006: ordered=96, arrived=324 units (ordered on Period 9, lead_time was 1 periods), starting on-hand inventory=330, demand=157, sold=157, ending on-hand inventory=173
+Daily Profit: $314.00, Daily Holding Cost: $173.00
+Daily Reward (R_t): $141.00
+
+======================================================================
+Period 11 (2019-08-05) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 327.53
+  Empirical std: 95.32
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 655.07
+  sigma_hat (\u03c3\u0302): 134.81
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 713.13
+  Current inventory: 269
+  Cap value: 484.33
+  OR recommends (capped): 445
+  OR recommends (uncapped): 445
+======================================================================
+
+
+Period 11 (2019-08-05) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-08-05 (Period 11). Historical mean demand \u2248 291 units/period (past 10 periods average = 290.8). Confirmed realized lead time = 1 (from history). Current visible inventory: on-hand=173, in-transit=96 \u2192 pipeline = 269 (these in-transit units arrive after my decision but before demand given LT=1). OR baseline recommends 445 (base_stock) and would order 445 \u2212 pipeline = 176 now. I treat OR as starting point but reduce order because: (a) pipeline already covers most of expected period demand (269 vs mean \u2248291), (b) profit/holding ratio (profit=$2, holding=$1) implies moderate service level but holding cost is significant relative to profit so avoid large excess stock, (c) recent realized demands have trended down from earlier peaks (last three periods demands 189,240,157) so downside risk of overstock is material. I therefore order a small replenishment to cover the modest shortfall and maintain service: order 50 units. This raises expected available inventory (after arrivals) to ~319, close to mean demand while limiting holding cost exposure.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 50
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 445})
+
+Period 11 (2019-08-05) Demand: {
+  "action": {
+    "568601006": 447
+  }
+}
+
+=== Period 11 Summary ===
+568601006: ordered=50, arrived=96 units (ordered on Period 10, lead_time was 1 periods), starting on-hand inventory=269, demand=447, sold=269, ending on-hand inventory=0
+Daily Profit: $538.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $538.00
+
+======================================================================
+Period 12 (2019-08-19) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 335.00
+  Empirical std: 96.81
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 670.00
+  sigma_hat (\u03c3\u0302): 136.91
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 728.97
+  Current inventory: 50
+  Cap value: 494.24
+  OR recommends (capped): 495
+  OR recommends (uncapped): 679
+======================================================================
+
+
+Period 12 (2019-08-19) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date/news: Period 12 (2019-08-19), no external news; seasonal context (late summer) doesn't imply large demand drop. Demand/lead-time evidence: realized lead time = 1 (confirmed in history); pipeline shows 50 units in-transit arriving before demand. Recent demand samples (provided) have mean \u2248401, SD \u224859; Period 11 demand observed high (447, with stockouts) suggesting true demand remains around ~400+. OR recommendation: 495 units. Interpretation/adjustment: OR's capped baseline targets a high base-stock but doesn't account that 50 units are already in-transit and recent evidence of ~400 mean demand implies a lower incremental order is sufficient. Balancing profit ($2) vs holding cost ($1) pushes toward meeting demand but avoiding excess ending inventory. Action chosen = base_stock (\u2248401 + 0.43\xb759 \u2248426) minus pipeline (50) \u2192 \u2248376; rounded to 380 to provide a small safety buffer against stockouts while limiting holding cost.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 380
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 495})
+
+Period 12 (2019-08-19) Demand: {
+  "action": {
+    "568601006": 482
+  }
+}
+
+=== Period 12 Summary ===
+568601006: ordered=380, arrived=50 units (ordered on Period 11, lead_time was 1 periods), starting on-hand inventory=50, demand=482, sold=50, ending on-hand inventory=0
+Daily Profit: $100.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $100.00
+
+======================================================================
+Period 13 (2019-09-02) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 343.65
+  Empirical std: 100.29
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 687.29
+  sigma_hat (\u03c3\u0302): 141.83
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 748.38
+  Current inventory: 380
+  Cap value: 508.61
+  OR recommends (capped): 369
+  OR recommends (uncapped): 369
+======================================================================
+
+
+Period 13 (2019-09-02) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date/news: 2019-09-02 (no special seasonal event). Demand evidence: historical sample mean=401, sample SD\u224866; recent realised demands are high (Periods 11-12 = 447,482) so demand remains elevated. Lead-time evidence: confirmed LT=1 from history (Period 2 arrival of order placed in Period 1). Inventory reconciliation: on-hand=0, in-transit=380 (this was ordered in Period 12 and\u2014given LT=1\u2014should arrive this period, but I must decide before seeing that arrival). OR recommendation: 369 units (baseline uses promised LT and historical demand). Interpretation & adjustment: given an expected single-period demand \u2248401 and safety stock (z*\u22480.431) \u2192 base_stock \u2248401+28\u2248429. With 380 units already en route, additional order needed \u2248429\u2212380\u224849. Ordering 49 balances service level (covers expected demand + modest safety) while avoiding excess holding cost given high holding $1/unit. Final action: order 49 units.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 49
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 369})
+
+Period 13 (2019-09-02) Demand: {
+  "action": {
+    "568601006": 685
+  }
+}
+
+=== Period 13 Summary ===
+568601006: ordered=49, arrived=380 units (ordered on Period 12, lead_time was 1 periods), starting on-hand inventory=380, demand=685, sold=380, ending on-hand inventory=0
+Daily Profit: $760.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $760.00
+
+======================================================================
+Period 14 (2019-09-16) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 362.61
+  Empirical std: 126.25
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 725.22
+  sigma_hat (\u03c3\u0302): 178.55
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 802.13
+  Current inventory: 49
+  Cap value: 570.28
+  OR recommends (capped): 571
+  OR recommends (uncapped): 754
+======================================================================
+
+
+Period 14 (2019-09-16) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-09-16. Recent realized lead times remain 1 period in history (Period 2,4,5...13 evidence). On-hand=0, in-transit=49 (order placed in Period 13 expected to arrive this period after decision). Demand has jumped recently (Periods 11\u201313 demands = 447, 482, 685; average \u2248538), well above earlier sample mean. OR recommended 571 units based on historic demand and promised LT; I treat that as a strong baseline but increase to guard against the clear upward demand shift and avoid lost sales. Ordering 650 (plus 49 in-transit) gives pipeline \u2248699 arriving before demand, providing coverage near one expected high-period demand while accepting modest extra holding cost (Profit > Holding so tilt to service).",
+  "carry_over_insight": "Recent demand regime increased: Periods 11\u201313 demands 447, 482, 685 \u2192 mean \u2248538 (evidence: Period 11 conclude, Period 12 conclude, Period 13 conclude); continue to monitor.",
+  "action": {
+    "568601006": 650
+  }
+}
+Carry-over insight: Recent demand regime increased: Periods 11\u201313 demands 447, 482, 685 \u2192 mean \u2248538 (evidence: Period 11 conclude, Period 12 conclude, Period 13 conclude); continue to monitor.
+============================================================
+  (OR recommended: {'568601006': 571})
+
+Period 14 (2019-09-16) Demand: {
+  "action": {
+    "568601006": 953
+  }
+}
+
+=== Period 14 Summary ===
+568601006: ordered=650, arrived=49 units (ordered on Period 13, lead_time was 1 periods), starting on-hand inventory=49, demand=953, sold=49, ending on-hand inventory=0
+Daily Profit: $98.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $98.00
+
+======================================================================
+Period 15 (2019-09-30) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 393.68
+  Empirical std: 182.76
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 787.37
+  sigma_hat (\u03c3\u0302): 258.46
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 898.69
+  Current inventory: 650
+  Cap value: 694.29
+  OR recommends (capped): 249
+  OR recommends (uncapped): 249
+======================================================================
+
+
+Period 15 (2019-09-30) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-09-30. History confirms realized lead time = 1 (multiple concluded periods). On-hand = 0, in-transit = 650 (this is the order placed in Period 14; it will arrive before demand in the upcoming period per LT=1 evidence). Recent demand has shifted up: Periods 11\u201314 demands = 447, 482, 685, 953 \u2192 recent mean \u2248 641, so demand volatility and level are well above the long-run sample mean. OR recommends 249 based on historical demand and promised LT. Given a confirmed LT=1 and 650 units already in pipeline (enough to cover an expected next-period demand ~600+ with some safety), placing additional order now would raise holding cost without materially improving service. Therefore I override the OR recommendation and order 0 units to avoid unnecessary holding cost while relying on the in-transit shipment to meet near-term demand.",
+  "carry_over_insight": "Recent demand regime increased: Periods 11\u201314 demands 447, 482, 685, 953 \u2192 mean \u2248641 (evidence: Periods 11\u201314 conclude); continue to monitor.",
+  "action": {
+    "568601006": 0
+  }
+}
+Carry-over insight: Recent demand regime increased: Periods 11\u201314 demands 447, 482, 685, 953 \u2192 mean \u2248641 (evidence: Periods 11\u201314 conclude); continue to monitor.
+============================================================
+  (OR recommended: {'568601006': 249})
+
+Period 15 (2019-09-30) Demand: {
+  "action": {
+    "568601006": 596
+  }
+}
+
+=== Period 15 Summary ===
+568601006: ordered=0, arrived=650 units (ordered on Period 14, lead_time was 1 periods), starting on-hand inventory=650, demand=596, sold=596, ending on-hand inventory=54
+Daily Profit: $1192.00, Daily Holding Cost: $54.00
+Daily Reward (R_t): $1138.00
+
+======================================================================
+Period 16 (2019-10-14) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 403.80
+  Empirical std: 183.54
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 807.60
+  sigma_hat (\u03c3\u0302): 259.57
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 919.40
+  Current inventory: 54
+  Cap value: 705.70
+  OR recommends (capped): 706
+  OR recommends (uncapped): 866
+======================================================================
+
+
+Period 16 (2019-10-14) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-10-14: no external news; SKU is a seasonal blazer but recent on-file demands sharply increased. Lead time evidence: concluded history shows consistent LT=1 (multiple periods: e.g., Period 2 arrival from Period 1, Periods 3\u201315 arrivals each correspond to order+1). Demand evidence: recent periods 11\u201315 demands = [447,482,685,953,596] \u2192 recent mean \u2248633 units/period, so near-term demand materially higher than early-sample mean. OR recommendation (capped) = 706 units (uses promised LT and historical demand only). Given LT=1 and current on-hand=54, ordering enough to cover expected ~633 next-period demand is primary objective; heavy overstock is penalized (holding $1/unit vs profit $2/unit). I scale down OR's 706 toward the recent mean: target inventory position \u2248633, so order = max(0, 633 \u2212 on_hand 54) = 579. This balances service level (cover expected demand + modest safety implicitly from using the 5-period mean) while limiting ending inventory holding cost versus OR's larger safety cushion.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 579
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 706})
+
+Period 16 (2019-10-14) Demand: {
+  "action": {
+    "568601006": 595
+  }
+}
+
+=== Period 16 Summary ===
+568601006: ordered=579, arrived=0, starting on-hand inventory=54, demand=595, sold=54, ending on-hand inventory=0
+Daily Profit: $108.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $108.00
+
+======================================================================
+Period 17 (2019-10-28) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 412.90
+  Empirical std: 183.70
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 825.81
+  sigma_hat (\u03c3\u0302): 259.79
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 937.71
+  Current inventory: 579
+  Cap value: 715.06
+  OR recommends (capped): 359
+  OR recommends (uncapped): 359
+======================================================================
+
+
+Period 17 (2019-10-28) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-10-28: recent realized demands have been well above historical baseline (Periods 11\u201316: 447,482,685,953,596,595 \u2192 recent mean \u2248626), so demand regime remains elevated. Lead time evidence from history consistently shows LT=1 (many concluded arrivals with LT=1). OR baseline recommends 359 using promised LT and historical demand, but current pipeline inventory is already very large: on-hand=0 + in-transit=579 (these 579 will arrive after decision and before Period 17 demand). Because the arriving 579 units will largely satisfy imminent high demand and any new order today would not arrive until after Period 17, placing additional large orders now would raise holding costs without increasing sales this period. To balance service level and holding cost given LT=1 and heavy pipeline, I override the OR recommendation and order 0 units now to avoid excess ending inventory while relying on the in-transit shipment to serve demand.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 0
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 359})
+
+Period 17 (2019-10-28) Demand: {
+  "action": {
+    "568601006": 616
+  }
+}
+
+=== Period 17 Summary ===
+568601006: ordered=0, arrived=579 units (ordered on Period 16, lead_time was 1 periods), starting on-hand inventory=579, demand=616, sold=579, ending on-hand inventory=0
+Daily Profit: $1158.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $1158.00
+
+======================================================================
+Period 18 (2019-11-11) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 422.14
+  Empirical std: 184.43
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 844.27
+  sigma_hat (\u03c3\u0302): 260.82
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 956.61
+  Current inventory: 0
+  Cap value: 725.49
+  OR recommends (capped): 726
+  OR recommends (uncapped): 957
+======================================================================
+
+
+Period 18 (2019-11-11) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date/news: 2019-11-11, no disruptive news. Evidence: realized lead time remains 1 (many concluded periods show ordered on Period N arrive in N+1); recent demand has stayed high\u2014Periods 11\u201317 demands = 447,482,685,953,596,595,616 \u2192 mean \u2248 625. OR baseline (capped) recommends 726 units using promised LT and historical variability; with on-hand=0 and pipeline=0 and LT=1 the risk of stockouts is high given sustained ~625 mean demand. Holding cost is significant but profit>holding (q\u22482/3) so moderate service emphasis is warranted. I accept the OR quantity to restore availability quickly and capture demand while not excessively increasing holding: order = 726.",
+  "carry_over_insight": "Recent demand regime sustained increase: Periods 11\u201317 demands 447,482,685,953,596,595,616 \u2192 mean \u2248625 (evidence: Periods 11\u201317 conclude); realized lead time = 1 period (evidence: multiple concluded arrivals matching ordered-on previous period).",
+  "action": {
+    "568601006": 726
+  }
+}
+Carry-over insight: Recent demand regime sustained increase: Periods 11\u201317 demands 447,482,685,953,596,595,616 \u2192 mean \u2248625 (evidence: Periods 11\u201317 conclude); realized lead time = 1 period (evidence: multiple concluded arrivals matching ordered-on previous period).
+============================================================
+  (OR recommended: {'568601006': 726})
+
+Period 18 (2019-11-11) Demand: {
+  "action": {
+    "568601006": 523
+  }
+}
+
+=== Period 18 Summary ===
+568601006: ordered=726, arrived=0, starting on-hand inventory=0, demand=523, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
+
+======================================================================
+Period 19 (2019-11-25) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 426.52
+  Empirical std: 181.41
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 853.04
+  sigma_hat (\u03c3\u0302): 256.55
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 963.55
+  Current inventory: 726
+  Cap value: 724.91
+  OR recommends (capped): 238
+  OR recommends (uncapped): 238
+======================================================================
+
+
+Period 19 (2019-11-25) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-11-25. History shows realized lead time = 1 period repeatedly; the 726 units in-transit (ordered in Period 18) are expected to arrive after my decision and before Period 19 demand. Recent demand regime (Periods 11\u201317) averaged \u2248625 units/period. OR recommended 238 units based on historical demand and promised LT, but it does not account for the large in-transit shipment arriving this period. If 726 arrives and demand \u2248625, ordering additional units now would create unnecessary ending inventory and incur $1/unit holding cost while providing only $2/unit profit if sold later. To minimize holding cost while maintaining service, I override the OR recommendation and place no order this period.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 0
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 238})
+
+Period 19 (2019-11-25) Demand: {
+  "action": {
+    "568601006": 902
+  }
+}
+
+=== Period 19 Summary ===
+568601006: ordered=0, arrived=726 units (ordered on Period 18, lead_time was 1 periods), starting on-hand inventory=726, demand=902, sold=726, ending on-hand inventory=0
+Daily Profit: $1452.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $1452.00
+
+======================================================================
+Period 20 (2019-12-09) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 446.33
+  Empirical std: 202.23
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 892.67
+  sigma_hat (\u03c3\u0302): 286.00
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 1015.85
+  Current inventory: 0
+  Cap value: 778.98
+  OR recommends (capped): 779
+  OR recommends (uncapped): 1016
+======================================================================
+
+
+Period 20 (2019-12-09) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-12-09 (Period 20). Recent realized lead time = 1 period (multiple concluded arrivals matching orders one period earlier). Recent demand regime elevated: periods 11\u201319 demands = [447,482,685,953,596,595,616,523,902], mean \u2248644 units and high variance. On-hand=0, in-transit=0, so no pipeline stock will cover next-period demand. OR baseline recommends 779 units (uses historical mean and promised LT); I treat that as a sensible starting point but slightly reduce to limit holding cost given high variance and non-negligible holding=$1/unit/period. With LT=1 an order now will arrive for Period 21 demand; targeting expected demand \u2248644 plus a modest safety buffer (to balance Profit=$2 vs Holding=$1) leads me to order 700 units \u2014 near OR's suggestion but restrained to reduce excess end-period inventory risk.",
+  "carry_over_insight": "Recent demand regime sustained increase: periods 11\u201319 demand mean \u2248644 (evidence: Periods 11\u201319 conclude); realized lead time = 1 period (evidence: multiple concluded arrivals matching orders placed one period earlier).",
+  "action": {
+    "568601006": 700
+  }
+}
+Carry-over insight: Recent demand regime sustained increase: periods 11\u201319 demand mean \u2248644 (evidence: Periods 11\u201319 conclude); realized lead time = 1 period (evidence: multiple concluded arrivals matching orders placed one period earlier).
+============================================================
+  (OR recommended: {'568601006': 779})
+
+Period 20 (2019-12-09) Demand: {
+  "action": {
+    "568601006": 562
+  }
+}
+
+=== Period 20 Summary ===
+568601006: ordered=700, arrived=0, starting on-hand inventory=0, demand=562, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
+
+======================================================================
+Period 21 (2019-12-23) OR ALGORITHM RECOMMENDATIONS (CAPPED POLICY):
+======================================================================
+
+568601006:
+  Empirical mean: 450.96
+  Empirical std: 199.32
+  Lead time (L): 1
+  mu_hat (\u03bc\u0302): 901.92
+  sigma_hat (\u03c3\u0302): 281.88
+  Critical fractile (q): 0.6667
+  z*: 0.4307
+  Base stock: 1023.33
+  Current inventory: 700
+  Cap value: 778.82
+  OR recommends (capped): 324
+  OR recommends (uncapped): 324
+======================================================================
+
+
+Period 21 (2019-12-23) Hybrid Decision:
+============================================================
+{
+  "rationale": "Date 2019-12-23. Recent history (Periods 11\u201319) shows a sustained higher-demand regime (mean \u2248644) and realized lead time = 1 (multiple concluded arrivals matching orders placed one period earlier). Current inventory: on-hand=0, in-transit=700 (this was ordered in Period 20 and\u2014given LT=1 evidence\u2014will arrive this period after my decision but before demand). OR recommends 324 based on historical demand and promised LT. Given the strong evidence LT=1 and a large incoming shipment (700) that likely covers expected demand (~644) for the upcoming period, ordering more now would create unnecessary holding cost ($1/unit/period) while giving only $2 profit per additional unit sold. To maximize Profit\xd7units_sold \u2212 Holding\xd7ending_inventory, I will not place a new order and let the in-transit stock arrive to meet demand.",
+  "carry_over_insight": "",
+  "action": {
+    "568601006": 0
+  }
+}
+Carry-over insight: (empty)
+============================================================
+  (OR recommended: {'568601006': 324})
+
+Period 21 (2019-12-23) Demand: {
+  "action": {
+    "568601006": 282
+  }
+}
+
+=== Period 21 Summary ===
+568601006: ordered=0, arrived=700 units (ordered on Period 20, lead_time was 1 periods), starting on-hand inventory=700, demand=282, sold=282, ending on-hand inventory=418
+Daily Profit: $564.00, Daily Holding Cost: $418.00
+Daily Reward (R_t): $146.00
+
 ============================================================
 === Final Results (Hybrid: LLM + OR) ===
 ============================================================
@@ -69,21 +949,42 @@ Daily Reward (R_t): $0.00
 Per-Item Statistics:
 
 568601006 (Mariette Blazer | product_code=568601 | Garment Upper body | Blazer | Womens Tailoring | Dressed | Fitted jacket in woven fabric with notch lapels, jetted front pockets, a decorative button at the cuffs and a single back vent. Lined.):
-  Ordered: 509, Sold: 0, Ending: 0
+  Ordered: 5341, Sold: 4923, Ending: 418
   Profit/unit: $2.0, Holding: $1.0/unit/period
-  Total Profit: $0.0
+  Total Profit: $9846.0
 
 ============================================================
 Period Breakdown:
 ============================================================
 Period 1 (2019-03-18): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 2 (2019-04-01): Profit=$854.00, Holding=$82.00, Reward=$772.00
+Period 3 (2019-04-15): Profit=$164.00, Holding=$0.00, Reward=$164.00
+Period 4 (2019-04-29): Profit=$702.00, Holding=$50.00, Reward=$652.00
+Period 5 (2019-05-13): Profit=$130.00, Holding=$0.00, Reward=$130.00
+Period 6 (2019-05-27): Profit=$572.00, Holding=$74.00, Reward=$498.00
+Period 7 (2019-06-10): Profit=$282.00, Holding=$0.00, Reward=$282.00
+Period 8 (2019-06-24): Profit=$378.00, Holding=$96.00, Reward=$282.00
+Period 9 (2019-07-08): Profit=$480.00, Holding=$6.00, Reward=$474.00
+Period 10 (2019-07-22): Profit=$314.00, Holding=$173.00, Reward=$141.00
+Period 11 (2019-08-05): Profit=$538.00, Holding=$0.00, Reward=$538.00
+Period 12 (2019-08-19): Profit=$100.00, Holding=$0.00, Reward=$100.00
+Period 13 (2019-09-02): Profit=$760.00, Holding=$0.00, Reward=$760.00
+Period 14 (2019-09-16): Profit=$98.00, Holding=$0.00, Reward=$98.00
+Period 15 (2019-09-30): Profit=$1192.00, Holding=$54.00, Reward=$1138.00
+Period 16 (2019-10-14): Profit=$108.00, Holding=$0.00, Reward=$108.00
+Period 17 (2019-10-28): Profit=$1158.00, Holding=$0.00, Reward=$1158.00
+Period 18 (2019-11-11): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 19 (2019-11-25): Profit=$1452.00, Holding=$0.00, Reward=$1452.00
+Period 20 (2019-12-09): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 21 (2019-12-23): Profit=$564.00, Holding=$418.00, Reward=$146.00
 
 ============================================================
 === TOTAL SUMMARY ===
 ============================================================
-Total Profit from Sales: $0.00
-Total Holding Cost: $0.00
+Total Profit from Sales: $9846.00
+Total Holding Cost: $953.00
 
->>> Total Reward (Hybrid Strategy): $0.00 <<<
-VM Final Reward: 0.00
+>>> Total Reward (Hybrid Strategy): $8893.00 <<<
+VM Final Reward: 8893.00
 ============================================================
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
