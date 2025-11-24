@@ -693,13 +693,16 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         system += (
             "HUMAN-IN-THE-LOOP MODE:\n"
             "You will interact with a human supervisor in a two-stage process:\n"
-            "  Stage 1: You provide your initial rationale and decision (full JSON with rationale + action)\n"
+            "  Stage 1: You provide your initial rationale and decision (full JSON with rationale + short_rationale_for_human + action)\n"
             "  Stage 2 (if human provides feedback): You receive the human's feedback and output ONLY the final action (no rationale needed)\n"
             "\n"
             "The human supervisor has domain expertise and may:\n"
             "  - Suggest adjustments based on information you don't have access to\n"
             "  - Point out considerations you might have missed\n"
             "  - Provide strategic insights about demand patterns\n"
+            "\n"
+            "IMPORTANT: The 'short_rationale_for_human' field is what the human will actually read on their screen.\n"
+            "Make it concise, actionable, and focused on YOUR key decision point (e.g., 'Following OR's 450 units because demand is stable' or 'Increased OR's 300 to 400 units due to upcoming holiday').\n"
             "\n"
             "When you receive human feedback in Stage 2, incorporate it thoughtfully and output only the action JSON.\n"
             "\n"
@@ -731,6 +734,16 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "3. Inspect the OR recommendation (quantity + stats) and decide how to adapt it.\n"
         "4. Justify your final quantity by tying it to demand outlook, lead-time belief, and OR's baseline.\n"
         "\n"
+        "=== RATIONALE GUIDELINES ===\n"
+        "You must provide TWO types of rationale:\n"
+        "1. FULL RATIONALE ('rationale' field): Complete step-by-step analysis covering all factors\n"
+        "2. SHORT RATIONALE ('short_rationale_for_human' field): 1-3 sentences for human decision-maker\n"
+        "   - Focus ONLY on your key adjustment decision\n"
+        "   - Example: 'Following OR recommendation of 450 units - demand pattern is stable'\n"
+        "   - Example: 'Increased OR's 300 to 400 units - anticipating 30% holiday demand surge'\n"
+        "   - Example: 'Reduced OR's 500 to 350 units - recent demand dropped 25% and lead time is shorter than expected'\n"
+        "   - BE SPECIFIC with numbers and reasons\n"
+        "\n"
         "=== CARRY-OVER INSIGHTS ===\n"
         "- Only record NEW, non-duplicated insights for sustained, evidence-backed shifts (demand mean/variance, lead time, seasonality) that future decisions must remember.\n"
         "- Stay conservative: if the observation is already captured or not yet material, leave the field empty instead of restating it.\n"
@@ -750,8 +763,8 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "=== OUTPUT FORMAT ===\n"
         "Return valid JSON only:\n"
         "{\n"
-        '  "rationale": "Explain (a) current date/news context, (b) demand/lead-time evidence, '
-        '(c) how you interpreted the OR recommendation, (d) why the final quantity meets service-level vs holding-cost goals.",\n'
+        '  "rationale": "Explain step by step: lead-time inference, inventory & demand analysis, news impact, final strategy.",\n'
+        '  "short_rationale_for_human": "Brief summary (1-3 sentences) explaining your key reasoning: why you adjusted OR recommendations or why you followed them unchanged.",\n'
         '  "carry_over_insight": "Summaries of NEW sustained changes with evidence, or \\"\\".",\n'
         f'  "action": {{{example_action}}}\n'
         "}\n"
