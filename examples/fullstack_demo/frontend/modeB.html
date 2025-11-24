@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Mode 1 OR - Operations Research Only</title>
+  <title>Mode 1 LLM - Weekly Feedback with OR+LLM</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <style>
     :root {
@@ -367,6 +367,15 @@
       align-items: center;
       margin-bottom: 8px;
     }
+    .or-recommendation-section {
+      margin-bottom: 20px;
+    }
+    .or-recommendation-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
     .algorithm-recommendation-value {
       background: var(--surface-muted);
       border-radius: 8px;
@@ -671,16 +680,13 @@
 </head>
 <body>
   <header>
-    <h1>📊 Mode 1 OR: Operations Research Only (Human Decision)</h1>
-    <p>Use OR algorithm recommendations to make your final decision.</p>
+    <h1>🎮 Mode 1 LLM: Weekly Feedback (OR+LLM → Human Decision)</h1>
+    <p>View OR recommendations and LLM analysis — you make the final decision.</p>
   </header>
 
   <main>
     <section id="setup-section" class="panel">
       <h2>Game Setup</h2>
-      <label class="input-label">Promised Lead Time (weeks)
-        <input id="promised-lead-time" type="number" min="0" value="4" />
-      </label>
       <button id="start-btn">Start Game</button>
       <div id="start-error" class="error"></div>
     </section>
@@ -749,16 +755,25 @@
           <section class="panel decision-panel">
             <h3 class="panel-title">Order Decision</h3>
             
+            <div class="or-recommendation-section">
+              <div class="or-recommendation-header">
+                <label class="input-label">OR Algorithm Recommendation (baseline)</label>
+              </div>
+              <div id="or-recommendation-value" class="algorithm-recommendation-value">
+                <span class="placeholder">Waiting for OR recommendation...</span>
+              </div>
+            </div>
+
             <div class="algorithm-recommendation-section">
               <div class="algorithm-recommendation-header">
-                <label class="input-label">OR Algorithm Recommendation</label>
+                <label class="input-label">LLM Recommendation (considers OR + news)</label>
               </div>
               <div id="algorithm-recommendation-value" class="algorithm-recommendation-value">
                 <span class="placeholder">Waiting for AI recommendation...</span>
               </div>
             </div>
 
-            <div class="reasoning-section hidden">
+            <div class="reasoning-section">
               <label class="input-label">Reasoning:</label>
               <textarea id="reasoning-text" readonly class="reasoning-text" placeholder="AI reasoning will appear here..."></textarea>
             </div>
@@ -859,6 +874,7 @@
     const newsPastEl = document.getElementById("news-past");
     const historyListEl = document.getElementById("history-list");
 
+    const orRecommendationEl = document.getElementById("or-recommendation-value");
     const algorithmRecommendationEl = document.getElementById("algorithm-recommendation-value");
     const reasoningTextEl = document.getElementById("reasoning-text");
 
@@ -904,13 +920,12 @@
 
     document.getElementById("start-btn").addEventListener("click", async () => {
       startError.textContent = "";
-      const promisedLeadTime = parseInt(document.getElementById("promised-lead-time").value, 10);
 
       try {
         const response = await apiRequest("/runs", {
           method: "POST",
           body: JSON.stringify({
-            mode: "modeA",
+            mode: "modeB",
             enable_or: true,
           }),
         });
@@ -941,8 +956,24 @@
         return;
       }
 
+      // Get item_id from latest proposal action
+      let itemId = null;
+      if (latestProposalAction && typeof latestProposalAction === 'object') {
+        const itemIds = Object.keys(latestProposalAction);
+        if (itemIds.length > 0) {
+          itemId = itemIds[0];
+        }
+      }
+      
+      if (!itemId) {
+        decisionError.textContent = "Cannot determine item ID. Please refresh the page.";
+        return;
+      }
+
       const actionJson = JSON.stringify({
-        "chips(Regular)": qty,
+        action: {
+          [itemId]: qty
+        }
       });
 
       isDecisionSubmitting = true;
@@ -972,6 +1003,7 @@
       renderNews(state.news || {});
       renderHistory(state.daily_logs || []);
       renderORRecommendation(state.or_recommendation);
+      renderOrderDecision(state.transcript || []);
       renderTranscript(state.transcript || []);
       renderHistoricalCharts(state.daily_logs || [], state.current_day || 1, state.initial_samples || {});
 
@@ -1048,8 +1080,24 @@
         qty = 0;
       }
       
+      // Get item_id from latest proposal action
+      let itemId = null;
+      if (latestProposalAction && typeof latestProposalAction === 'object') {
+        const itemIds = Object.keys(latestProposalAction);
+        if (itemIds.length > 0) {
+          itemId = itemIds[0];
+        }
+      }
+      
+      if (!itemId) {
+        decisionError.textContent = "Cannot determine item ID for auto-submit.";
+        return;
+      }
+
       const actionJson = JSON.stringify({
-        "chips(Regular)": qty,
+        action: {
+          [itemId]: qty
+        }
       });
 
       isDecisionSubmitting = true;
@@ -1323,42 +1371,25 @@
     });
 
     function renderORRecommendation(orRecommendation) {
-      if (!algorithmRecommendationEl) return;
+      if (!orRecommendationEl) return;
       
       if (!orRecommendation || typeof orRecommendation !== 'object') {
-        algorithmRecommendationEl.innerHTML = '<span class="placeholder">Waiting for OR recommendation...</span>';
-        latestProposalAction = null;
-        orderQuantityInput.value = "";
+        orRecommendationEl.innerHTML = '<span class="placeholder">Waiting for OR recommendation...</span>';
         return;
       }
 
       const recommendations = orRecommendation.recommendations || {};
       const actionEntries = Object.entries(recommendations);
-      
-      latestProposalAction = actionEntries.length ? recommendations : null;
 
       if (actionEntries.length > 0) {
-        algorithmRecommendationEl.innerHTML = actionEntries.map(([itemId, qty]) => `
+        orRecommendationEl.innerHTML = actionEntries.map(([itemId, qty]) => `
           <div class="recommendation-item">
             <span>${escapeHtml(String(itemId))}</span>
             <strong>${formatNumber(qty)}</strong>
           </div>
         `).join("");
-        
-        // Automatically populate order quantity input with OR recommendation
-        for (const [itemId, qty] of actionEntries) {
-          const value = Number.isFinite(Number(qty)) ? Number(qty) : "";
-          if (/regular/i.test(itemId)) {
-            orderQuantityInput.value = value;
-            break;
-          } else if (/bbq/i.test(itemId)) {
-            orderQuantityInput.value = value;
-            break;
-          }
-        }
       } else {
-        algorithmRecommendationEl.innerHTML = '<span class="placeholder">No OR recommendation yet.</span>';
-        orderQuantityInput.value = "";
+        orRecommendationEl.innerHTML = '<span class="placeholder">No OR recommendation yet.</span>';
       }
     }
 
@@ -1371,20 +1402,17 @@
       if (!proposal) {
         algorithmRecommendationEl.innerHTML = '<span class="placeholder">Waiting for AI recommendation...</span>';
         latestProposalAction = null;
-        if (applyProposalBtn) applyProposalBtn.disabled = true;
         if (reasoningTextEl) reasoningTextEl.value = "";
+        orderQuantityInput.value = "";
         return;
       }
 
       const payload = coerceAgentPayload(proposal.content);
       const action = coerceActionObject(payload.action);
-      const rationale = payload.rationale;
+      const rationale = payload.short_rationale_for_human || payload.rationale;
 
       const actionEntries = Object.entries(action);
       latestProposalAction = actionEntries.length ? action : null;
-      if (applyProposalBtn) {
-        applyProposalBtn.disabled = !actionEntries.length;
-      }
 
       // Display algorithm recommendation (item name and quantity)
       if (actionEntries.length > 0) {
@@ -1394,8 +1422,21 @@
             <strong>${formatNumber(qty)}</strong>
           </div>
         `).join("");
+        
+        // Automatically populate order quantity input with LLM recommendation
+        for (const [itemId, qty] of actionEntries) {
+          const value = Number.isFinite(Number(qty)) ? Number(qty) : "";
+          if (/regular/i.test(itemId)) {
+            orderQuantityInput.value = value;
+            break;
+          } else if (/bbq/i.test(itemId)) {
+            orderQuantityInput.value = value;
+            break;
+          }
+        }
       } else {
         algorithmRecommendationEl.innerHTML = '<span class="placeholder">No explicit order proposal yet.</span>';
+        orderQuantityInput.value = "";
       }
 
       // Display reasoning (read-only)
@@ -1504,7 +1545,7 @@
 
       // Prepare sample labels and data
       const sampleLabels = sampleData.map((_, index) => `Sample ${index + 1}`);
-      const sampleDemandData = [...sampleData];
+      const sampleDemandData = [...sampleData]; // Gray line for samples
       
       // Calculate sample statistics
       let sampleAverage = 0;
@@ -1554,6 +1595,7 @@
         demandStdDevEl.textContent = weekDemandData.length > 0 ? formatNumber(demandStdDev, 1) : "—";
       }
       if (historicalStatisticsEl) {
+        // Show historical statistics only if we have week data
         if (weekDemandData.length > 0) {
           historicalStatisticsEl.classList.remove("hidden");
         } else {
@@ -1563,8 +1605,11 @@
 
       // Combine labels and data
       const combinedLabels = [...sampleLabels, ...weekLabels];
+      // Sample demand: has values for samples, null for weeks
       const combinedSampleDemand = [...sampleDemandData, ...Array(weekLabels.length).fill(null)];
+      // Week demand: null for samples, has values for weeks
       const combinedWeekDemand = [...Array(sampleLabels.length).fill(null), ...weekDemandData];
+      // Week demand fulfilled: null for samples, has values for weeks
       const combinedDemandFulfilled = [...Array(sampleLabels.length).fill(null), ...weekDemandFulfilledData];
 
       // Render Historical Demand chart

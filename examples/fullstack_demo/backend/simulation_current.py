@@ -1,4 +1,4 @@
-"""Legacy-style simulation helpers retaining llm_csv_demo-style transcripts."""
+"""Simulation helpers for fullstack demo - imports external test scripts."""
 
 from __future__ import annotations
 
@@ -9,13 +9,19 @@ import re
 import sys
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
-import numpy as np
 import pandas as pd
-from openai import OpenAI
-from scipy.stats import norm
 import textarena as ta
+
+# Add examples directory to path for importing external scripts
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(EXAMPLES_DIR))
+
+# Import from external test scripts
+from or_csv_demo import CSVDemandPlayer, ORAgent
+from or_to_llm_csv_demo import GPT5MiniAgent, make_hybrid_vm_agent
 
 
 def _sanitize_text(text: str) -> str:
@@ -29,14 +35,15 @@ def _safe_print(text: str) -> None:
     print(_sanitize_text(str(text)))
 
 
-ModeLiteral = Literal["mode1_or", "mode1_llm", "mode2_llm"]
+ModeLiteral = Literal["modeA", "modeB", "modeC"]
 
 
 @dataclass
 class SimulationConfig:
     mode: ModeLiteral
-    demand_file: str
-    promised_lead_time: int = 0
+    demand_file: str  # test.csv path
+    train_file: str   # train.csv path for initial samples
+    promised_lead_time: int = 1  # Fixed to 1
     guidance_frequency: int = 5
     enable_or: bool = True  # Flag to enable/disable OR recommendations
 
@@ -55,302 +62,6 @@ class SimulationTranscript:
 
     def append(self, kind: str, payload: Dict[str, Any]) -> None:
         self.events.append(TranscriptEvent(kind=kind, payload=payload))
-
-
-class CSVDemandPlayer:
-    def __init__(self, csv_path: str):
-        self.df = pd.read_csv(csv_path)
-        # Support both "week" and "day" column names
-        if "day" not in self.df.columns and "week" in self.df.columns:
-            self.df = self.df.rename(columns={"week": "day"})
-        if "day" not in self.df.columns:
-            raise ValueError("CSV must contain a 'day' or 'week' column")
-        self.item_ids = self._extract_item_ids()
-        if not self.item_ids:
-            raise ValueError("CSV missing demand_* columns")
-        self._validate_item_columns()
-        self.has_news = "news" in self.df.columns
-
-    def _extract_item_ids(self) -> List[str]:
-        item_ids: List[str] = []
-        for col in self.df.columns:
-            if col.startswith("demand_"):
-                item_ids.append(col[len("demand_") :])
-        return item_ids
-
-    def _validate_item_columns(self) -> None:
-        required = ["demand", "description", "lead_time", "profit", "holding_cost"]
-        for item_id in self.item_ids:
-            for suffix in required:
-                col = f"{suffix}_{item_id}"
-                if col not in self.df.columns:
-                    raise ValueError(f"CSV missing required column: {col}")
-
-    def get_item_ids(self) -> List[str]:
-        return list(self.item_ids)
-
-    def get_initial_item_configs(self) -> List[Dict[str, Any]]:
-        if self.df.empty:
-            raise ValueError("CSV is empty")
-        first_row = self.df.iloc[0]
-        configs: List[Dict[str, Any]] = []
-        for item_id in self.item_ids:
-            configs.append(
-                {
-                    "item_id": item_id,
-                    "description": str(first_row[f"description_{item_id}"]),
-                    "lead_time": self._normalize_lead_time(first_row[f"lead_time_{item_id}"]),
-                    "profit": float(first_row[f"profit_{item_id}"]),
-                    "holding_cost": float(first_row[f"holding_cost_{item_id}"]),
-                }
-            )
-        return configs
-
-    def get_day_item_config(self, day: int, item_id: str) -> Dict[str, Any]:
-        if day < 1 or day > len(self.df):
-            raise ValueError(f"Day {day} out of range (1-{len(self.df)})")
-        if item_id not in self.item_ids:
-            raise ValueError(f"Unknown item_id: {item_id}")
-        row = self.df.iloc[day - 1]
-        return {
-            "description": str(row[f"description_{item_id}"]),
-            "lead_time": self._normalize_lead_time(row[f"lead_time_{item_id}"]),
-            "profit": float(row[f"profit_{item_id}"]),
-            "holding_cost": float(row[f"holding_cost_{item_id}"]),
-        }
-
-    def get_num_days(self) -> int:
-        return len(self.df)
-
-    def get_news_schedule(self) -> Dict[int, str]:
-        if not self.has_news:
-            return {}
-        schedule: Dict[int, str] = {}
-        for _, row in self.df.iterrows():
-            day = int(row["day"])
-            raw = row.get("news")
-            if pd.notna(raw) and str(raw).strip():
-                schedule[day] = str(raw).strip()
-        return schedule
-
-    def get_demand_action(self, day: int) -> str:
-        if day < 1 or day > len(self.df):
-            raise ValueError(f"Day {day} out of range (1-{len(self.df)})")
-        row = self.df.iloc[day - 1]
-        payload = {item_id: int(row[f"demand_{item_id}"]) for item_id in self.item_ids}
-        return json.dumps({"action": payload}, indent=2)
-
-    @staticmethod
-    def _normalize_lead_time(value: Any) -> float:
-        if isinstance(value, str) and value.lower() == "inf":
-            return float("inf")
-        try:
-            numeric = float(value)
-        except Exception as exc:  # noqa: BLE001
-            raise ValueError(f"Invalid lead time value: {value}") from exc
-        if numeric == float("inf"):
-            return float("inf")
-        return int(numeric)
-
-
-class ORAgent:
-    """
-    OR algorithm baseline agent using base-stock policy.
-
-    Supports two policies:
-    1. Vanilla: order_quantity = max(base_stock - current_inventory, 0)
-       where base_stock = μ̂ + z*σ̂
-    2. Capped: order_quantity = max(min(base_stock - current_inventory, cap), 0)
-       where cap = μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
-
-    mu_hat = (1+L) * empirical_mean
-    sigma_hat = sqrt(1+L) * empirical_std
-    z* = Phi^(-1)(q), where q = profit / (profit + holding_cost)
-    """
-    
-    def __init__(self, items_config: Dict[str, Any], initial_samples: Optional[Dict[str, List[int]]] = None, policy: str = 'capped'):
-        """
-        Args:
-            items_config: Dict of {item_id: {'lead_time': L, 'profit': p, 'holding_cost': h}}
-            initial_samples: Optional dict of {item_id: [list of initial demand samples]}
-                           If None or empty, will use only observed demands
-            policy: 'vanilla' or 'capped' (default: 'capped')
-        """
-        self.items_config = items_config
-        self.initial_samples = initial_samples if initial_samples else {}
-        self.policy = policy
-        
-        # Store observed demands (will be updated each day)
-        # Format: {item_id: [demand_day1, demand_day2, ...]}
-        self.observed_demands: Dict[str, List[int]] = {item_id: [] for item_id in items_config}
-    
-    def _parse_inventory_from_observation(self, observation: str, item_id: str) -> int:
-        """
-        Parse current total inventory (on-hand + in-transit) from observation.
-        
-        Observation format:
-          chips(Regular) (...): Profit=$2/unit, Holding=$1/unit/day
-            On-hand: 5, In-transit: 10 units
-        
-        Returns:
-            Total inventory across all pipeline stages (on-hand + in-transit)
-        """
-        try:
-            lines = observation.split('\n')
-            for i, line in enumerate(lines):
-                # Find the item header line
-                if line.strip().startswith(f"{item_id}"):
-                    # Next line should have the inventory info
-                    if i + 1 < len(lines):
-                        inventory_line = lines[i + 1]
-                        
-                        # Parse: "  On-hand: 5, In-transit: 10 units"
-                        if "On-hand:" in inventory_line and "In-transit:" in inventory_line:
-                            # Extract on-hand value
-                            on_hand_start = inventory_line.find("On-hand:") + len("On-hand:")
-                            on_hand_end = inventory_line.find(",", on_hand_start)
-                            on_hand = int(inventory_line[on_hand_start:on_hand_end].strip())
-                            
-                            # Extract in-transit value: "In-transit: 10 units"
-                            in_transit_start = inventory_line.find("In-transit:") + len("In-transit:")
-                            # Find the end - look for "units" or end of line
-                            in_transit_str = inventory_line[in_transit_start:].strip()
-                            # Remove "units" if present
-                            in_transit_str = in_transit_str.replace("units", "").strip()
-                            in_transit = int(in_transit_str)
-                            
-                            total_inventory = on_hand + in_transit
-                            return total_inventory
-            
-            # If not found, return 0
-            return 0
-        except Exception:
-            return 0
-    
-    def _calculate_order(self, item_id: str, current_inventory: int) -> Dict[str, Any]:
-        """
-        Calculate order quantity using OR base-stock policy.
-        
-        Args:
-            item_id: Item identifier
-            current_inventory: Current total inventory (on-hand + in-transit)
-            
-        Returns:
-            Dict with keys: order, empirical_mean, empirical_std, mu_hat, sigma_hat, 
-                           L, z_star, q, base_stock, cap (if capped), order_uncapped (if capped)
-        """
-        config = self.items_config[item_id]
-        L = config['lead_time']
-        p = config['profit']
-        h = config['holding_cost']
-        
-        # Collect all demand samples
-        initial = self.initial_samples.get(item_id, [])
-        all_samples = initial + self.observed_demands[item_id]
-        
-        # If no samples yet, use a conservative default (order 0)
-        if not all_samples:
-            return {
-                'order': 0,
-                'empirical_mean': 0,
-                'empirical_std': 0,
-                'mu_hat': 0,
-                'sigma_hat': 0,
-                'L': L,
-                'z_star': 0,
-                'q': p / (p + h),
-                'base_stock': 0,
-                'current_inventory': current_inventory
-            }
-        
-        # Calculate empirical statistics
-        empirical_mean = float(np.mean(all_samples))
-        empirical_std = float(np.std(all_samples, ddof=1)) if len(all_samples) > 1 else 0.0
-        
-        # Calculate mu_hat and sigma_hat for lead time + review period
-        mu_hat = (1 + L) * empirical_mean
-        sigma_hat = np.sqrt(1 + L) * empirical_std
-        
-        # Calculate critical fractile and z*
-        q = p / (p + h)
-        z_star = float(norm.ppf(q))
-        
-        # Calculate base stock
-        base_stock = mu_hat + z_star * sigma_hat
-        
-        result: Dict[str, Any] = {
-            'empirical_mean': empirical_mean,
-            'empirical_std': empirical_std,
-            'mu_hat': mu_hat,
-            'sigma_hat': sigma_hat,
-            'L': L,
-            'z_star': z_star,
-            'q': q,
-            'base_stock': base_stock,
-            'current_inventory': current_inventory
-        }
-        
-        # Calculate order quantity based on policy
-        if self.policy == 'vanilla':
-            order = max(int(np.ceil(base_stock - current_inventory)), 0)
-            result['order'] = order
-        else:  # capped policy
-            # Vanilla order (for logging)
-            order_uncapped = max(int(np.ceil(base_stock - current_inventory)), 0)
-            
-            # Cap calculation: μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
-            cap_z = float(norm.ppf(0.95))
-            cap = mu_hat / (1 + L) + cap_z * sigma_hat / np.sqrt(1 + L)
-            
-            # Capped order
-            order = max(min(int(np.ceil(base_stock - current_inventory)), int(np.ceil(cap))), 0)
-            
-            result['order'] = order
-            result['order_uncapped'] = order_uncapped
-            result['cap'] = cap
-        
-        return result
-    
-    def update_demand_observation(self, item_id: str, observed_demand: int) -> None:
-        """
-        Update observed demand history for an item.
-        
-        Args:
-            item_id: Item identifier
-            observed_demand: The true demand observed on this day (requested quantity)
-        """
-        self.observed_demands[item_id].append(observed_demand)
-    
-    def get_recommendation(self, observation: str) -> Tuple[Dict[str, int], Dict[str, Dict[str, Any]]]:
-        """
-        Generate OR algorithm recommendations with detailed statistics.
-        
-        Args:
-            observation: Current game observation
-            
-        Returns:
-            Tuple of (recommendations_dict, statistics_dict)
-            recommendations_dict: {"item_id": order_quantity, ...}
-            statistics_dict: {"item_id": {calculation_details}, ...}
-        """
-        recommendations: Dict[str, int] = {}
-        statistics: Dict[str, Dict[str, Any]] = {}
-        
-        for item_id in self.items_config:
-            # Parse current inventory from observation
-            current_inventory = self._parse_inventory_from_observation(observation, item_id)
-            
-            # Calculate order quantity with full statistics
-            calc_result = self._calculate_order(item_id, current_inventory)
-            recommendations[item_id] = calc_result['order']
-            statistics[item_id] = calc_result
-        
-        return recommendations, statistics
-
-
-def _default_initial_samples(item_ids: Iterable[str]) -> Dict[str, List[int]]:
-    historical = [108, 74, 119, 124, 51, 67, 103, 92, 100, 79]
-    return {item_id: historical.copy() for item_id in item_ids}
 
 
 DAY_CONCLUDED_PATTERN = re.compile(r'^(\s*Day\s+(\d+)\s+concluded:)(.*)$')
@@ -381,211 +92,29 @@ def _inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> s
 
 def _make_base_agent(
     *,
-    item_ids: Iterable[str],
+    item_ids: List[str],
     initial_samples: Dict[str, List[int]],
     promised_lead_time: int,
     human_feedback_enabled: bool,
     guidance_enabled: bool,
     or_enabled: bool = False,
 ) -> ta.Agent:
-    available_items = [str(item) for item in item_ids]
-    items_str = ", ".join(f'"{item}"' for item in available_items) or "None"
-
-    system_parts: List[str] = [
-        "You are the Vending Machine controller (VM). You manage multiple items, each with unit profit and holding costs.",
-        "Objective: Maximize total reward = sum of daily rewards R_t, where R_t = Profit*Sold - HoldingCost*EndingInventory.",
-        "",
-        f"AVAILABLE ITEMS: {items_str}",
-        "CRITICAL: Use these exact item IDs (including parentheses/punctuation) in your action JSON.",
-        "",
-        "Core mechanics:",
-        f"- Supplier-promised lead time (displayed to you): {promised_lead_time} days.",
-        "- Actual lead time may differ and can change; infer it from arrival records.",
-        "- Arrival log format: 'arrived=X units (ordered on Day Y, lead_time was Z days)'.",
-        "- Track your orders and infer when each shipment will arrive.",
-        "- On-hand inventory is immediately available; In-transit totals goods en route (arrival timing must be inferred).",
-        "- Initial on-hand inventory on Day 1 is 0 for every item.",
-        "- Holding cost applies to ending inventory each day.",
-        "- Daily news is revealed day by day; you cannot see future news.",
-        "- Daily sequence: you submit the order first, previously scheduled shipments arrive next, and customer demand happens last.",
-    ]
-
-    if or_enabled:
-        system_parts.extend(
-            [
-                "",
-                "OR ALGORITHM ASSISTANCE:",
-                "You will receive recommendations from an Operations Research (OR) algorithm each day.",
-                "The OR algorithm uses a base-stock policy based on statistical analysis:",
-                "- It calculates optimal orders using historical demand patterns",
-                f"- IMPORTANT: OR uses the PROMISED lead time ({promised_lead_time} days) in its calculations",
-                "- Uses profit and holding cost in its calculations",
-                "- Aims to balance service level (meeting demand) vs holding costs",
-                "- Works well for NORMAL, STABLE demand patterns",
-                "",
-                "IMPORTANT LIMITATIONS:",
-                "1. The OR algorithm CANNOT react to news events. It only looks at historical data.",
-                "2. The OR algorithm uses PROMISED lead time, not actual lead time.",
-                "This is where YOU come in!",
-                "",
-                "Your Strategy:",
-                "1. INFER actual lead time from arrival records in game history (look for 'lead_time was X days')",
-                "2. Compare inferred actual lead time with promised lead time to detect discrepancies",
-                "3. Track your own orders and when they should arrive based on inferred actual lead_time",
-                "4. Use 'In-transit' to see total goods coming, but remember you must infer WHEN they arrive",
-                "5. Use OR recommendation as your BASELINE for normal days (OR uses statistical analysis)",
-                "6. Adjust OR recommendations if actual lead time differs from promised lead time",
-                "7. React to THIS DAY'S NEWS as it happens, considering inferred actual lead time",
-                "8. Learn from past news events to understand their impact on demand",
-                "9. Balance between data-driven OR approach and news-driven/lead-time-adjusted insights",
-                "",
-            ]
-        )
-
-    if human_feedback_enabled:
-        system_parts.extend(
-            [
-                "",
-                "HUMAN COLLABORATION:",
-                "- You may exchange messages with a human supervisor before submitting the final action.",
-                "- Provide thorough rationale and proposed orders when prompted.",
-                "- Incorporate any human feedback carefully before your final decision.",
-            ]
-        )
-
-    if guidance_enabled:
-        system_parts.extend(
-            [
-                "",
-                "STRATEGIC GUIDANCE:",
-                "- Periodically you will receive strategic guidance from the human supervisor.",
-                "- Treat new guidance as authoritative until superseded; reference it explicitly in your rationale.",
-            ]
-        )
-
-    if initial_samples:
-        system_parts.append("")
-        system_parts.append("HISTORICAL DEMAND SAMPLES (reference):")
-        for item_id, samples in initial_samples.items():
-            system_parts.append(f"- {item_id}: {samples}")
-        system_parts.append("Use these samples to ground early decisions, especially on Day 1.")
-
-    if available_items:
-        example_action = ", ".join(f'"{item}": 100' for item in available_items[:2])
-        if len(available_items) > 2:
-            example_action += ", ..."
-    else:
-        example_action = '"item_id": quantity, ...'
-
-    system_parts.extend(
-        [
-            "",
-            "Strategy checklist:",
-            "- Infer current lead time from recent arrivals and update when evidence changes.",
-            "- Track on-hand plus in-transit inventory against demand patterns.",
-            "- Respond to today's news and remember how similar events affected demand before.",
-            "- Balance profit potential against holding costs; avoid unnecessary overstocking.",
-            "- Maintain carry_over_insight only for NEW, sustained shifts:",
-            "    * Cite concrete evidence (specific days, averages, or news).",
-            "    * If the observation already exists, output an empty string \"\".",
-            "- Keep rationale CONCISE, output only insights that materially affect decision.",
-        ]
+    """Create base agent using external script's agent creation function."""
+    # Use the external make_hybrid_vm_agent from or_to_llm_csv_demo
+    return make_hybrid_vm_agent(
+        initial_samples=initial_samples,
+        promised_lead_time=promised_lead_time,
+        human_feedback_enabled=human_feedback_enabled,
+        guidance_enabled=guidance_enabled
     )
-
-    if or_enabled:
-        system_parts.extend(
-            [
-                "",
-                "When OR recommendations are provided, explain your reasoning:",
-                "- Review OR algorithm recommendations",
-                "- Analyze current inventory (on-hand + in-transit) and demand patterns",
-                "- Evaluate this day's news and learn from past events",
-                "- Consider lead_time when adjusting OR recommendations (goods arrive after lead_time!)",
-                "- Decide: follow OR baseline or adjust based on news/analysis",
-                "- Explain your final ordering strategy",
-            ]
-        )
-
-    system_parts.extend(
-        [
-            "",
-            "RESPONSE FORMAT (valid JSON only):",
-            "{",
-            '  "rationale": "Explain step by step: lead-time inference, inventory & demand analysis, news impact, final strategy.",',
-            '  "short_rationale_for_human": "Brief summary (1-3 sentences) explaining your key reasoning: why you adjusted OR recommendations or why you followed them unchanged.",',
-            '  "carry_over_insight": "New sustained insight with evidence, or empty string \"\".",',
-            f'  "action": {{{example_action}}}',
-            "}",
-            "",
-            f"Remember: use the exact item IDs: {items_str}. Do not output any text outside the JSON.",
-        ]
-    )
-
-    system_prompt = "\n".join(system_parts)
-
-    return GPT5MiniAgent(
-        system_prompt=system_prompt,
-        reasoning_effort="minimal",
-        verbosity="low",
-    )
-
-
-class GPT5MiniAgent(ta.Agent):
-    """Wrapper around the OpenAI Responses API for gpt-5-mini."""
-
-    def __init__(
-        self,
-        *,
-        system_prompt: str,
-        reasoning_effort: str = "minimal",
-        verbosity: str = "low",
-    ) -> None:
-        super().__init__()
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
-        self._client = OpenAI(api_key=api_key)
-        self._system_prompt = system_prompt
-        self._reasoning_effort = reasoning_effort
-        self._verbosity = verbosity
-
-    def __call__(self, observation: str) -> str:
-        if not isinstance(observation, str):
-            raise ValueError(f"Expected observation to be a string, received {type(observation)}")
-        response = self._client.responses.create(
-            model="gpt-5-mini",
-            input=[
-                {
-                    "role": "system",
-                    "content": [{"type": "input_text", "text": self._system_prompt}],
-                },
-                {
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": observation}],
-                },
-            ],
-            reasoning={"effort": self._reasoning_effort},
-            text={"verbosity": self._verbosity},
-        )
-        if hasattr(response, "output_text") and response.output_text:
-            return response.output_text.strip()
-        fragments: List[str] = []
-        for block in getattr(response, "output", []) or []:
-            for content in getattr(block, "content", []) or []:
-                text_obj = getattr(content, "text", None)
-                if text_obj and hasattr(text_obj, "value"):
-                    fragments.append(text_obj.value)
-        if fragments:
-            return "\n".join(fragments).strip()
-        raise RuntimeError("gpt-5-mini response did not include text content")
 
 
 class SimulationSession:
-    """Stateful session retaining llm_csv_demo style transcript events."""
+    """Stateful session managing game state and human interaction."""
 
     def __init__(self, config: SimulationConfig):
         self.config = config
-        self.csv_player = CSVDemandPlayer(config.demand_file)
+        self.csv_player = CSVDemandPlayer(config.demand_file, initial_samples=None)
         self.transcript = SimulationTranscript()
 
         self.current_day = 1
@@ -595,18 +124,20 @@ class SimulationSession:
         self._carry_over_insights: Dict[int, str] = {}
         self._ui_daily_logs: List[Dict[str, Any]] = []
         self._running_reward: float = 0.0
-        self._initial_samples = _default_initial_samples(self.csv_player.get_item_ids())
+        
+        # Extract initial samples from train.csv
+        self._initial_samples = self._load_initial_samples()
         
         # Print initialization info to terminal
         print(f"\n{'='*70}")
         print(f"SIMULATION INITIALIZATION - {config.mode.upper()}")
         print(f"{'='*70}")
-        print(f"Total weeks: {self.csv_player.get_num_days()}")
-        print(f"Promised lead time: {config.promised_lead_time} days")
+        print(f"Total periods: {self.csv_player.get_num_periods()}")
+        print(f"Promised lead time: {config.promised_lead_time} periods")
         print(f"Items: {', '.join(self.csv_player.get_item_ids())}")
         print(f"Initial samples: {self._initial_samples}")
-        if config.mode == "mode2_llm":
-            print(f"Guidance frequency: Every {config.guidance_frequency} weeks")
+        if config.mode == "modeC":
+            print(f"Guidance frequency: Every {config.guidance_frequency} periods")
         print(f"{'='*70}")
         sys.stdout.flush()
         
@@ -616,7 +147,7 @@ class SimulationSession:
         self._or_statistics: Dict[str, Dict[str, Any]] = {}
         self._final_inventory_snapshot: Optional[List[Dict[str, Any]]] = None
         
-        if config.enable_or and config.mode in ("mode1_or", "mode1_llm", "mode2_llm"):
+        if config.enable_or and config.mode in ("modeA", "modeB", "modeC"):
             # Create OR agent configuration using promised lead time
             or_items_config = {}
             for item_config in self.csv_player.get_initial_item_configs():
@@ -630,19 +161,19 @@ class SimulationSession:
             sys.stdout.flush()
 
         # Determine if we need LLM agent
-        need_llm = config.mode in ("mode1_llm", "mode2_llm")
+        need_llm = config.mode in ("modeB", "modeC")
         
         if need_llm:
             self._agent = _make_base_agent(
                 item_ids=self.csv_player.get_item_ids(),
                 initial_samples=self._initial_samples,
                 promised_lead_time=config.promised_lead_time,
-                human_feedback_enabled=(config.mode == "mode1_llm"),
-                guidance_enabled=(config.mode == "mode2_llm"),
+                human_feedback_enabled=(config.mode == "modeB"),
+                guidance_enabled=(config.mode == "modeC"),
                 or_enabled=config.enable_or,
             )
         else:
-            # mode1_or doesn't need LLM agent
+            # modeA doesn't need LLM agent
             self._agent = None
 
         self._env = ta.make(env_id="VendingMachine-v0")
@@ -653,23 +184,46 @@ class SimulationSession:
         self._original_num_days = vm_env_module.NUM_DAYS
         self._original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
         vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
-        self._total_days = self.csv_player.get_num_days()
+        self._total_days = self.csv_player.get_num_periods()
         vm_env_module.NUM_DAYS = self._total_days
 
         self._setup_environment()
-        # Ensure day 1 item configurations reflect CSV (in case CSV changes between reset)
+        # Ensure day 1 item configurations reflect CSV
         self._apply_day_item_configs(self.current_day)
         self._pid, initial_observation = self._env.get_observation()
         self._observation = _inject_carry_over_insights(initial_observation, self._carry_over_insights)
         if self._pid != 0:
             raise RuntimeError("VM should act first")
 
-        if self.config.mode == "mode1_or":
-            self._bootstrap_mode1_or()
-        elif self.config.mode == "mode1_llm":
-            self._bootstrap_mode1_llm()
-        else:  # mode2_llm
-            self._bootstrap_mode2_llm()
+        if self.config.mode == "modeA":
+            self._bootstrap_modeA()
+        elif self.config.mode == "modeB":
+            self._bootstrap_modeB()
+        else:  # modeC
+            self._bootstrap_modeC()
+
+    def _load_initial_samples(self) -> Dict[str, List[int]]:
+        """Load initial demand samples from train.csv."""
+        train_df = pd.read_csv(self.config.train_file)
+        item_ids = self.csv_player.get_item_ids()
+        
+        if not item_ids:
+            raise ValueError("No items detected in CSV")
+        
+        first_item = item_ids[0]
+        demand_col = f'demand_{first_item}'
+        
+        if demand_col not in train_df.columns:
+            raise ValueError(f"Column {demand_col} not found in train.csv")
+        
+        train_samples = train_df[demand_col].tolist()
+        initial_samples = {item_id: train_samples for item_id in item_ids}
+        
+        print(f"Loaded {len(train_samples)} initial samples from train.csv")
+        print(f"  Samples: {train_samples}")
+        print(f"  Mean: {sum(train_samples)/len(train_samples):.1f}")
+        
+        return initial_samples
 
     # ------------------------------------------------------------------
     # Public API
@@ -679,6 +233,7 @@ class SimulationSession:
             "mode": self.config.mode,
             "guidance_frequency": self.config.guidance_frequency,
             "current_day": self.current_day,
+            "current_period_date": self.csv_player.get_exact_date(self.current_day),
             "player_id": self._pid,
             "observation": self._observation,
             "transcript": [
@@ -688,8 +243,8 @@ class SimulationSession:
             "final_reward": self.transcript.final_reward,
             "status_cards": self._build_status_cards(),
             "daily_logs": copy.deepcopy(self._ui_daily_logs),
-            "news": self._build_news_schedule(),
             "initial_samples": self._initial_samples,
+            "item_description": self._get_item_description(),
         }
         
         # Add OR recommendations if available
@@ -699,9 +254,9 @@ class SimulationSession:
                 "statistics": self._or_statistics
             }
         
-        if self.config.mode in ("mode1_or", "mode1_llm"):
+        if self.config.mode in ("modeA", "modeB"):
             state["waiting_for_final_action"] = self._pid == 0 and not self.transcript.completed
-        elif self.config.mode == "mode2_llm":
+        elif self.config.mode == "modeC":
             state["waiting_for_guidance"] = self._pending_guidance_day is not None
             state["guidance_history"] = [
                 {"day": day, "message": message} for day, message in self._guidance_history
@@ -711,9 +266,22 @@ class SimulationSession:
                 state["latest_agent_proposal"] = latest
         return state
 
+    def _get_item_description(self) -> str:
+        """Get item description from current period."""
+        item_ids = self.csv_player.get_item_ids()
+        if not item_ids:
+            return ""
+        
+        # Get description from current period
+        try:
+            config = self.csv_player.get_period_item_config(self.current_day, item_ids[0])
+            return config.get('description', '')
+        except:
+            return ""
+
     def submit_final_action(self, action_json: str) -> Dict[str, Any]:
-        if self.config.mode not in ("mode1_or", "mode1_llm"):
-            raise RuntimeError("Final action only available in Mode 1 variants")
+        if self.config.mode not in ("modeA", "modeB"):
+            raise RuntimeError("Final action only available in Mode A and B")
         if self._pid != 0:
             raise RuntimeError("Not waiting for VM turn")
         action_dict, carry_memo = self._parse_action_json(action_json)
@@ -722,7 +290,7 @@ class SimulationSession:
         
         # Print human decision to terminal
         print(f"\n{'='*70}")
-        print(f"Week {self.current_day} - HUMAN DECISION:")
+        print(f"Period {self.current_day} - HUMAN DECISION:")
         print(f"{'='*70}")
         print(f"Human Action:")
         for item_id, qty in action_dict.items():
@@ -740,8 +308,8 @@ class SimulationSession:
         return self._advance_with_vm_action(payload)
 
     def submit_guidance(self, message: str) -> Dict[str, Any]:
-        if self.config.mode != "mode2_llm":
-            raise RuntimeError("Guidance only available in Mode 2")
+        if self.config.mode != "modeC":
+            raise RuntimeError("Guidance only available in Mode C")
         if self._pending_guidance_day is None:
             raise RuntimeError("Not waiting for guidance")
         trimmed = message.strip()
@@ -750,7 +318,7 @@ class SimulationSession:
         
         # Print human guidance to terminal
         print(f"\n{'='*70}")
-        print(f"Week {self._pending_guidance_day} - HUMAN GUIDANCE:")
+        print(f"Period {self._pending_guidance_day} - HUMAN GUIDANCE:")
         print(f"{'='*70}")
         print(f"{trimmed}")
         print(f"{'='*70}")
@@ -773,21 +341,21 @@ class SimulationSession:
 
         self.transcript.append("initial_samples", {"samples": self._initial_samples})
 
-        for day, news in self.csv_player.get_news_schedule().items():
-            self._env.add_news(day, news)
+        # News功能已移除 - H&M数据集没有news列
+        # for day, news in self.csv_player.get_news_schedule().items():
+        #     self._env.add_news(day, news)
 
         self._env.reset(num_players=2)
         self._reset_ui_tracking()
 
     def _apply_day_item_configs(self, day: int) -> None:
         """Update environment item configs to match CSV for the specified day."""
-        # Guard against out-of-range (e.g., after simulation completes)
-        if day < 1 or day > self.csv_player.get_num_days():
+        if day < 1 or day > self.csv_player.get_num_periods():
             return
 
         for item_id in self.csv_player.get_item_ids():
             try:
-                config = self.csv_player.get_day_item_config(day, item_id)
+                config = self.csv_player.get_period_item_config(day, item_id)
             except ValueError:
                 continue
             self._env.update_item_config(
@@ -798,13 +366,13 @@ class SimulationSession:
                 description=config.get("description"),
             )
 
-    def _bootstrap_mode1_or(self) -> None:
+    def _bootstrap_modeA(self) -> None:
         """Bootstrap for OR-only mode."""
         self.transcript.append("observation", {"day": self.current_day, "content": self._observation})
         # Get OR recommendation
         self._update_or_recommendation()
     
-    def _bootstrap_mode1_llm(self) -> None:
+    def _bootstrap_modeB(self) -> None:
         """Bootstrap for OR + LLM mode."""
         self.transcript.append("observation", {"day": self.current_day, "content": self._observation})
         # Get OR recommendation first
@@ -813,19 +381,22 @@ class SimulationSession:
         # Then get LLM proposal
         self._agent_proposal_with_history()
 
-    def _bootstrap_mode2_llm(self) -> None:
-        """Bootstrap for Mode 2 with LLM and optional OR."""
+    def _bootstrap_modeC(self) -> None:
+        """Bootstrap for Mode C with LLM and optional OR."""
         self.transcript.append("observation", {"day": self.current_day, "content": self._observation})
         self._run_until_pause_or_complete()
     
     def _update_or_recommendation(self) -> None:
         """Update OR recommendations for current observation."""
         if self._or_agent:
-            self._or_recommendations, self._or_statistics = self._or_agent.get_recommendation(self._observation)
+            action_json_str, self._or_statistics = self._or_agent.get_action(self._observation)
+            # Parse the JSON string to extract action dict
+            action_data = json.loads(action_json_str)
+            self._or_recommendations = action_data.get('action', {})
             
             # Print detailed OR statistics to terminal
             print(f"\n{'='*70}")
-            print(f"Week {self.current_day} - OR ALGORITHM RECOMMENDATIONS (CAPPED Policy):")
+            print(f"Period {self.current_day} - OR ALGORITHM RECOMMENDATIONS (CAPPED Policy):")
             print(f"{'='*70}")
             for item_id, item_stats in self._or_statistics.items():
                 print(f"\n{item_id}:")
@@ -868,7 +439,7 @@ class SimulationSession:
         
         # Print LLM reasoning to terminal
         print(f"\n{'='*70}")
-        print(f"Week {self.current_day} - LLM DECISION:")
+        print(f"Period {self.current_day} - LLM DECISION:")
         print(f"{'='*70}")
         
         rationale = data.get("rationale", "")
@@ -943,12 +514,12 @@ class SimulationSession:
         if self._pid != 1:
             raise RuntimeError("Expected demand turn after VM action")
 
-        demand_action = self.csv_player.get_demand_action(self.current_day)
+        demand_action = self.csv_player.get_action(self.current_day)
         demand_dict = json.loads(demand_action)
         
         # Print demand to terminal
         print(f"\n{'='*70}")
-        print(f"Week {self.current_day} - ACTUAL DEMAND:")
+        print(f"Period {self.current_day} - ACTUAL DEMAND:")
         print(f"{'='*70}")
         for item_id, qty in demand_dict.get("action", {}).items():
             print(f"  {item_id}: {qty} units")
@@ -978,16 +549,16 @@ class SimulationSession:
             "observation", {"day": self.current_day, "content": self._observation}
         )
 
-        if self.config.mode in ("mode1_or", "mode1_llm"):
+        if self.config.mode in ("modeA", "modeB"):
             # Get OR recommendation for new day
             if self._or_agent:
                 self._update_or_recommendation()
             
-            if self.config.mode == "mode1_llm":
+            if self.config.mode == "modeB":
                 proposal = self._agent_proposal_with_history()
                 return {"next_observation": self._observation, "proposal": proposal, "completed": False}
             else:
-                # mode1_or: just return state with OR recommendation
+                # modeA: just return state with OR recommendation
                 return {"next_observation": self._observation, "completed": False}
 
         self._run_until_pause_or_complete()
@@ -1002,7 +573,7 @@ class SimulationSession:
                 if self._or_agent:
                     self._update_or_recommendation()
                 print(f"\n{'='*70}")
-                print(f"Week {guidance_day} - WAITING FOR HUMAN GUIDANCE")
+                print(f"Period {guidance_day} - WAITING FOR HUMAN GUIDANCE")
                 print(f"{'='*70}")
                 sys.stdout.flush()
                 break
@@ -1019,9 +590,9 @@ class SimulationSession:
             except json.JSONDecodeError:
                 data = {"rationale": cleaned, "action": {}}
             
-            # Print LLM decision for mode2
+            # Print LLM decision for modeC
             print(f"\n{'='*70}")
-            print(f"Week {self.current_day} - LLM AUTO-PLAY DECISION:")
+            print(f"Period {self.current_day} - LLM AUTO-PLAY DECISION:")
             print(f"{'='*70}")
             
             rationale = data.get("rationale", "")
@@ -1090,7 +661,7 @@ class SimulationSession:
         return "\n".join(lines)
 
     def _guidance_due_for_day(self, day: int) -> Optional[int]:
-        if self.config.mode != "mode2_llm":
+        if self.config.mode != "modeC":
             return None
         frequency = max(self.config.guidance_frequency, 1)
         if ((day - 1) % frequency) == 0:
@@ -1140,7 +711,7 @@ class SimulationSession:
         print(f"\n{'='*70}")
         print(f"SIMULATION COMPLETED - {self.config.mode.upper()}")
         print(f"{'='*70}")
-        print(f"\nTotal weeks completed: {self.current_day - 1}")
+        print(f"\nTotal periods completed: {self.current_day - 1}")
         print(f"Total Profit from Sales: ${vm_info.get('total_sales_profit', 0.0):.2f}")
         print(f"Total Holding Cost: ${vm_info.get('total_holding_cost', 0.0):.2f}")
         print(f"\n>>> TOTAL REWARD: ${total_reward:.2f} <<<")
@@ -1188,7 +759,6 @@ class SimulationSession:
     def _sanitize_day_log(self, log: Dict[str, Any], all_logs: List[Dict[str, Any]]) -> Dict[str, Any]:
         sanitized: Dict[str, Any] = {
             "day": int(log.get("day", 0)),
-            "news": log.get("news"),
             "daily_profit": float(log.get("daily_profit", 0.0)),
             "daily_holding_cost": float(log.get("daily_holding_cost", 0.0)),
             "daily_reward": float(log.get("daily_reward", 0.0)),
@@ -1240,14 +810,12 @@ class SimulationSession:
                 arrival_day = order_info.get("arrival_day", float("inf"))
             else:
                 # Check if order arrived in the same day (lead_time=0 case)
-                # Check current log's arrivals
                 current_arrivals = log.get("arrivals", {})
                 item_arrivals = current_arrivals.get(item_id, [])
                 for arrival_entry in item_arrivals:
                     if isinstance(arrival_entry, (list, tuple)) and len(arrival_entry) >= 2:
                         arrival_order_day = int(arrival_entry[1])
                         if arrival_order_day == log_day:
-                            # Order arrived on the same day (lead_time=0)
                             arrival_day = log_day
                             lead_time = 0
                             break
@@ -1271,9 +839,8 @@ class SimulationSession:
                             break
             
             # Determine if order has arrived
-            # For lead_time=0, order arrives on the same day, so arrival_day = log_day
             arrived = arrival_day != float("inf") and arrival_day <= current_day
-            arrival_week = int(arrival_day) if arrival_day != float("inf") and arrived else None
+            arrival_period = int(arrival_day) if arrival_day != float("inf") and arrived else None
             
             order_status.append({
                 "item_id": item_id,
@@ -1282,7 +849,7 @@ class SimulationSession:
                 "lead_time": float(lead_time) if lead_time != float("inf") else 0.0,
                 "arrival_day": float(arrival_day) if arrival_day != float("inf") else None,
                 "arrived": arrived,
-                "arrival_week": arrival_week,
+                "arrival_period": arrival_period,
             })
         
         sanitized["order_status"] = order_status
@@ -1352,68 +919,55 @@ class SimulationSession:
             )
         return snapshot
 
-    def _build_news_schedule(self) -> Dict[str, List[Dict[str, Any]]]:
-        schedule = self.csv_player.get_news_schedule()
-        if not schedule:
-            return {"today": [], "upcoming": [], "past": []}
-        today: List[Dict[str, Any]] = []
-        past: List[Dict[str, Any]] = []
-        for day in sorted(schedule.keys()):
-            entry = {"day": day, "content": schedule[day]}
-            if day == self.current_day:
-                today.append(entry)
-            elif day < self.current_day:
-                past.append(entry)
-        return {"today": today, "upcoming": [], "past": past}
 
-
-class Mode1ORSession(SimulationSession):
-    """Mode 1 OR: OR recommendations only with human final decision."""
+class ModeASession(SimulationSession):
+    """Mode A: OR → Human Decision"""
     def __init__(self, config: SimulationConfig):
-        if config.mode != "mode1_or":
-            raise ValueError("Mode1ORSession requires mode='mode1_or'")
+        if config.mode != "modeA":
+            raise ValueError("ModeASession requires mode='modeA'")
         super().__init__(config)
 
     def submit_final_decision(self, action_json: str) -> Dict[str, Any]:
         result = self.submit_final_action(action_json)
-        # If game completed, return the finalized state; otherwise serialize current state
         if result.get("completed"):
             return self.serialize_state()
         return self.serialize_state()
 
 
-class Mode1LLMSession(SimulationSession):
-    """Mode 1 LLM: OR + LLM recommendations with human final decision."""
+class ModeBSession(SimulationSession):
+    """Mode B: OR → LLM → Human Decision"""
     def __init__(self, config: SimulationConfig):
-        if config.mode != "mode1_llm":
-            raise ValueError("Mode1LLMSession requires mode='mode1_llm'")
+        if config.mode != "modeB":
+            raise ValueError("ModeBSession requires mode='modeB'")
         super().__init__(config)
 
     def submit_final_decision(self, action_json: str) -> Dict[str, Any]:
         result = self.submit_final_action(action_json)
-        # If game completed, return the finalized state; otherwise serialize current state
         if result.get("completed"):
             return self.serialize_state()
         return self.serialize_state()
 
 
-class Mode2LLMSession(SimulationSession):
-    """Mode 2 LLM: OR + LLM with periodic human guidance."""
+class ModeCSession(SimulationSession):
+    """Mode C: OR → LLM → Guidance"""
     def __init__(self, config: SimulationConfig):
-        if config.mode != "mode2_llm":
-            raise ValueError("Mode2LLMSession requires mode='mode2_llm'")
+        if config.mode != "modeC":
+            raise ValueError("ModeCSession requires mode='modeC'")
         super().__init__(config)
 
 
 def load_simulation(config: SimulationConfig) -> SimulationSession:
     if not os.path.exists(config.demand_file):
         raise FileNotFoundError(f"Demand file not found: {config.demand_file}")
-    if config.mode == "mode1_or":
-        return Mode1ORSession(config)
-    if config.mode == "mode1_llm":
-        return Mode1LLMSession(config)
-    if config.mode == "mode2_llm":
-        return Mode2LLMSession(config)
+    if not os.path.exists(config.train_file):
+        raise FileNotFoundError(f"Train file not found: {config.train_file}")
+    
+    if config.mode == "modeA":
+        return ModeASession(config)
+    if config.mode == "modeB":
+        return ModeBSession(config)
+    if config.mode == "modeC":
+        return ModeCSession(config)
     raise ValueError(f"Unsupported mode: {config.mode}")
 
 
@@ -1423,8 +977,8 @@ __all__ = [
     "SimulationConfig",
     "SimulationTranscript",
     "SimulationSession",
-    "Mode1ORSession",
-    "Mode1LLMSession",
-    "Mode2LLMSession",
+    "ModeASession",
+    "ModeBSession",
+    "ModeCSession",
     "load_simulation",
 ]

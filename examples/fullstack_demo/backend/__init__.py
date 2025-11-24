@@ -5,9 +5,9 @@ from .simulation_current import (
     SimulationConfig,
     SimulationTranscript,
     load_simulation,
-    Mode1ORSession,
-    Mode1LLMSession,
-    Mode2LLMSession,
+    ModeASession,
+    ModeBSession,
+    ModeCSession,
     ORAgent,
 )
 
@@ -16,9 +16,9 @@ __all__ = [
     "SimulationConfig", 
     "SimulationTranscript",
     "load_simulation",
-    "Mode1ORSession",
-    "Mode1LLMSession",
-    "Mode2LLMSession",
+    "ModeASession",
+    "ModeBSession",
+    "ModeCSession",
     "ORAgent",
 ]
 

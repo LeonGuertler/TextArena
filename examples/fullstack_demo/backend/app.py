@@ -45,46 +45,28 @@ def serve_frontend():
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Frontend not found")
 
 
-@app.get("/mode1_or.html")
-def serve_mode1_or():
-    mode1_or_path = FRONTEND_DIR / "mode1_or.html"
-    if mode1_or_path.exists():
-        return FileResponse(mode1_or_path)
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode 1 OR page not found")
+@app.get("/modeA.html")
+def serve_modeA():
+    modeA_path = FRONTEND_DIR / "modeA.html"
+    if modeA_path.exists():
+        return FileResponse(modeA_path)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode A page not found")
 
 
-@app.get("/mode1_llm.html")
-def serve_mode1_llm():
-    mode1_llm_path = FRONTEND_DIR / "mode1_llm.html"
-    if mode1_llm_path.exists():
-        return FileResponse(mode1_llm_path)
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode 1 LLM page not found")
+@app.get("/modeB.html")
+def serve_modeB():
+    modeB_path = FRONTEND_DIR / "modeB.html"
+    if modeB_path.exists():
+        return FileResponse(modeB_path)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode B page not found")
 
 
-@app.get("/mode2_llm.html")
-def serve_mode2_llm():
-    mode2_llm_path = FRONTEND_DIR / "mode2_llm.html"
-    if mode2_llm_path.exists():
-        return FileResponse(mode2_llm_path)
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode 2 LLM page not found")
-
-
-@app.get("/mode1.html")
-def serve_mode1():
-    # Redirect to mode1_llm.html for backward compatibility
-    mode1_llm_path = FRONTEND_DIR / "mode1_llm.html"
-    if mode1_llm_path.exists():
-        return FileResponse(mode1_llm_path)
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode 1 page not found")
-
-
-@app.get("/mode2.html")
-def serve_mode2():
-    # Redirect to mode2_llm.html for backward compatibility
-    mode2_llm_path = FRONTEND_DIR / "mode2_llm.html"
-    if mode2_llm_path.exists():
-        return FileResponse(mode2_llm_path)
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode 2 page not found")
+@app.get("/modeC.html")
+def serve_modeC():
+    modeC_path = FRONTEND_DIR / "modeC.html"
+    if modeC_path.exists():
+        return FileResponse(modeC_path)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mode C page not found")
 
 
 @app.get("/config.js")
@@ -99,9 +81,8 @@ def config_js() -> Response:
 
 
 class StartRunPayload(BaseModel):
-    mode: str = Field(pattern="^(mode1_or|mode1_llm|mode2_llm)$")
-    promised_lead_time: int = 0
-    guidance_frequency: Optional[int] = Field(default=5, ge=1)
+    mode: str = Field(pattern="^(modeA|modeB|modeC)$")
+    guidance_frequency: Optional[int] = Field(default=4, ge=1)
     enable_or: bool = True  # The convenient switch for OR on/off
 
 
@@ -126,15 +107,30 @@ def start_run(
 ):
     _ensure_mode_choice(payload.mode, auth)
 
-    # Construct absolute path to demand_case1_iid_normal.csv
+    # Construct paths to H&M instance 568601006
     backend_dir = Path(__file__).resolve().parent
-    demand_csv_path = backend_dir.parent.parent / "demand_case1_iid_normal.csv"
+    examples_dir = backend_dir.parent.parent
+    instance_dir = examples_dir / "H&M_instances" / "568601006"
+    test_csv_path = instance_dir / "test.csv"
+    train_csv_path = instance_dir / "train.csv"
+    
+    if not test_csv_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Test CSV not found: {test_csv_path}"
+        )
+    if not train_csv_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Train CSV not found: {train_csv_path}"
+        )
     
     config = SimulationConfig(
         mode=payload.mode,  # type: ignore[arg-type]
-        demand_file=str(demand_csv_path),
-        promised_lead_time=payload.promised_lead_time,
-        guidance_frequency=payload.guidance_frequency or 5,
+        demand_file=str(test_csv_path),
+        train_file=str(train_csv_path),
+        promised_lead_time=1,  # Fixed to 1
+        guidance_frequency=payload.guidance_frequency or 4,
         enable_or=payload.enable_or,
     )
 
@@ -166,8 +162,8 @@ def submit_final_action(
     _ensure_user_access(entry, auth)
     session = entry.session
 
-    if session.config.mode not in ("mode1_or", "mode1_llm"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Mode 1 variants support final actions")
+    if session.config.mode not in ("modeA", "modeB"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Mode A and B support final actions")
 
     result = session.submit_final_decision(payload.action_json)
     
@@ -193,8 +189,8 @@ def submit_guidance(
     _ensure_user_access(entry, auth)
     session = entry.session
 
-    if session.config.mode != "mode2_llm":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Mode 2 LLM supports guidance")
+    if session.config.mode != "modeC":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Mode C supports guidance")
 
     result = session.submit_guidance(payload.message)
     
@@ -214,7 +210,7 @@ def _get_entry(run_id: str) -> RunEntry:
 def _ensure_mode_choice(mode: str, auth: AuthContext) -> None:
     if not auth.user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing user context")
-    if mode not in {"mode1_or", "mode1_llm", "mode2_llm"}:
+    if mode not in {"modeA", "modeB", "modeC"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid mode")
 
 
