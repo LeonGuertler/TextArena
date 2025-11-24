@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import threading
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,9 +60,11 @@ class SimulationTranscript:
     events: List[TranscriptEvent] = field(default_factory=list)
     completed: bool = False
     final_reward: Optional[float] = None
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
 
     def append(self, kind: str, payload: Dict[str, Any]) -> None:
-        self.events.append(TranscriptEvent(kind=kind, payload=payload))
+        with self._lock:
+            self.events.append(TranscriptEvent(kind=kind, payload=payload))
 
 
 DAY_CONCLUDED_PATTERN = re.compile(r'^(\s*Day\s+(\d+)\s+concluded:)(.*)$')
@@ -124,9 +127,11 @@ class SimulationSession:
         self._carry_over_insights: Dict[int, str] = {}
         self._ui_daily_logs: List[Dict[str, Any]] = []
         self._running_reward: float = 0.0
+        self._streaming_text: str = ""  # Store partial LLM response for streaming
+        self._streaming_lock: threading.Lock = threading.Lock()  # Lock for streaming text access
         
         # Extract initial samples from train.csv
-        self._initial_samples = self._load_initial_samples()
+        self._initial_samples, self._initial_sample_dates = self._load_initial_samples()
         
         # Print initialization info to terminal
         print(f"\n{'='*70}")
@@ -202,8 +207,8 @@ class SimulationSession:
         else:  # modeC
             self._bootstrap_modeC()
 
-    def _load_initial_samples(self) -> Dict[str, List[int]]:
-        """Load initial demand samples from train.csv."""
+    def _load_initial_samples(self) -> tuple[Dict[str, List[int]], List[str]]:
+        """Load initial demand samples and dates from train.csv."""
         train_df = pd.read_csv(self.config.train_file)
         item_ids = self.csv_player.get_item_ids()
         
@@ -212,6 +217,7 @@ class SimulationSession:
         
         first_item = item_ids[0]
         demand_col = f'demand_{first_item}'
+        date_col = f'exact_dates_{first_item}'
         
         if demand_col not in train_df.columns:
             raise ValueError(f"Column {demand_col} not found in train.csv")
@@ -219,32 +225,55 @@ class SimulationSession:
         train_samples = train_df[demand_col].tolist()
         initial_samples = {item_id: train_samples for item_id in item_ids}
         
+        # Extract dates if available
+        sample_dates = []
+        if date_col in train_df.columns:
+            sample_dates = train_df[date_col].tolist()
+        else:
+            # Fallback: use sample numbers if dates not available
+            sample_dates = [f"Sample {i+1}" for i in range(len(train_samples))]
+        
         print(f"Loaded {len(train_samples)} initial samples from train.csv")
         print(f"  Samples: {train_samples}")
+        print(f"  Dates: {sample_dates}")
         print(f"  Mean: {sum(train_samples)/len(train_samples):.1f}")
         
-        return initial_samples
+        return initial_samples, sample_dates
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def serialize_state(self) -> Dict[str, Any]:
+        # Build period dates map for frontend lookup
+        num_periods = self.csv_player.get_num_periods()
+        period_dates = {}
+        for period in range(1, num_periods + 1):
+            date = self.csv_player.get_exact_date(period)
+            # Only include if it's a real date (not "Period_X" format)
+            if date and not date.startswith("Period_"):
+                period_dates[period] = date
+        
         state: Dict[str, Any] = {
             "mode": self.config.mode,
             "guidance_frequency": self.config.guidance_frequency,
             "current_day": self.current_day,
             "current_period_date": self.csv_player.get_exact_date(self.current_day),
+            "total_periods": num_periods,  # Total number of periods in the simulation
             "player_id": self._pid,
             "observation": self._observation,
             "transcript": [
-                {"kind": evt.kind, "payload": evt.payload} for evt in self.transcript.events
+                {"kind": evt.kind, "payload": evt.payload} 
+                for evt in (self.transcript.events.copy() if hasattr(self.transcript, '_lock') else self.transcript.events)
             ],
             "completed": self.transcript.completed,
             "final_reward": self.transcript.final_reward,
             "status_cards": self._build_status_cards(),
             "daily_logs": copy.deepcopy(self._ui_daily_logs),
             "initial_samples": self._initial_samples,
+            "initial_sample_dates": self._initial_sample_dates,
+            "period_dates": period_dates,  # Map of period number -> date string
             "item_description": self._get_item_description(),
+            "streaming_text": self.get_streaming_text(),  # Include streaming text for real-time updates
         }
         
         # Add OR recommendations if available
@@ -378,8 +407,32 @@ class SimulationSession:
         # Get OR recommendation first
         if self._or_agent:
             self._update_or_recommendation()
-        # Then get LLM proposal
-        self._agent_proposal_with_history()
+        # LLM proposal will be generated asynchronously in the background
+        # This allows the frontend to show OR recommendation and "thinking" state immediately
+    
+    def _trigger_llm_proposal_async(self) -> None:
+        """Trigger LLM proposal generation in a background thread with streaming support."""
+        def generate_proposal():
+            try:
+                # Clear streaming text at start
+                with self._streaming_lock:
+                    self._streaming_text = ""
+                
+                # Generate proposal with streaming callback
+                self._agent_proposal_with_history_streaming()
+            except Exception as e:
+                print(f"Error generating LLM proposal: {e}", file=sys.stderr)
+                sys.stderr.flush()
+                with self._streaming_lock:
+                    self._streaming_text = ""
+        
+        thread = threading.Thread(target=generate_proposal, daemon=True)
+        thread.start()
+    
+    def get_streaming_text(self) -> str:
+        """Get current streaming text (partial LLM response)."""
+        with self._streaming_lock:
+            return self._streaming_text
 
     def _bootstrap_modeC(self) -> None:
         """Bootstrap for Mode C with LLM and optional OR."""
@@ -436,6 +489,202 @@ class SimulationSession:
             data = json.loads(cleaned)
         except json.JSONDecodeError:
             data = {"rationale": cleaned, "action": {}}
+        
+        # Print LLM reasoning to terminal
+        print(f"\n{'='*70}")
+        print(f"Period {self.current_day} - LLM DECISION:")
+        print(f"{'='*70}")
+        
+        rationale = data.get("rationale", "")
+        if rationale:
+            print(f"\nLLM Rationale:")
+            print(f"{rationale}")
+        
+        action = data.get("action", {})
+        if action:
+            print(f"\nLLM Action:")
+            for item_id, qty in action.items():
+                or_rec = self._or_recommendations.get(item_id, "N/A")
+                print(f"  {item_id}: {qty} units (OR recommended: {or_rec})")
+        
+        carry_over = data.get("carry_over_insight", "")
+        if carry_over:
+            print(f"\nCarry-over Insight: {carry_over}")
+        else:
+            print(f"\nCarry-over Insight: (empty)")
+        
+        print(f"{'='*70}")
+        sys.stdout.flush()
+        
+        self._store_carry_over_insight(self.current_day, data.get("carry_over_insight"))
+        self.transcript.append(
+            "agent_proposal", {"day": self.current_day, "content": data}
+        )
+        return data
+    
+    def _agent_proposal_with_history_streaming(self) -> Dict[str, Any]:
+        """Generate agent proposal with streaming support - updates partial text as it generates."""
+        prompt = self._format_prompt_without_conversation()
+        
+        # Clear streaming text
+        with self._streaming_lock:
+            self._streaming_text = ""
+        
+        # Create a streaming wrapper around the agent
+        # Since OpenAI Responses API may not support streaming, we'll simulate it
+        # by updating text as it's generated using a wrapper
+        
+        def streaming_agent_call(agent, observation):
+            """Wrapper that updates streaming text during agent call with true token streaming."""
+            # Try to unwrap agent if it's wrapped (e.g., HumanFeedbackAgent)
+            base_agent = agent
+            if hasattr(agent, 'base_agent'):
+                base_agent = agent.base_agent
+            
+            # Debug: print agent type
+            print(f"DEBUG: Agent type: {type(agent)}, Base agent type: {type(base_agent)}")
+            print(f"DEBUG: Base agent has client: {hasattr(base_agent, 'client')}")
+            if hasattr(base_agent, 'client'):
+                print(f"DEBUG: Base agent client has responses: {hasattr(base_agent.client, 'responses')}")
+            
+            # Check if base agent is GPT5MiniAgent and supports streaming
+            if hasattr(base_agent, 'client') and hasattr(base_agent.client, 'responses'):
+                # Try streaming approach - update text as chunks arrive
+                try:
+                    from openai import OpenAI
+                    request_payload = {
+                        "model": base_agent.model_name,
+                        "input": [
+                            {"role": "system", "content": [{"type": "input_text", "text": base_agent.system_prompt}]},
+                            {"role": "user", "content": [{"type": "input_text", "text": observation}]},
+                        ],
+                    }
+                    if hasattr(base_agent, 'reasoning_effort') and base_agent.reasoning_effort:
+                        request_payload["reasoning"] = {"effort": base_agent.reasoning_effort}
+                    if hasattr(base_agent, 'text_verbosity') and base_agent.text_verbosity:
+                        request_payload["text"] = {"verbosity": base_agent.text_verbosity}
+                    
+                    # Try streaming with stream=True
+                    try:
+                        print(f"DEBUG: Attempting streaming call with stream=True")
+                        stream = base_agent.client.responses.create(stream=True, **request_payload)
+                        full_text = ""
+                        chunk_count = 0
+                        
+                        # Process stream chunks as they arrive
+                        for chunk in stream:
+                            chunk_count += 1
+                            
+                            # Extract text from delta events
+                            chunk_text = None
+                            
+                            # Check for ResponseTextDeltaEvent - these have delta.text
+                            if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'text') and chunk.delta.text:
+                                chunk_text = chunk.delta.text
+                            # Check for ResponseTextDoneEvent - these have text attribute
+                            elif hasattr(chunk, 'text') and chunk.text:
+                                chunk_text = chunk.text
+                            # Fallback: check for output_text
+                            elif hasattr(chunk, 'output_text') and chunk.output_text:
+                                chunk_text = chunk.output_text
+                            
+                            if chunk_text:
+                                # Append incremental text
+                                full_text += chunk_text
+                                
+                                # Update streaming text with accumulated text
+                                with self._streaming_lock:
+                                    self._streaming_text = full_text
+                                
+                                # Print debug every 10 chunks to track progress
+                                if chunk_count % 10 == 0:
+                                    print(f"DEBUG: Updated streaming text, chunk {chunk_count}, length: {len(full_text)}, preview: {full_text[-30:]}")
+                                
+                                # Small delay to allow frontend to catch up
+                                # This ensures frontend polling can see incremental updates
+                                import time
+                                time.sleep(0.02)  # 20ms delay - allows ~50 updates per second
+                        
+                        print(f"DEBUG: Streaming completed, total chunks: {chunk_count}, final text length: {len(full_text)}")
+                        print(f"DEBUG: Final streaming text preview: {full_text[:100]}...")
+                        return full_text.strip() if full_text else ""
+                    except Exception as stream_error:
+                        # Streaming not supported or failed, try non-streaming
+                        print(f"DEBUG: Streaming failed: {type(stream_error).__name__}: {stream_error}")
+                        print(f"DEBUG: Falling back to non-streaming call")
+                        try:
+                            response = base_agent.client.responses.create(**request_payload)
+                            result = response.output_text.strip() if hasattr(response, 'output_text') else str(response).strip()
+                            print(f"DEBUG: Non-streaming call succeeded, result length: {len(result)}")
+                            with self._streaming_lock:
+                                self._streaming_text = result
+                            return result
+                        except Exception as e:
+                            print(f"DEBUG: Non-streaming call also failed: {type(e).__name__}: {e}")
+                            raise
+                        
+                except Exception as e:
+                    # Fall back to regular call
+                    print(f"Streaming attempt failed, falling back to regular call: {e}")
+                    result = agent(observation)
+                    with self._streaming_lock:
+                        self._streaming_text = result
+                    return result
+            else:
+                # Regular agent call - simulate streaming by updating text in word chunks
+                import time
+                import re
+                
+                # Clear streaming text at start
+                with self._streaming_lock:
+                    self._streaming_text = ""
+                
+                # Call agent - this might take a while
+                result = agent(observation)
+                
+                if not result:
+                    # If result is empty, return early
+                    return ""
+                
+                # Simulate streaming by updating text word by word
+                # This provides visual feedback even if true streaming isn't available
+                # Split text into words and update incrementally
+                words = re.findall(r'\S+\s*', result)  # Match words with trailing spaces
+                accumulated = ""
+                
+                # Update in chunks for better performance
+                chunk_size = max(1, len(words) // 20)  # Update ~20 times
+                for i, word in enumerate(words):
+                    accumulated += word
+                    # Update every chunk_size words or at the end
+                    if (i + 1) % chunk_size == 0 or i == len(words) - 1:
+                        with self._streaming_lock:
+                            self._streaming_text = accumulated
+                        time.sleep(0.1)  # Small delay to allow frontend polling
+                
+                # Ensure final text is set
+                with self._streaming_lock:
+                    self._streaming_text = result
+                
+                return result
+        
+        # Call agent with streaming wrapper
+        print(f"DEBUG: Calling streaming agent with prompt length: {len(prompt)}")
+        action_text = streaming_agent_call(self._agent, prompt)
+        print(f"DEBUG: Agent call completed, response length: {len(action_text) if action_text else 0}")
+        print(f"DEBUG: Response preview: {action_text[:200] if action_text else 'EMPTY'}")
+        
+        cleaned = self._clean_json(action_text)
+        print(f"DEBUG: Cleaned response length: {len(cleaned)}")
+        try:
+            data = json.loads(cleaned)
+            print(f"DEBUG: Parsed JSON successfully, keys: {list(data.keys())}")
+        except json.JSONDecodeError as e:
+            print(f"DEBUG: JSON decode failed: {e}, using cleaned text as rationale")
+            data = {"rationale": cleaned, "action": {}}
+        
+        # Keep streaming text until proposal is added to transcript
+        # Don't clear it here - it will be cleared when the next proposal starts
         
         # Print LLM reasoning to terminal
         print(f"\n{'='*70}")
@@ -555,8 +804,11 @@ class SimulationSession:
                 self._update_or_recommendation()
             
             if self.config.mode == "modeB":
-                proposal = self._agent_proposal_with_history()
-                return {"next_observation": self._observation, "proposal": proposal, "completed": False}
+                # Trigger LLM proposal generation asynchronously
+                # This allows the frontend to return immediately and show "thinking" state
+                self._trigger_llm_proposal_async()
+                # Return state immediately with OR recommendation, LLM will update via polling
+                return {"next_observation": self._observation, "completed": False}
             else:
                 # modeA: just return state with OR recommendation
                 return {"next_observation": self._observation, "completed": False}
@@ -757,8 +1009,10 @@ class SimulationSession:
             self._ui_daily_logs.append(self._sanitize_day_log(raw_log, env_logs))
 
     def _sanitize_day_log(self, log: Dict[str, Any], all_logs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        log_day = int(log.get("day", 0))
         sanitized: Dict[str, Any] = {
-            "day": int(log.get("day", 0)),
+            "day": log_day,
+            "date": self.csv_player.get_exact_date(log_day),  # Add exact date for this period
             "daily_profit": float(log.get("daily_profit", 0.0)),
             "daily_holding_cost": float(log.get("daily_holding_cost", 0.0)),
             "daily_reward": float(log.get("daily_reward", 0.0)),
@@ -856,7 +1110,8 @@ class SimulationSession:
         return sanitized
 
     def _latest_agent_proposal(self) -> Optional[Dict[str, Any]]:
-        for event in reversed(self.transcript.events):
+        events_copy = self.transcript.events.copy() if hasattr(self.transcript, '_lock') else self.transcript.events
+        for event in reversed(events_copy):
             if event.kind == "agent_proposal" and isinstance(event.payload, dict):
                 payload = event.payload
                 content = payload.get("content")
