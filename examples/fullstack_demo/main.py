@@ -56,9 +56,16 @@ def launch_uvicorn(*, reload_enabled: bool) -> None:
 
 
 def main() -> None:
+    # Try loading .env from multiple locations
+    # 1. From fullstack_demo directory
     env_path = Path(__file__).resolve().parent / ".env"
     if env_path.exists():
         load_dotenv(env_path)
+    # 2. From project root (OR_Agent directory)
+    project_root_env = PROJECT_ROOT / ".env"
+    if project_root_env.exists():
+        load_dotenv(project_root_env)
+    # 3. From current working directory
     load_dotenv()
 
     # Disable reload in production (Render sets FULLSTACK_DEMO_RELOAD=0)
