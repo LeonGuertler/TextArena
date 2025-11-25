@@ -549,9 +549,8 @@ class SimulationSession:
             
             # Check if base agent is GPT5MiniAgent and supports streaming
             if hasattr(base_agent, 'client') and hasattr(base_agent.client, 'responses'):
-                # Try streaming approach - update text as chunks arrive
+                # Try true streaming using OpenAI Responses streaming interface
                 try:
-                    from openai import OpenAI
                     request_payload = {
                         "model": base_agent.model_name,
                         "input": [
@@ -559,79 +558,70 @@ class SimulationSession:
                             {"role": "user", "content": [{"type": "input_text", "text": observation}]},
                         ],
                     }
-                    if hasattr(base_agent, 'reasoning_effort') and base_agent.reasoning_effort:
+                    if getattr(base_agent, "reasoning_effort", None):
                         request_payload["reasoning"] = {"effort": base_agent.reasoning_effort}
-                    if hasattr(base_agent, 'text_verbosity') and base_agent.text_verbosity:
+                    if getattr(base_agent, "text_verbosity", None):
                         request_payload["text"] = {"verbosity": base_agent.text_verbosity}
-                    
-                    # Try streaming with stream=True
-                    try:
-                        print(f"DEBUG: Attempting streaming call with stream=True")
-                        stream = base_agent.client.responses.create(stream=True, **request_payload)
-                        full_text = ""
-                        chunk_count = 0
-                        
-                        # Process stream chunks as they arrive
-                        for chunk in stream:
-                            chunk_count += 1
-                            
-                            # Extract text from delta events
-                            chunk_text = None
-                            
-                            # Check for ResponseTextDeltaEvent - these have delta.text
-                            if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'text') and chunk.delta.text:
-                                chunk_text = chunk.delta.text
-                            # Check for ResponseTextDoneEvent - these have text attribute
-                            elif hasattr(chunk, 'text') and chunk.text:
-                                chunk_text = chunk.text
-                            # Fallback: check for output_text
-                            elif hasattr(chunk, 'output_text') and chunk.output_text:
-                                chunk_text = chunk.output_text
-                            
-                            if chunk_text:
-                                # Append incremental text
-                                full_text += chunk_text
-                                
-                                # Update streaming text with accumulated text
-                                with self._streaming_lock:
-                                    self._streaming_text = full_text
-                                
-                                # Print debug every 10 chunks to track progress
-                                if chunk_count % 10 == 0:
-                                    print(f"DEBUG: Updated streaming text, chunk {chunk_count}, length: {len(full_text)}, preview: {full_text[-30:]}")
-                                
-                                # Small delay to allow frontend to catch up
-                                # This ensures frontend polling can see incremental updates
-                                import time
-                                time.sleep(0.02)  # 20ms delay - allows ~50 updates per second
-                        
-                        print(f"DEBUG: Streaming completed, total chunks: {chunk_count}, final text length: {len(full_text)}")
-                        print(f"DEBUG: Final streaming text preview: {full_text[:100]}...")
-                        return full_text.strip() if full_text else ""
-                    except Exception as stream_error:
-                        # Streaming not supported or failed, try non-streaming
-                        print(f"DEBUG: Streaming failed: {type(stream_error).__name__}: {stream_error}")
-                        print(f"DEBUG: Falling back to non-streaming call")
-                        try:
-                            response = base_agent.client.responses.create(**request_payload)
-                            result = response.output_text.strip() if hasattr(response, 'output_text') else str(response).strip()
-                            print(f"DEBUG: Non-streaming call succeeded, result length: {len(result)}")
-                            with self._streaming_lock:
-                                self._streaming_text = result
-                            return result
-                        except Exception as e:
-                            print(f"DEBUG: Non-streaming call also failed: {type(e).__name__}: {e}")
-                            raise
-                        
-                except Exception as e:
-                    # Fall back to regular call
-                    print(f"Streaming attempt failed, falling back to regular call: {e}")
-                    result = agent(observation)
+
+                    import time
+
+                    print("DEBUG: Attempting streaming call via responses.stream")
+                    full_text = ""
+
+                    # Use streaming context manager so we can get final response afterwards
+                    with base_agent.client.responses.stream(**request_payload) as stream:
+                        for event in stream:
+                            event_type = getattr(event, "type", None)
+                            if event_type == "response.output_text.delta":
+                                # Extract delta text safely
+                                chunk_text = ""
+                                delta_obj = getattr(event, "delta", None)
+                                if isinstance(delta_obj, str):
+                                    chunk_text = delta_obj
+                                elif delta_obj is not None:
+                                    # delta may expose .text or .content depending on SDK version
+                                    if hasattr(delta_obj, "text"):
+                                        chunk_text = delta_obj.text
+                                    elif hasattr(delta_obj, "content"):
+                                        chunk_text = delta_obj.content
+                                if chunk_text:
+                                    full_text += chunk_text
+                                    with self._streaming_lock:
+                                        self._streaming_text = full_text
+                            elif event_type == "response.completed":
+                                break
+                            # Avoid tight loop to give time for frontend polling
+                            time.sleep(0.01)
+
+                        # After stream ends, grab the final response from SDK helper
+                        final_response = stream.get_final_response()
+                        if hasattr(final_response, "output_text"):
+                            final_text = final_response.output_text
+                            if isinstance(final_text, list):
+                                final_text = "".join(final_text)
+                            if isinstance(final_text, str):
+                                full_text = final_text or full_text
+
+                    if full_text:
+                        return full_text.strip()
+
+                except Exception as stream_error:
+                    print(f"DEBUG: Streaming attempt failed ({type(stream_error).__name__}): {stream_error}")
+                    # Fall back to non-streaming call below
+
+                # Fallback to non-streaming call
+                try:
+                    response = base_agent.client.responses.create(**request_payload)
+                    result = response.output_text.strip() if hasattr(response, 'output_text') else str(response).strip()
                     with self._streaming_lock:
                         self._streaming_text = result
                     return result
+                except Exception as e:
+                    print(f"DEBUG: Non-streaming call failed ({type(e).__name__}): {e}")
+                    raise
             else:
-                # Regular agent call - simulate streaming by updating text in word chunks
+                # Regular agent call - simulate streaming by updating text incrementally after call completes
+                # This provides visual feedback even if true streaming isn't available
                 import time
                 import re
                 
@@ -640,27 +630,29 @@ class SimulationSession:
                     self._streaming_text = ""
                 
                 # Call agent - this might take a while
+                # Show a placeholder while waiting
+                with self._streaming_lock:
+                    self._streaming_text = "Thinking..."
+                
                 result = agent(observation)
                 
                 if not result:
-                    # If result is empty, return early
+                    with self._streaming_lock:
+                        self._streaming_text = ""
                     return ""
                 
-                # Simulate streaming by updating text word by word
-                # This provides visual feedback even if true streaming isn't available
-                # Split text into words and update incrementally
-                words = re.findall(r'\S+\s*', result)  # Match words with trailing spaces
+                # Simulate streaming by revealing text incrementally
+                # This gives the appearance of streaming even though we have the full result
+                # Split into chunks and reveal progressively
+                chunk_size = max(10, len(result) // 30)  # Update ~30 times for smooth effect
                 accumulated = ""
                 
-                # Update in chunks for better performance
-                chunk_size = max(1, len(words) // 20)  # Update ~20 times
-                for i, word in enumerate(words):
-                    accumulated += word
-                    # Update every chunk_size words or at the end
-                    if (i + 1) % chunk_size == 0 or i == len(words) - 1:
-                        with self._streaming_lock:
-                            self._streaming_text = accumulated
-                        time.sleep(0.1)  # Small delay to allow frontend polling
+                for i in range(0, len(result), chunk_size):
+                    accumulated = result[:i + chunk_size]
+                    with self._streaming_lock:
+                        self._streaming_text = accumulated
+                    # Small delay to allow frontend polling (50ms for smooth streaming)
+                    time.sleep(0.05)
                 
                 # Ensure final text is set
                 with self._streaming_lock:
@@ -716,6 +708,11 @@ class SimulationSession:
         self.transcript.append(
             "agent_proposal", {"day": self.current_day, "content": data}
         )
+        
+        # Clear streaming text once proposal is complete - frontend will show short_rationale_for_human instead
+        with self._streaming_lock:
+            self._streaming_text = ""
+        
         return data
 
     def _format_prompt_without_conversation(self) -> str:

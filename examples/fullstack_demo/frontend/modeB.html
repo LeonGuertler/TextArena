@@ -933,6 +933,7 @@
     let historicalInventoryChartInstance = null;
     let latestState = null;
     let isDecisionSubmitting = false;
+    let lastDisplayedPeriod = 0;  // Track last displayed period to detect period changes
 
     // Get instance parameter from URL query string
     const urlParams = new URLSearchParams(window.location.search);
@@ -1301,7 +1302,25 @@
     }
 
     function renderOrderDecision(transcript, orRecommendation, streamingText) {
-      const proposal = findLatestProposal(transcript);
+      // Get current period from latestState
+      const currentPeriod = latestState ? (latestState.current_day || 1) : 1;
+      
+      // If period changed, clear old proposal display
+      if (currentPeriod !== lastDisplayedPeriod) {
+        lastDisplayedPeriod = currentPeriod;
+        // Clear previous period's proposal display
+        if (algorithmRecommendationEl) {
+          algorithmRecommendationEl.innerHTML = '<span class="placeholder">Waiting for AI recommendation...</span>';
+        }
+        if (reasoningTextEl) {
+          reasoningTextEl.value = "";
+        }
+        latestProposalAction = null;
+        orderQuantityInput.value = "";
+        window.lastReasoningLength = 0;
+      }
+      
+      const proposal = findLatestProposalForPeriod(transcript, currentPeriod);
       
       // Render Algorithm recommendation
       if (!algorithmRecommendationEl) return;
@@ -1319,15 +1338,19 @@
           // Show streaming text in reasoning area if available
           if (reasoningTextEl) {
             if (streamingText && streamingText.trim()) {
-              // Try to parse streaming JSON and extract rationale field for readability
+              // Skip JSON parsing for placeholder text like "Thinking..."
               let displayText = streamingText;
-              try {
-                const parsed = JSON.parse(streamingText);
-                if (parsed && typeof parsed === "object" && parsed.rationale) {
-                  displayText = String(parsed.rationale);
+              if (!streamingText.startsWith("Thinking") && streamingText.trim().length > 10) {
+                // Try to parse streaming JSON and extract rationale field for readability
+                try {
+                  const parsed = JSON.parse(streamingText);
+                  if (parsed && typeof parsed === "object" && parsed.rationale) {
+                    displayText = String(parsed.rationale);
+                  }
+                } catch (e) {
+                  // If parsing fails, fall back to raw streamingText
+                  // This is normal during streaming as JSON may be incomplete
                 }
-              } catch (e) {
-                // If parsing fails, fall back to raw streamingText
               }
 
               // Update textarea value with human-readable rationale (or raw text)
@@ -1364,7 +1387,8 @@
 
       const payload = coerceAgentPayload(proposal.content);
       const action = coerceActionObject(payload.action);
-      const rationale = payload.short_rationale_for_human || payload.rationale;
+      // When proposal is available, only show short_rationale_for_human (ignore streaming text)
+      const rationale = payload.short_rationale_for_human || payload.rationale || "";
 
       const actionEntries = Object.entries(action);
       latestProposalAction = actionEntries.length ? action : null;
@@ -1394,9 +1418,10 @@
         orderQuantityInput.value = "";
       }
 
-      // Display reasoning (read-only)
+      // Display reasoning (read-only) - only show short_rationale_for_human when proposal is complete
+      // Ignore streaming text when proposal exists
       if (reasoningTextEl) {
-        reasoningTextEl.value = rationale ? String(rationale) : "";
+        reasoningTextEl.value = rationale;
       }
     }
 
@@ -1406,6 +1431,21 @@
         const event = transcript[i];
         if (event && event.kind === "agent_proposal" && event.payload) {
           return event.payload;
+        }
+      }
+      return null;
+    }
+
+    function findLatestProposalForPeriod(transcript, period) {
+      if (!Array.isArray(transcript)) return null;
+      for (let i = transcript.length - 1; i >= 0; i -= 1) {
+        const event = transcript[i];
+        if (event && event.kind === "agent_proposal" && event.payload) {
+          // Check if this proposal is for the current period
+          const proposalDay = event.payload.day || event.payload.payload?.day;
+          if (proposalDay === period) {
+            return event.payload;
+          }
         }
       }
       return null;
@@ -1955,8 +1995,15 @@
           
           // Check if streaming text is available - poll more frequently when streaming
           const isStreaming = state.streaming_text && state.streaming_text.trim().length > 0;
+          const currentPeriod = state.current_day || 1;
           const hasLLMProposal = state.transcript && state.transcript.some(
-            evt => evt.kind === "agent_proposal" && evt.payload
+            evt => {
+              if (evt.kind === "agent_proposal" && evt.payload) {
+                const proposalDay = evt.payload.day || evt.payload.payload?.day;
+                return proposalDay === currentPeriod;
+              }
+              return false;
+            }
           );
           
           // Check if we're waiting for LLM (OR recommendation exists but no proposal yet)
