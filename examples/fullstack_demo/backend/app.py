@@ -182,10 +182,11 @@ def start_run(
     _ensure_mode_choice(payload.mode, auth)
 
     # Map instance number to folder name
+    # Note: instance 1 is the swimwear instance (599580017)
     instance_folders = {
         0: "tutorial",
-        1: "568601006",
-        2: "599580017",
+        1: "599580017",  # Swimwear instance
+        2: "568601006",
         3: "706016001",
     }
     instance_folder = instance_folders[payload.instance]
@@ -208,11 +209,21 @@ def start_run(
             detail=f"Train CSV not found: {train_csv_path}"
         )
     
+    # Promised lead time by instance (periods)
+    # Swimwear instance has promised lead time 0, others 1
+    instance_promised_lead_times = {
+        0: 1,
+        1: 0,  # swimwear
+        2: 1,
+        3: 1,
+    }
+    promised_lead_time = instance_promised_lead_times.get(payload.instance, 1)
+
     config = SimulationConfig(
         mode=payload.mode,  # type: ignore[arg-type]
         demand_file=str(test_csv_path),
         train_file=str(train_csv_path),
-        promised_lead_time=1,  # Fixed to 1
+        promised_lead_time=promised_lead_time,
         guidance_frequency=payload.guidance_frequency or 4,
         enable_or=payload.enable_or,
     )
@@ -276,8 +287,8 @@ def get_instance_image(instance_num: int):
     """Get the product image for a specific instance."""
     instance_folders = {
         0: "tutorial",
-        1: "568601006",
-        2: "599580017",
+        1: "599580017",
+        2: "568601006",
         3: "706016001",
     }
     
@@ -301,8 +312,8 @@ def get_instance_description(instance_num: int):
     """Get the product description for a specific instance."""
     instance_folders = {
         0: "tutorial",
-        1: "568601006",
-        2: "599580017",
+        1: "599580017",
+        2: "568601006",
         3: "706016001",
     }
     

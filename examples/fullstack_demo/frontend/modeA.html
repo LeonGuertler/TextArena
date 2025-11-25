@@ -776,6 +776,7 @@
             <div class="snapshot-cost-info">
               <div>profit/unit: <span id="snapshot-profit">—</span></div>
               <div>holding cost/unit: <span id="snapshot-holding-cost">—</span></div>
+              <div>Promised lead time: <span id="snapshot-lead-time">—</span> periods</div>
             </div>
           </section>
 
@@ -1121,6 +1122,7 @@
       const snapshotReceivedEl = document.getElementById("snapshot-received");
       const snapshotProfitEl = document.getElementById("snapshot-profit");
       const snapshotHoldingCostEl = document.getElementById("snapshot-holding-cost");
+      const snapshotLeadTimeEl = document.getElementById("snapshot-lead-time");
 
       if (!snapshotWeekEl) return;
 
@@ -1235,6 +1237,12 @@
       }
       if (snapshotHoldingCostEl) {
         snapshotHoldingCostEl.textContent = formatCurrency(item.holding_cost || 0);
+      }
+
+      // Promised lead time (periods)
+      if (snapshotLeadTimeEl) {
+        const promised = Number(state.promised_lead_time);
+        snapshotLeadTimeEl.textContent = Number.isFinite(promised) ? formatNumber(promised) : "--";
       }
     }
 
@@ -1653,6 +1661,29 @@
         const arrivingToday = arrivalWeek !== null && arrivalWeek === currentDay;
         return { arrived: arrivedNow, arrivalWeek, arrivingToday };
       });
+
+      // Helper to map a period number to a human-readable date label (if available)
+      function getDateForPeriod(period) {
+        const numeric = Number(period);
+        if (!Number.isFinite(numeric)) return null;
+
+        // First try: find matching daily log with a concrete date
+        const matchingLog = filteredLogs.find((log) => log.day === numeric);
+        if (matchingLog && typeof matchingLog.date === "string" && !matchingLog.date.startsWith("Period_")) {
+          return matchingLog.date;
+        }
+
+        // Second try: look up in periodDates map (if provided)
+        if (periodDates && typeof periodDates === "object") {
+          const fromMap = periodDates[numeric];
+          if (typeof fromMap === "string" && fromMap) {
+            return fromMap;
+          }
+        }
+
+        // No exact date available
+        return null;
+      }
       
       // Combine order visual status with sample placeholders (null for sample positions)
       const combinedOrderVisualStatus = [
@@ -1795,13 +1826,11 @@
                       const status = orderStatusData[ctx.dataIndex];
                       if (status) {
                         if (status.arrived && status.arrivalWeek !== null) {
-                          return `${label}: ${value} (received at period ${formatNumber(status.arrivalWeek)})`;
-                        }
-                        if (status.arrivalWeek !== null) {
-                          if (status.arrivingToday) {
-                            return `${label}: ${value} (arriving later today)`;
+                          const dateLabel = getDateForPeriod(status.arrivalWeek);
+                          if (dateLabel) {
+                            return `${label}: ${value} (received ${dateLabel})`;
                           }
-                          return `${label}: ${value} (expected period ${formatNumber(status.arrivalWeek)})`;
+                          return `${label}: ${value} (received)`;
                         }
                       }
                       return `${label}: ${value} (in-transit)`;

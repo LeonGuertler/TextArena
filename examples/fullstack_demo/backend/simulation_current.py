@@ -257,6 +257,7 @@ class SimulationSession:
         state: Dict[str, Any] = {
             "mode": self.config.mode,
             "guidance_frequency": self.config.guidance_frequency,
+            "promised_lead_time": self.config.promised_lead_time,
             "current_day": self.current_day,
             "current_period_date": self.csv_player.get_exact_date(self.current_day),
             "total_periods": num_periods,  # Total number of periods in the simulation
