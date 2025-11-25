@@ -8,7 +8,6 @@ This demo uses:
 CSV Format:
   - Column A: exact_dates_{item_id}  (e.g., exact_dates_cola, exact_dates_chips)
   - Column B+: demand_{item_id} (e.g., demand_cola, demand_chips)
-  - Last column: news (optional, can be empty)
 
 Usage:
   python vending_csv_demo.py --demand-file path/to/demands.csv
@@ -378,7 +377,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "Maximize total reward (R_t = Profit × units_sold − HoldingCost × ending_inventory) over 14‑day periods.\n"
         "\n"
         "=== TIMELINE & DATA ===\n"
-        "- Observations contain the exact period dates plus complete history to date; there is no future news feed.\n"
+        "- Observations contain the exact period dates plus complete history to date; there is no future information feed.\n"
         "- Use calendar + world knowledge (seasonality, holidays) whenever the description/date imply it.\n"
         "\n"
         "=== GAME MECHANISM: PERIOD EXECUTION SEQUENCE ===\n"
@@ -495,7 +494,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
     
     system += (
         "=== DECISION CHECKLIST ===\n"
-        "1. Note the current date/news and compare to relevant seasonal history.\n"
+        "1. Use world knowledge and SKU description to compare to historical demand for this SKU.\n"
         "2. Reconcile on-hand + in-transit vs. expected arrivals; flag overdue orders.\n"
         "3. Infer lead time (or order loss) from arrivals/absences and adjust safety stock.\n"
         "4. Forecast demand using calendar knowledge plus recent data regimes.\n"
@@ -510,7 +509,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "=== OUTPUT FORMAT ===\n"
         "Respond with valid JSON only:\n"
         "{\n"
-        '  "rationale": "Step-by-step reasoning covering (a) date/news context, (b) demand regime analysis, '
+        '  "rationale": "Step-by-step reasoning covering (a) world knowledge and SKU description, (b) demand regime analysis, '
         ' (c) lead_time vs. missing orders, (d) inventory & pipeline assessment, (e) final order logic.",\n'
         '  "carry_over_insight": "Summarize all NEW sustained changes with evidence, or \\"\\" if none.",\n'
         f'  "action": {{{example_action}}}\n'

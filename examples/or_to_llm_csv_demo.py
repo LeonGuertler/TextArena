@@ -3,11 +3,10 @@ Hybrid Strategy: LLM Agent + OR Algorithm Recommendation
 
 This demo combines:
 - OR Algorithm: Provides data-driven baseline recommendations (good for normal days)
-- LLM Agent: Makes final decisions considering OR + news schedule (reacts to events)
+- LLM Agent: Makes final decisions considering OR
 
-The OR algorithm calculates optimal orders using base-stock policy but cannot
-react to news. The LLM agent sees OR recommendations and adjusts based on news.
-
+The OR algorithm calculates optimal orders using base-stock policy. 
+The LLM agent sees OR recommendations and adjusts based on the current situation.
 Usage:
   python agent&or_csv_demo.py --demand-file path/to/demands.csv
 """
@@ -659,7 +658,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "5. OR LIMITATIONS:\n"
         "   - Uses promised lead time L (not actual observed)\n"
         "   - Uses ALL historical samples equally (no recency weighting)\n"
-        "   - Cannot see news, lost orders, or actual arrival patterns\n"
+        "   - Cannot see lost orders, or actual arrival patterns\n"
         "   - Assumes i.i.d. demand (no regime shifts or seasonality)\n"
         "\n"
         "YOUR ROLE: The OR recommendation is a data-driven baseline. You can override it by considering:\n"
@@ -670,7 +669,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "\n"
         "=== COLLABORATION STRATEGY ===\n"
         "1. Read the OR recommendation (quantity + stats) and treat it as the starting point.\n"
-        "2. Compare OR's assumptions to reality: news, inferred demand regimes, arrivals, and missing shipments.\n"
+        "2. Compare OR's assumptions to reality: inferred demand regimes, arrivals, and missing shipments.\n"
         "3. Decide whether to follow, scale, or override OR's quantity. Explain the adjustment path explicitly in your rationale.\n"
         "\n"
         "=== DEMAND & LEAD-TIME REASONING ===\n"
@@ -729,7 +728,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
     
     system += (
         "=== DECISION CHECKLIST ===\n"
-        "1. Interpret news/date signals and compare to historical demand for this SKU.\n"
+        "1. Use world knowledge and SKU description to compare to historical demand for this SKU.\n"
         "2. Reconcile on-hand + pipeline with expected arrivals; highlight overdue/lost shipments.\n"
         "3. Inspect the OR recommendation (quantity + stats) and decide how to adapt it.\n"
         "4. Justify your final quantity by tying it to demand outlook, lead-time belief, and OR's baseline.\n"
@@ -763,7 +762,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "=== OUTPUT FORMAT ===\n"
         "Return valid JSON only:\n"
         "{\n"
-        '  "rationale": "Explain step by step: lead-time inference, inventory & demand analysis, news impact, final strategy.",\n'
+        '  "rationale": "Explain step by step: lead-time inference, inventory & demand analysis, final strategy.",\n'
         '  "short_rationale_for_human": "Brief summary (1-3 sentences) explaining your key reasoning: why you adjusted OR recommendations or why you followed them unchanged.",\n'
         '  "carry_over_insight": "Summaries of NEW sustained changes with evidence, or \\"\\".",\n'
         f'  "action": {{{example_action}}}\n'
@@ -972,7 +971,7 @@ def main():
             for item_id, rec_qty in or_recommendations.items():
                 or_text += f"  {item_id}: {rec_qty} units\n"
             or_text += "\nNote: OR uses the promised lead time and historical demand only.\n"
-            or_text += "It cannot see news, lost shipments, or actual lead-time shifts—adjust accordingly.\n"
+            or_text += "It cannot see lost shipments, or actual lead-time shifts—adjust accordingly.\n"
             or_text += "="*60 + "\n"
             
             # Enhance observation with OR recommendations

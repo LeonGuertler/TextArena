@@ -459,6 +459,12 @@
             </div>
           </section>
 
+          <section class="history-panel">
+            <h3>Game History</h3>
+            <div id="history-list" class="history-list">
+              <p class="placeholder">Game history will appear once the simulation progresses.</p>
+            </div>
+          </section>
         </div>
 
         <div class="column column-right">
@@ -542,10 +548,12 @@
     let historicalDemandChartInstance = null;
     let historicalInventoryChartInstance = null;
     let showingRawTranscript = false;
+    let productName = null; // Store product name for use in Game History
     const setupSection = document.getElementById("setup-section");
     const gameSection = document.getElementById("game-section");
 
     const guidanceHistoryEl = document.getElementById("guidance-history");
+    const historyListEl = document.getElementById("history-list");
 
     const guidancePanel = document.getElementById("guidance-panel");
     const guidanceStatus = document.getElementById("guidance-status");
@@ -601,6 +609,10 @@
           const descResponse = await fetch(`/instances/${instance}/description`);
           if (descResponse.ok) {
             const descData = await descResponse.json();
+            // Store product name for use in Game History
+            if (descData.product) {
+              productName = descData.product;
+            }
             if (descEl) {
               let descHTML = "";
               if (descData.product) {
@@ -707,6 +719,7 @@
       if (!state) return;
 
       renderSnapshot(state);
+      renderHistory(state.daily_logs || [], state.transcript || []);
       renderGuidanceHistory(state.guidance_history || []);
       renderGuidancePanel(state);
       renderTimeline(state.transcript || []);
@@ -850,6 +863,111 @@
       }
     }
 
+
+    function renderHistory(dailyLogs, transcript) {
+      if (!historyListEl) return;
+      if (!Array.isArray(dailyLogs) || dailyLogs.length === 0) {
+        historyListEl.innerHTML = `<p class="placeholder">Game history will appear once the simulation progresses.</p>`;
+        return;
+      }
+      const sorted = dailyLogs.slice().sort((a, b) => Number(a.day || 0) - Number(b.day || 0));
+      historyListEl.innerHTML = sorted.map(log => createHistoryEntry(log, transcript)).join("");
+    }
+
+    function createHistoryEntry(log, transcript) {
+      const day = formatNumber(log.day);
+      const reward = formatCurrency(log.daily_reward);
+      const lines = buildHistoryLines(log);
+      
+      // Extract LLM short rationale for this period from transcript
+      const shortRationale = extractShortRationaleForPeriod(transcript, log.day);
+      
+      // Add short rationale after the summary if available
+      if (shortRationale) {
+        lines.push("");
+        lines.push(`LLM Reasoning: ${shortRationale}`);
+      }
+      
+      const body = escapeHtml(lines.join("\n")).replace(/\n/g, "<br>");
+      return `
+        <article class="history-entry">
+          <header>
+            <div>Period ${day}</div>
+            <span>Reward ${reward}</span>
+          </header>
+          <div class="history-body">${body}</div>
+        </article>
+      `;
+    }
+
+    function buildHistoryLines(log) {
+      const lines = [];
+      const items = [];
+      const seen = new Set();
+      const appendFrom = (source) => {
+        if (!source) return;
+        Object.keys(source).forEach((itemId) => {
+          if (!seen.has(itemId)) {
+            seen.add(itemId);
+            items.push(itemId);
+          }
+        });
+      };
+      appendFrom(log.orders);
+      appendFrom(log.requests);
+      appendFrom(log.sales);
+      appendFrom(log.starting_inventory);
+      appendFrom(log.ending_inventory);
+
+      items.sort((a, b) => a.localeCompare(b));
+
+      items.forEach((itemId) => {
+        const ordered = Number((log.orders || {})[itemId] ?? 0);
+        const starting = Number((log.starting_inventory || {})[itemId] ?? 0);
+        const demand = Number((log.requests || {})[itemId] ?? 0);
+        const sold = Number((log.sales || {})[itemId] ?? 0);
+        const ending = Number((log.ending_inventory || {})[itemId] ?? 0);
+        const arrivalEntries = (log.arrivals && log.arrivals[itemId]) || [];
+        let arrivalText = "0";
+        if (Array.isArray(arrivalEntries) && arrivalEntries.length) {
+          arrivalText = arrivalEntries
+            .map((entry) => {
+              const qty = formatNumber(entry.quantity ?? entry[0]);
+              const day = formatNumber(entry.order_day ?? entry[1]);
+              return `${qty} (from Period ${day})`;
+            })
+            .join(", ");
+        }
+        
+        // Format: 3 lines for better readability
+        // Use product name if available, otherwise fall back to itemId
+        const displayName = productName || itemId;
+        lines.push(`${displayName}:`);
+        lines.push(`  Order & Arrival: ${formatNumber(ordered)} ordered, ${arrivalText} arrived`);
+        lines.push(`  Demand & Sales: ${formatNumber(demand)} demand, ${formatNumber(sold)} sold`);
+        lines.push(`  Inventory: ${formatNumber(starting)} starting → ${formatNumber(ending)} ending`);
+      });
+
+      return lines;
+    }
+
+    function extractShortRationaleForPeriod(transcript, period) {
+      if (!Array.isArray(transcript)) return null;
+      
+      // Find the latest agent_proposal for this period
+      for (let i = transcript.length - 1; i >= 0; i--) {
+        const event = transcript[i];
+        if (event && event.kind === "agent_proposal" && event.payload) {
+          const payloadDay = event.payload.day;
+          if (payloadDay === period) {
+            const content = event.payload.content || {};
+            // Prefer short_rationale_for_human, fallback to rationale
+            return content.short_rationale_for_human || content.rationale || null;
+          }
+        }
+      }
+      return null;
+    }
 
     function renderGuidanceHistory(history) {
       if (!guidanceHistoryEl) return;
