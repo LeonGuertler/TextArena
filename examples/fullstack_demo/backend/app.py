@@ -142,9 +142,33 @@ class FinalActionPayload(BaseModel):
 class RunEntry:
     session: Any  # Can be Mode1Session or Mode2Session
     owner_id: str
+    user_index: Optional[int] = None
+    user_uuid: Optional[str] = None
+    instance: Optional[str] = None  # Instance folder name (e.g., "tutorial", "568601006")
 
 
 RUN_STORE: Dict[str, RunEntry] = {}
+
+
+def _get_user_info(user_id: str, user_manager: SupabaseUserManager) -> Dict[str, Any]:
+    """Get user index and uuid from users table by user_id."""
+    try:
+        # Query users table by user_id to get uuid and index
+        result = (
+            user_manager.client.table(user_manager.table_name)
+            .select("uuid, index")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        data = getattr(result, "data", None) or []
+        if data:
+            return {"uuid": data[0]["uuid"], "index": data[0]["index"]}
+        # If not found, return None values (logging will be skipped)
+        return {"uuid": None, "index": None}
+    except Exception as e:
+        logging.warning(f"Failed to get user info for user_id={user_id}: {e}")
+        return {"uuid": None, "index": None}
 
 
 @app.post("/runs")
@@ -153,6 +177,7 @@ def start_run(
     background_tasks: BackgroundTasks,
     auth: AuthContext = Depends(get_auth_context),
     supabase_logger: SupabaseLogger = Depends(get_supabase_logger),
+    user_manager: SupabaseUserManager = Depends(get_supabase_user_manager),
 ):
     _ensure_mode_choice(payload.mode, auth)
 
@@ -194,7 +219,39 @@ def start_run(
 
     session = load_simulation(config)
     run_id = str(uuid.uuid4())
-    RUN_STORE[run_id] = RunEntry(session=session, owner_id=auth.user_id)
+    
+    # Get user info for logging
+    user_info = _get_user_info(auth.user_id or "anonymous", user_manager)
+    
+    RUN_STORE[run_id] = RunEntry(
+        session=session,
+        owner_id=auth.user_id or "anonymous",
+        user_index=user_info.get("index"),
+        user_uuid=user_info.get("uuid"),
+        instance=instance_folder,
+    )
+
+    # Set up step logging callback for modeC (automatic decisions)
+    if payload.mode == "modeC" and user_info.get("index") is not None and user_info.get("uuid") and instance_folder:
+        def log_step_callback(step_data: Dict[str, Any]) -> None:
+            try:
+                supabase_logger.log_step(
+                    user_index=user_info["index"],
+                    user_uuid=user_info["uuid"],
+                    instance=instance_folder,
+                    mode=payload.mode,
+                    period=step_data["period"],
+                    inventory_decision=step_data["inventory_decision"],
+                    total_reward=step_data["total_reward"],
+                    input_prompt=step_data.get("input_prompt"),
+                    output_prompt=step_data.get("output_prompt"),
+                    or_recommendation=step_data.get("or_recommendation"),
+                    run_id=run_id,
+                )
+            except Exception as e:
+                logging.warning(f"Failed to log step in modeC: {e}", exc_info=True)
+        
+        session._step_logging_callback = log_step_callback
 
     # For modeB, trigger LLM proposal generation in the background
     # This allows the frontend to show OR recommendation and "thinking" state immediately
@@ -281,6 +338,27 @@ def get_instance_description(instance_num: int):
         return {"product": "", "description": f"Error reading description: {str(e)}"}
 
 
+def _extract_prompts_from_transcript(session: Any, period: int) -> Dict[str, Optional[str]]:
+    """Extract input and output prompts for a given period from transcript."""
+    input_prompt = None
+    output_prompt = None
+    
+    # Look for agent_proposal events for this period
+    for evt in session.transcript.events:
+        if evt.kind == "agent_proposal" and evt.payload.get("day") == period:
+            content = evt.payload.get("content", {})
+            # Input prompt would be the observation, output would be the rationale
+            output_prompt = content.get("rationale")
+            # Try to find the observation for this period
+            for obs_evt in session.transcript.events:
+                if obs_evt.kind == "observation" and obs_evt.payload.get("day") == period:
+                    input_prompt = obs_evt.payload.get("content", "")
+                    break
+            break
+    
+    return {"input_prompt": input_prompt, "output_prompt": output_prompt}
+
+
 @app.post("/runs/{run_id}/final-action")
 def submit_final_action(
     run_id: str,
@@ -295,7 +373,46 @@ def submit_final_action(
     if session.config.mode not in ("modeA", "modeB"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Mode A and B support final actions")
 
+    # Extract decision before submitting
+    import json
+    try:
+        action_dict = json.loads(payload.action_json)
+        if isinstance(action_dict, dict) and "action" in action_dict:
+            action_dict = action_dict["action"]
+    except json.JSONDecodeError:
+        # If parsing fails, try to extract from the raw string
+        action_dict = {}
+    
+    # Get current period and reward
+    current_period = session.current_day
+    current_reward = session._running_reward if hasattr(session, "_running_reward") else 0.0
+    
+    # Get OR recommendation
+    or_recommendation = session._or_recommendations if hasattr(session, "_or_recommendations") else None
+    
+    # Extract prompts
+    prompts = _extract_prompts_from_transcript(session, current_period)
+    
     result = session.submit_final_decision(payload.action_json)
+    
+    # Log the step (non-blocking - don't fail if logging fails)
+    if entry.user_index is not None and entry.user_uuid and entry.instance:
+        try:
+            supabase_logger.log_step(
+                user_index=entry.user_index,
+                user_uuid=entry.user_uuid,
+                instance=entry.instance,
+                mode=session.config.mode,
+                period=current_period,
+                inventory_decision=action_dict,
+                total_reward=current_reward,
+                input_prompt=prompts.get("input_prompt"),
+                output_prompt=prompts.get("output_prompt"),
+                or_recommendation=or_recommendation,
+                run_id=run_id,
+            )
+        except Exception as e:
+            logging.warning(f"Failed to log step to Supabase: {e}", exc_info=True)
     
     # Only persist when game is completed (non-blocking - don't fail if persistence fails)
     if result.get("completed"):
@@ -325,6 +442,50 @@ def submit_guidance(
 
     if session.config.mode != "modeC":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Mode C supports guidance")
+
+    # Log the human guidance before processing
+    if entry.user_index is not None and entry.user_uuid and entry.instance:
+        try:
+            # Get current period (the pending guidance day) and reward
+            guidance_period = session._pending_guidance_day if hasattr(session, "_pending_guidance_day") and session._pending_guidance_day else session.current_day
+            current_reward = session._running_reward if hasattr(session, "_running_reward") else 0.0
+            
+            supabase_logger.log_guidance(
+                user_index=entry.user_index,
+                user_uuid=entry.user_uuid,
+                instance=entry.instance,
+                mode=session.config.mode,
+                period=guidance_period,
+                guidance_message=payload.message.strip(),
+                total_reward=current_reward,
+                run_id=run_id,
+            )
+        except Exception as e:
+            logging.warning(f"Failed to log guidance to Supabase: {e}", exc_info=True)
+
+    # Set up step logging callback for modeC automatic decisions
+    if entry.user_index is not None and entry.user_uuid and entry.instance:
+        def log_step_callback(step_data: Dict[str, Any]) -> None:
+            try:
+                supabase_logger.log_step(
+                    user_index=entry.user_index,
+                    user_uuid=entry.user_uuid,
+                    instance=entry.instance,
+                    mode=session.config.mode,
+                    period=step_data["period"],
+                    inventory_decision=step_data["inventory_decision"],
+                    total_reward=step_data["total_reward"],
+                    input_prompt=step_data.get("input_prompt"),
+                    output_prompt=step_data.get("output_prompt"),
+                    or_recommendation=step_data.get("or_recommendation"),
+                    run_id=run_id,
+                )
+            except Exception as e:
+                logging.warning(f"Failed to log step in modeC: {e}", exc_info=True)
+        
+        session._step_logging_callback = log_step_callback
+    else:
+        session._step_logging_callback = None
 
     result = session.submit_guidance(payload.message)
     
@@ -370,18 +531,24 @@ def _maybe_persist(
     if not state.get("completed"):
         return
         
-    transcript = state.get("transcript", [])
-    raw_output = json.dumps(transcript)
     final_reward = state.get("final_reward", 0.0)
     
-    supabase_logger.log_run(
-        user_id=auth.user_id,
-        mode=state.get("mode"),
-        final_reward=final_reward,
-        log_text=raw_output,
-        guidance_frequency=session.config.guidance_frequency if session.config.mode == "modeC" else None,
-        run_id=run_id,
-    )
+    # Get entry to access user info and instance
+    entry = RUN_STORE.get(run_id)
+    
+    # Log game completion with user index/uuid if available
+    if entry and entry.user_index is not None and entry.user_uuid and entry.instance:
+        try:
+            supabase_logger.log_game_completion(
+                user_index=entry.user_index,
+                user_uuid=entry.user_uuid,
+                instance=entry.instance,
+                mode=state.get("mode"),
+                total_reward=float(final_reward),
+                run_id=run_id,
+            )
+        except Exception as e:
+            logging.warning(f"Failed to log game completion to Supabase: {e}", exc_info=True)
 
 
 # Mount static files after all API routes to avoid conflicts

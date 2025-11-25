@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from supabase import Client, create_client
@@ -22,6 +23,8 @@ def _create_supabase_client() -> Client:
 class SupabaseLogger:
     client: Client
     table_name: str = "game_runs"
+    step_table_name: str = "game_steps"
+    completion_table_name: str = "game_completions"
 
     def log_run(
         self,
@@ -42,6 +45,93 @@ class SupabaseLogger:
             "run_id": run_id,
         }
         self.client.table(self.table_name).insert(payload).execute()
+
+    def log_step(
+        self,
+        *,
+        user_index: int,
+        user_uuid: str,
+        instance: str,
+        mode: str,
+        period: int,
+        inventory_decision: Dict[str, int],
+        total_reward: float,
+        input_prompt: Optional[str] = None,
+        output_prompt: Optional[str] = None,
+        or_recommendation: Optional[Dict[str, int]] = None,
+        run_id: Optional[str] = None,
+        step_type: str = "decision",  # "decision" or "guidance"
+    ) -> None:
+        """Log a single game step/decision."""
+        payload = {
+            "user_index": user_index,
+            "user_uuid": user_uuid,
+            "instance": instance,
+            "mode": mode,
+            "period": period,
+            "inventory_decision": inventory_decision,
+            "total_reward": total_reward,
+            "input_prompt": input_prompt,
+            "output_prompt": output_prompt,
+            "or_recommendation": or_recommendation,
+            "run_id": run_id,
+            "step_type": step_type,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        self.client.table(self.step_table_name).insert(payload).execute()
+
+    def log_guidance(
+        self,
+        *,
+        user_index: int,
+        user_uuid: str,
+        instance: str,
+        mode: str,
+        period: int,
+        guidance_message: str,
+        total_reward: float,
+        run_id: Optional[str] = None,
+    ) -> None:
+        """Log human guidance in Mode C."""
+        payload = {
+            "user_index": user_index,
+            "user_uuid": user_uuid,
+            "instance": instance,
+            "mode": mode,
+            "period": period,
+            "inventory_decision": {},  # Empty dict for guidance entries
+            "total_reward": total_reward,
+            "input_prompt": None,
+            "output_prompt": None,
+            "or_recommendation": None,
+            "guidance_message": guidance_message,  # Separate column for guidance
+            "run_id": run_id,
+            "step_type": "guidance",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        self.client.table(self.step_table_name).insert(payload).execute()
+
+    def log_game_completion(
+        self,
+        *,
+        user_index: int,
+        user_uuid: str,
+        instance: str,
+        mode: str,
+        total_reward: float,
+        run_id: Optional[str] = None,
+    ) -> None:
+        """Log game completion summary."""
+        payload = {
+            "user_index": user_index,
+            "user_uuid": user_uuid,
+            "instance": instance,
+            "mode": mode,
+            "total_reward": total_reward,
+            "run_id": run_id,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        self.client.table(self.completion_table_name).insert(payload).execute()
 
 
 def get_supabase_logger() -> SupabaseLogger:

@@ -11,7 +11,7 @@ import threading
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import pandas as pd
 import textarena as ta
@@ -129,6 +129,7 @@ class SimulationSession:
         self._running_reward: float = 0.0
         self._streaming_text: str = ""  # Store partial LLM response for streaming
         self._streaming_lock: threading.Lock = threading.Lock()  # Lock for streaming text access
+        self._step_logging_callback: Optional[Callable[[Dict[str, Any]], None]] = None  # Callback for logging steps
         
         # Extract initial samples from train.csv
         self._initial_samples, self._initial_sample_dates = self._load_initial_samples()
@@ -869,6 +870,30 @@ class SimulationSession:
             self.transcript.append(
                 "agent_proposal", {"day": self.current_day, "content": data}
             )
+
+            # Log this step if callback is set (for modeC automatic decisions)
+            if self._step_logging_callback:
+                try:
+                    action_dict = data.get("action", {})
+                    current_reward = self._running_reward if hasattr(self, "_running_reward") else 0.0
+                    or_rec = self._or_recommendations if hasattr(self, "_or_recommendations") else None
+                    
+                    # Extract prompts
+                    input_prompt = prompt  # The formatted prompt sent to LLM
+                    output_prompt = data.get("rationale", "")
+                    
+                    self._step_logging_callback({
+                        "period": self.current_day,
+                        "inventory_decision": action_dict,
+                        "total_reward": current_reward,
+                        "input_prompt": input_prompt,
+                        "output_prompt": output_prompt,
+                        "or_recommendation": or_rec,
+                    })
+                except Exception as e:
+                    # Don't fail the game if logging fails
+                    print(f"Warning: Failed to log step: {e}", file=sys.stderr)
+                    sys.stderr.flush()
 
             action_payload = json.dumps({"action": data.get("action", {})})
             result = self._advance_with_vm_action(action_payload)
