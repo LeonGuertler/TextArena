@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Instance Leaderboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f172a;
+      color: #e5e7eb;
+      margin: 0;
+      padding: 24px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    p {
+      margin: 4px 0 16px;
+      color: #9ca3af;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      background: #020617;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    thead {
+      background: #111827;
+    }
+    th, td {
+      padding: 8px 12px;
+      text-align: left;
+      font-size: 14px;
+    }
+    th {
+      color: #9ca3af;
+      font-weight: 500;
+    }
+    tbody tr:nth-child(even) {
+      background: #020617;
+    }
+    tbody tr:nth-child(odd) {
+      background: #020617;
+    }
+    tbody tr.highlight {
+      background: #1d4ed8;
+    }
+    tbody tr:hover {
+      background: #1f2937;
+    }
+    .rank {
+      width: 40px;
+    }
+    .name {
+      width: 40%;
+    }
+    .reward {
+      font-variant-numeric: tabular-nums;
+    }
+    .meta {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+    .status {
+      font-size: 13px;
+      margin-top: 8px;
+      color: #9ca3af;
+    }
+    .error {
+      color: #fecaca;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 id="title">Leaderboard</h1>
+    <p id="subtitle"></p>
+    <div id="status" class="status">Loading leaderboard…</div>
+    <table>
+      <thead>
+        <tr>
+          <th class="rank">#</th>
+          <th class="name">Name</th>
+          <th>Total reward</th>
+          <th>Mode</th>
+          <th>Last update</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <!-- rows injected by JS -->
+      </tbody>
+    </table>
+  </div>
+
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js';
+
+    // TODO: 替换成你自己的 Supabase 参数
+    const SUPABASE_URL = 'https://bssczohwaphkwikdjhxx.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJzc2N6b2h3YXBoa3dpa2RqaHh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY0ODQ4NzcsImV4cCI6MjA2MjA2MDg3N30.BfTyfZja4jRv7NCKkbkmM2xSPm-AUaZVFC07kSRsWMk';
+    // 临时方案：在前端使用 service_role key 绕过 RLS（仅限内部调试，之后务必改回 anon 并在 Supabase 里配置 RLS）
+    const SUPABASE_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJzc2N6b2h3YXBoa3dpa2RqaHh4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NjQ4NDg3NywiZXhwIjoyMDYyMDYwODc3fQ.E0kb3NV2lR-j0fFyMj2GwPr9RyTcApN62w3SwpATDEk';
+    // 这里的 INSTANCE_ID 会在三个页面中分别修改
+    const INSTANCE_ID = '568601006'; 
+
+    const INSTANCE_LABELS = {
+      '599580017': 'Instance 1',
+      '568601006': 'Instance 2',
+      '706016001': 'Instance 3',
+    };
+
+    const REFRESH_MS = 5000; // 5 秒刷新一次
+    const MAX_ROWS = 50;
+
+    // 临时使用 service_role key；等你能登录 Supabase后，请改回 SUPABASE_ANON_KEY 并在数据库里加只读策略
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    const titleEl = document.getElementById('title');
+    const subtitleEl = document.getElementById('subtitle');
+    const statusEl = document.getElementById('status');
+    const tbodyEl = document.getElementById('tbody');
+
+    titleEl.textContent = INSTANCE_LABELS[INSTANCE_ID] || `Instance ${INSTANCE_ID} Leaderboard`;
+    subtitleEl.textContent = 'Ranked by current total reward (from game steps).';
+
+    function formatNumber(x) {
+      const n = Number(x || 0);
+      return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    }
+
+    function formatTime(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      return d.toLocaleString();
+    }
+
+    async function fetchLeaderboardOnce() {
+      statusEl.textContent = 'Updating…';
+
+      // 1) 拉该 instance 的最近若干条 step 数据
+      const { data, error } = await supabase
+        .from('game_steps')
+        .select('user_uuid, user_index, instance, mode, total_reward, timestamp')
+        .eq('instance', INSTANCE_ID)
+        .order('timestamp', { ascending: false })
+        .limit(2000);
+
+      if (error) {
+        console.error('Supabase error loading game_steps', error);
+        const msg = error.message || JSON.stringify(error);
+        statusEl.textContent = `Error loading leaderboard: ${msg}`;
+        statusEl.classList.add('error');
+        tbodyEl.innerHTML = '<tr><td colspan="5">Failed to load data.</td></tr>';
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        tbodyEl.innerHTML = '<tr><td colspan="5">No data yet for this instance.</td></tr>';
+        statusEl.textContent = 'No data yet';
+        statusEl.classList.remove('error');
+        return;
+      }
+
+      // 2) 为了拿到 name，再拉一次 or_agent_users（如果你用的是 users 表，就改这里）
+      const { data: userRows, error: userErr } = await supabase
+        .from('or_agent_users')
+        .select('uuid, name, index');
+
+      if (userErr) {
+        console.warn('Failed to load user names, fallback to index only', userErr);
+      }
+
+      const nameByUuid = new Map();
+      (userRows || []).forEach(row => {
+        nameByUuid.set(row.uuid, row.name || `User #${row.index}`);
+      });
+
+      // 3) 按 user_uuid 聚合：取每个用户在该 instance 最新一条记录
+      const latestByUser = new Map();
+      for (const row of data) {
+        const key = row.user_uuid;
+        if (!latestByUser.has(key)) {
+          latestByUser.set(key, row);
+        }
+      }
+
+      let rows = Array.from(latestByUser.values());
+      rows.sort((a, b) => Number(b.total_reward || 0) - Number(a.total_reward || 0));
+      rows = rows.slice(0, MAX_ROWS);
+
+      // 4) 渲染表格
+      tbodyEl.innerHTML = rows.map((row, idx) => {
+        const displayName =
+          nameByUuid.get(row.user_uuid) ||
+          (row.user_index != null ? `User #${row.user_index}` : 'Unknown user');
+        const reward = formatNumber(row.total_reward);
+        const mode = row.mode || '';
+        const time = formatTime(row.timestamp);
+
+        return `
+          <tr>
+            <td class="rank">${idx + 1}</td>
+            <td class="name">${displayName}</td>
+            <td class="reward">${reward}</td>
+            <td>${mode}</td>
+            <td>${time}</td>
+          </tr>
+        `;
+      }).join('');
+
+      statusEl.textContent = `Last updated at ${new Date().toLocaleTimeString()}`;
+      statusEl.classList.remove('error');
+    }
+
+    // 首次加载 + 定时轮询
+    fetchLeaderboardOnce();
+    setInterval(fetchLeaderboardOnce, REFRESH_MS);
+  </script>
+</body>
+</html>
