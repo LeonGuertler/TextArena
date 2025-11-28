@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import asyncio
 import threading
 import unicodedata
 from dataclasses import dataclass, field
@@ -130,6 +131,7 @@ class SimulationSession:
         self._streaming_text: str = ""  # Store partial LLM response for streaming
         self._streaming_lock: threading.Lock = threading.Lock()  # Lock for streaming text access
         self._step_logging_callback: Optional[Callable[[Dict[str, Any]], None]] = None  # Callback for logging steps
+        self._completion_callback: Optional[Callable[[Dict[str, Any]], None]] = None  # Callback for logging game completion
         
         # Extract initial samples from train.csv
         self._initial_samples, self._initial_sample_dates = self._load_initial_samples()
@@ -184,14 +186,8 @@ class SimulationSession:
 
         self._env = ta.make(env_id="VendingMachine-v0")
         self._base_env = self._resolve_base_env(self._env)
-        from textarena.envs.VendingMachine import env as vm_env_module
-
-        self._vm_env_module = vm_env_module
-        self._original_num_days = vm_env_module.NUM_DAYS
-        self._original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
-        vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
+        
         self._total_days = self.csv_player.get_num_periods()
-        vm_env_module.NUM_DAYS = self._total_days
 
         self._setup_environment()
         # Ensure day 1 item configurations reflect CSV
@@ -245,6 +241,10 @@ class SimulationSession:
     # Public API
     # ------------------------------------------------------------------
     def serialize_state(self) -> Dict[str, Any]:
+        # Ensure daily logs are synced before serializing state
+        # This is important for Mode C where periods complete asynchronously
+        self._sync_ui_daily_logs()
+        
         # Build period dates map for frontend lookup
         num_periods = self.csv_player.get_num_periods()
         period_dates = {}
@@ -338,7 +338,7 @@ class SimulationSession:
         )
         return self._advance_with_vm_action(payload)
 
-    def submit_guidance(self, message: str) -> Dict[str, Any]:
+    def submit_guidance(self, message: str, background_tasks=None) -> Dict[str, Any]:
         if self.config.mode != "modeC":
             raise RuntimeError("Guidance only available in Mode C")
         if self._pending_guidance_day is None:
@@ -360,7 +360,25 @@ class SimulationSession:
             {"day": self._pending_guidance_day, "content": trimmed},
         )
         self._pending_guidance_day = None
-        self._run_until_pause_or_complete()
+        # Trigger async auto-play - returns immediately, continues in background
+        # Use BackgroundTasks if available (from FastAPI), otherwise fall back to threading
+        if background_tasks is not None:
+            background_tasks.add_task(self._trigger_modeC_auto_play_async)
+        else:
+            # Fallback: schedule async task from sync context
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._trigger_modeC_auto_play_async())
+            except RuntimeError:
+                # No event loop running, create one in background thread
+                def run_in_new_loop():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    new_loop.run_until_complete(self._trigger_modeC_auto_play_async())
+                    new_loop.close()
+                
+                thread = threading.Thread(target=run_in_new_loop, daemon=True)
+                thread.start()
         return self.serialize_state()
 
     # ------------------------------------------------------------------
@@ -376,7 +394,7 @@ class SimulationSession:
         # for day, news in self.csv_player.get_news_schedule().items():
         #     self._env.add_news(day, news)
 
-        self._env.reset(num_players=2)
+        self._env.reset(num_players=2, num_days=self._total_days, initial_inventory_per_item=0)
         self._reset_ui_tracking()
 
     def _apply_day_item_configs(self, day: int) -> None:
@@ -412,24 +430,21 @@ class SimulationSession:
         # LLM proposal will be generated asynchronously in the background
         # This allows the frontend to show OR recommendation and "thinking" state immediately
     
-    def _trigger_llm_proposal_async(self) -> None:
-        """Trigger LLM proposal generation in a background thread with streaming support."""
-        def generate_proposal():
-            try:
-                # Clear streaming text at start
-                with self._streaming_lock:
-                    self._streaming_text = ""
-                
-                # Generate proposal with streaming callback
-                self._agent_proposal_with_history_streaming()
-            except Exception as e:
-                print(f"Error generating LLM proposal: {e}", file=sys.stderr)
-                sys.stderr.flush()
-                with self._streaming_lock:
-                    self._streaming_text = ""
-        
-        thread = threading.Thread(target=generate_proposal, daemon=True)
-        thread.start()
+    async def _trigger_llm_proposal_async(self) -> None:
+        """Trigger LLM proposal generation asynchronously with streaming support."""
+        try:
+            # Clear streaming text at start
+            with self._streaming_lock:
+                self._streaming_text = ""
+            
+            # Generate proposal with streaming callback (run in thread pool for I/O-bound operation)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self._agent_proposal_with_history_streaming)
+        except Exception as e:
+            print(f"Error generating LLM proposal: {e}", file=sys.stderr)
+            sys.stderr.flush()
+            with self._streaming_lock:
+                self._streaming_text = ""
     
     def get_streaming_text(self) -> str:
         """Get current streaming text (partial LLM response)."""
@@ -439,7 +454,243 @@ class SimulationSession:
     def _bootstrap_modeC(self) -> None:
         """Bootstrap for Mode C with LLM and optional OR."""
         self.transcript.append("observation", {"day": self.current_day, "content": self._observation})
-        self._run_until_pause_or_complete()
+        # Note: Auto-play is triggered via background_tasks in app.py after session creation
+        # This bootstrap just sets up the initial observation
+    
+    async def _trigger_modeC_auto_play_async(self) -> None:
+        """Trigger Mode C auto-play loop asynchronously with streaming support."""
+        try:
+            # Run the async loop (it's already async-compatible)
+            await self._run_until_pause_or_complete_async()
+        except Exception as e:
+            import traceback
+            print(f"Error in Mode C auto-play: {e}", file=sys.stderr)
+            print(f"Traceback: {traceback.format_exc()}", file=sys.stderr)
+            sys.stderr.flush()
+            # Clear streaming text on error
+            with self._streaming_lock:
+                self._streaming_text = ""
+    
+    async def _run_until_pause_or_complete_async(self) -> None:
+        """Non-blocking version of _run_until_pause_or_complete with streaming support."""
+        loop = asyncio.get_event_loop()
+        while not self.transcript.completed:
+            # Yield control at the start of each iteration to allow FastAPI to handle GET requests
+            await asyncio.sleep(0)  # Yield to event loop immediately
+            
+            guidance_day = self._guidance_due_for_day(self.current_day)
+            if guidance_day is not None and guidance_day not in self._guidance_messages:
+                self._pending_guidance_day = guidance_day
+                # Get OR recommendation before pausing
+                if self._or_agent:
+                    self._update_or_recommendation()
+                print(f"\n{'='*70}")
+                print(f"Period {guidance_day} - WAITING FOR HUMAN GUIDANCE")
+                print(f"{'='*70}")
+                sys.stdout.flush()
+                break
+
+            # Get OR recommendation before LLM
+            if self._or_agent:
+                self._update_or_recommendation()
+
+            # Use non-streaming LLM call for Mode C (no need to stream since frontend doesn't display it)
+            prompt = self._format_guided_prompt()
+            
+            # Yield control before starting LLM call to allow GET requests to be processed
+            await asyncio.sleep(0)
+            
+            # Generate proposal without streaming (run in thread pool for I/O-bound operation)
+            data = await loop.run_in_executor(None, self._agent_proposal_with_guidance, prompt)
+            
+            # Print LLM decision for modeC
+            print(f"\n{'='*70}")
+            print(f"Period {self.current_day} - LLM AUTO-PLAY DECISION:")
+            print(f"{'='*70}")
+            
+            rationale = data.get("rationale", "")
+            if rationale:
+                print(f"\nLLM Rationale:")
+                print(f"{rationale}")
+            
+            action = data.get("action", {})
+            if action:
+                print(f"\nLLM Action:")
+                for item_id, qty in action.items():
+                    or_rec = self._or_recommendations.get(item_id, "N/A") if self._or_recommendations else "N/A"
+                    print(f"  {item_id}: {qty} units (OR recommended: {or_rec})")
+            
+            carry_over = data.get("carry_over_insight", "")
+            if carry_over:
+                print(f"\nCarry-over Insight: {carry_over}")
+            else:
+                print(f"\nCarry-over Insight: (empty)")
+            
+            print(f"{'='*70}")
+            sys.stdout.flush()
+            
+            self._store_carry_over_insight(self.current_day, data.get("carry_over_insight"))
+            self.transcript.append(
+                "agent_proposal", {"day": self.current_day, "content": data}
+            )
+
+            action_payload = json.dumps({"action": data.get("action", {})})
+            
+            # Run _advance_with_vm_action in executor to avoid blocking event loop
+            # This ensures FastAPI can handle GET requests during period advancement
+            result = await loop.run_in_executor(None, self._advance_with_vm_action, action_payload)
+            
+            # Ensure logs are synced after period completes (in case they weren't synced in _advance_with_vm_action)
+            # This is critical for Mode C where periods complete asynchronously
+            self._sync_ui_daily_logs()
+            
+            # Log this step AFTER action is executed and reward is updated
+            # This ensures we log the reward AFTER the action, not before
+            if self._step_logging_callback:
+                try:
+                    action_dict = data.get("action", {})
+                    # Get reward AFTER action is executed and logs are synced
+                    current_reward = self._running_reward if hasattr(self, "_running_reward") else 0.0
+                    or_rec = self._or_recommendations if hasattr(self, "_or_recommendations") else None
+                    
+                    # Extract prompts
+                    input_prompt = prompt  # The formatted prompt sent to LLM
+                    output_prompt = data.get("rationale", "")
+                    
+                    self._step_logging_callback({
+                        "period": self.current_day,
+                        "inventory_decision": action_dict,
+                        "total_reward": current_reward,
+                        "input_prompt": input_prompt,
+                        "output_prompt": output_prompt,
+                        "or_recommendation": or_rec,
+                    })
+                except Exception as e:
+                    # Don't fail the game if logging fails
+                    print(f"Warning: Failed to log step: {e}", file=sys.stderr)
+                    sys.stderr.flush()
+            
+            # Yield control after each period completes to allow frontend polling to catch up
+            # This ensures UI updates promptly and prevents blocking
+            await asyncio.sleep(0.1)  # Small delay to allow frontend to poll and update UI
+            
+            if isinstance(result, dict) and result.get("completed"):
+                # Game completed - trigger persistence callback if set
+                if hasattr(self, "_completion_callback") and self._completion_callback:
+                    try:
+                        state = self.serialize_state()
+                        self._completion_callback(state)
+                    except Exception as e:
+                        print(f"Warning: Failed to trigger completion callback: {e}", file=sys.stderr)
+                        sys.stderr.flush()
+                break
+            if self.transcript.completed:
+                # Game completed - trigger persistence callback if set
+                if hasattr(self, "_completion_callback") and self._completion_callback:
+                    try:
+                        state = self.serialize_state()
+                        self._completion_callback(state)
+                    except Exception as e:
+                        print(f"Warning: Failed to trigger completion callback: {e}", file=sys.stderr)
+                        sys.stderr.flush()
+                break
+            if self._pending_guidance_day is not None:
+                break
+    
+    def _agent_proposal_with_guidance(self, prompt: str) -> Dict[str, Any]:
+        """Generate agent proposal without streaming for Mode C (non-blocking, no streaming overhead)."""
+        # Direct non-streaming call - simpler and faster for Mode C
+        try:
+            action_text = str(self._agent(prompt))
+        except Exception as e:
+            print(f"DEBUG: Agent call failed ({type(e).__name__}): {e}")
+            action_text = ""
+        
+        cleaned = self._clean_json(action_text)
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError:
+            data = {"rationale": cleaned, "action": {}}
+        
+        return data
+    
+    def _agent_proposal_with_guidance_streaming(self, prompt: str) -> Dict[str, Any]:
+        """Generate agent proposal with streaming support for Mode C guided prompts."""
+        # Use the same streaming mechanism as Mode B
+        def streaming_agent_call(agent, observation):
+            """Wrapper that updates streaming text during agent call."""
+            base_agent = agent
+            if hasattr(agent, 'base_agent'):
+                base_agent = agent.base_agent
+            
+            # Try true streaming if available
+            if hasattr(base_agent, 'client') and hasattr(base_agent.client, 'responses'):
+                try:
+                    request_payload = {
+                        "model": base_agent.model_name,
+                        "input": [
+                            {"role": "system", "content": [{"type": "input_text", "text": base_agent.system_prompt}]},
+                            {"role": "user", "content": [{"type": "input_text", "text": observation}]},
+                        ],
+                    }
+                    if getattr(base_agent, "reasoning_effort", None):
+                        request_payload["reasoning"] = {"effort": base_agent.reasoning_effort}
+                    if getattr(base_agent, "text_verbosity", None):
+                        request_payload["text"] = {"verbosity": base_agent.text_verbosity}
+
+                    import time
+                    full_text = ""
+                    with base_agent.client.responses.stream(**request_payload) as stream:
+                        for event in stream:
+                            event_type = getattr(event, "type", None)
+                            if event_type == "response.output_text.delta":
+                                chunk_text = ""
+                                delta_obj = getattr(event, "delta", None)
+                                if isinstance(delta_obj, str):
+                                    chunk_text = delta_obj
+                                elif delta_obj is not None:
+                                    if hasattr(delta_obj, "text"):
+                                        chunk_text = delta_obj.text
+                                    elif hasattr(delta_obj, "content"):
+                                        chunk_text = delta_obj.content
+                                if chunk_text:
+                                    full_text += chunk_text
+                                    with self._streaming_lock:
+                                        self._streaming_text = full_text
+                            elif event_type == "response.completed":
+                                break
+                            time.sleep(0.01)
+                        
+                        final_response = stream.get_final_response()
+                        if hasattr(final_response, "output_text"):
+                            result = final_response.output_text
+                        else:
+                            result = full_text
+                        return result
+                except Exception as stream_error:
+                    # Fall back to non-streaming
+                    pass
+            
+            # Fallback to non-streaming call
+            try:
+                result = str(agent(observation))
+                with self._streaming_lock:
+                    self._streaming_text = result
+                return result
+            except Exception as e:
+                print(f"DEBUG: Agent call failed ({type(e).__name__}): {e}")
+                with self._streaming_lock:
+                    self._streaming_text = "Error generating response"
+                return ""
+        
+        action_text = streaming_agent_call(self._agent, prompt)
+        cleaned = self._clean_json(action_text)
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError:
+            data = {"rationale": cleaned, "action": {}}
+        
+        return data
     
     def _update_or_recommendation(self) -> None:
         """Update OR recommendations for current observation."""
@@ -805,14 +1056,40 @@ class SimulationSession:
             if self.config.mode == "modeB":
                 # Trigger LLM proposal generation asynchronously
                 # This allows the frontend to return immediately and show "thinking" state
-                self._trigger_llm_proposal_async()
+                # Schedule the async task properly to avoid "coroutine was never awaited" warning
+                try:
+                    # Try to get the running event loop (FastAPI provides one)
+                    loop = asyncio.get_running_loop()
+                    # Schedule the task in the running loop
+                    loop.create_task(self._trigger_llm_proposal_async())
+                except RuntimeError:
+                    # No running event loop (e.g., called from thread pool executor)
+                    # Create a new event loop in a background thread
+                    def run_async():
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            new_loop.run_until_complete(self._trigger_llm_proposal_async())
+                        finally:
+                            new_loop.close()
+                    thread = threading.Thread(target=run_async, daemon=True)
+                    thread.start()
                 # Return state immediately with OR recommendation, LLM will update via polling
                 return {"next_observation": self._observation, "completed": False}
             else:
                 # modeA: just return state with OR recommendation
                 return {"next_observation": self._observation, "completed": False}
-
-        self._run_until_pause_or_complete()
+        
+        # Mode C: This should never be reached because Mode C uses async auto-play loop
+        # If we get here, it means Mode C is being used incorrectly (e.g., from sync context)
+        # The async version (_run_until_pause_or_complete_async) is called from _trigger_modeC_auto_play_async
+        # which is triggered when the game starts or guidance is submitted
+        if self.config.mode == "modeC":
+            # Mode C should not reach here - it uses async auto-play loop
+            # Return current state and let async loop handle progression
+            return {"next_observation": self._observation, "completed": False}
+        
+        # Fallback for any other mode (shouldn't happen)
         return self.serialize_state()
 
     def _run_until_pause_or_complete(self) -> None:
@@ -872,10 +1149,18 @@ class SimulationSession:
                 "agent_proposal", {"day": self.current_day, "content": data}
             )
 
-            # Log this step if callback is set (for modeC automatic decisions)
+            action_payload = json.dumps({"action": data.get("action", {})})
+            result = self._advance_with_vm_action(action_payload)
+            
+            # Ensure logs are synced after period completes
+            self._sync_ui_daily_logs()
+            
+            # Log this step AFTER action is executed and reward is updated
+            # This ensures we log the reward AFTER the action, not before
             if self._step_logging_callback:
                 try:
                     action_dict = data.get("action", {})
+                    # Get reward AFTER action is executed and logs are synced
                     current_reward = self._running_reward if hasattr(self, "_running_reward") else 0.0
                     or_rec = self._or_recommendations if hasattr(self, "_or_recommendations") else None
                     
@@ -895,9 +1180,6 @@ class SimulationSession:
                     # Don't fail the game if logging fails
                     print(f"Warning: Failed to log step: {e}", file=sys.stderr)
                     sys.stderr.flush()
-
-            action_payload = json.dumps({"action": data.get("action", {})})
-            result = self._advance_with_vm_action(action_payload)
             if isinstance(result, dict) and result.get("completed"):
                 break
             if self.transcript.completed:
@@ -1004,8 +1286,6 @@ class SimulationSession:
                 },
             },
         )
-        self._vm_env_module.NUM_DAYS = self._original_num_days
-        self._vm_env_module.INITIAL_INVENTORY_PER_ITEM = self._original_initial_inventory
         return {"completed": True, "final_reward": self.transcript.final_reward}
 
     @staticmethod
@@ -1020,16 +1300,28 @@ class SimulationSession:
         self._running_reward = 0.0
 
     def _sync_ui_daily_logs(self) -> None:
+        # Try to get logs from base environment (unwrap wrappers)
         env_logs = getattr(self._base_env, "daily_logs", None)
+        
+        # Fallback: try getting from wrapped env if base_env doesn't have it
+        if not env_logs:
+            env_logs = getattr(self._env, "daily_logs", None)
+        
         if not env_logs:
             return
+        
         start = len(self._ui_daily_logs)
         if start >= len(env_logs):
+            # Already synced all available logs
             return
+        
+        # Sync all new logs from start to end
+        # This ensures we catch all logs that were created since last sync
         for raw_log in env_logs[start:]:
             reward = float(raw_log.get("daily_reward", 0.0))
             self._running_reward += reward
-            self._ui_daily_logs.append(self._sanitize_day_log(raw_log, env_logs))
+            sanitized = self._sanitize_day_log(raw_log, env_logs)
+            self._ui_daily_logs.append(sanitized)
 
     def _sanitize_day_log(self, log: Dict[str, Any], all_logs: List[Dict[str, Any]]) -> Dict[str, Any]:
         log_day = int(log.get("day", 0))

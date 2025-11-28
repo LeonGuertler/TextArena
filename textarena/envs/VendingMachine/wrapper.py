@@ -33,7 +33,7 @@ class VendingMachineObservationWrapper(ObservationWrapper):
         self.game_history: List[Dict[str, Any]] = []
         self.current_day = 1
     
-    def reset(self, num_players: int, seed: Optional[int] = None):
+    def reset(self, num_players: int, seed: Optional[int] = None, **kwargs):
         """Reset the wrapper state along with the environment."""
         # Clear wrapper state
         self.full_observations = {}
@@ -41,7 +41,7 @@ class VendingMachineObservationWrapper(ObservationWrapper):
         self.current_day = 1
         
         # Call parent's reset (which calls env.reset)
-        return super().reset(num_players=num_players, seed=seed)
+        return super().reset(num_players=num_players, seed=seed, **kwargs)
         
     def _extract_game_info_from_observations(self, player_id: int) -> Dict[str, Any]:
         """Extract current game state from observations for multi-item environment."""

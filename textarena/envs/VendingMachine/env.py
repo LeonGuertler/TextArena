@@ -60,6 +60,10 @@ class VendingMachineEnv(ta.Env):
         self.state: TwoPlayerState
         self.current_day = 1
         
+        # Instance-specific game parameters (set during reset)
+        self.num_days: int = NUM_DAYS  # Default to module-level value, can be overridden in reset()
+        self.initial_inventory_per_item: int = INITIAL_INVENTORY_PER_ITEM  # Default to module-level value
+        
         # Item definitions: {item_id: {description, lead_time, profit, holding_cost}}
         self.items: Dict[str, Dict[str, Any]] = {}
         
@@ -105,7 +109,7 @@ class VendingMachineEnv(ta.Env):
             'holding_cost': holding_cost
         }
         
-        # Initialize on-hand inventory (will be set to INITIAL_INVENTORY_PER_ITEM in reset)
+        # Initialize on-hand inventory (will be set to initial_inventory_per_item in reset)
         self.on_hand_inventory[item_id] = 0
         
         self.total_ordered[item_id] = 0
@@ -124,15 +128,31 @@ class VendingMachineEnv(ta.Env):
         
         self.news_schedule[day] = news
 
-    def reset(self, num_players: int, seed: Optional[int] = None):
-        if num_players != 2:
+    def reset(self, seed: Optional[int] = None, num_days: Optional[int] = None, initial_inventory_per_item: Optional[int] = None, num_players: Optional[int] = None):
+        """
+        Reset the environment for a new game.
+        
+        Args:
+            seed: Optional random seed
+            num_days: Optional number of days/periods (defaults to module NUM_DAYS)
+            initial_inventory_per_item: Optional initial inventory per item (defaults to module INITIAL_INVENTORY_PER_ITEM)
+            num_players: Optional number of players (ignored, always 2 for VendingMachine)
+        """
+        # num_players is ignored - VendingMachine always has exactly 2 players (VM and Demand)
+        if num_players is not None and num_players != 2:
             raise ValueError("VendingMachineEnv requires exactly 2 players: VM (0) and Demand (1)")
         
         if not self.items:
             raise ValueError("No items added. Call add_item() before reset()")
 
-        # Initialize TextArena two-player state
-        self.state = TwoPlayerState(num_players=2, max_turns=NUM_DAYS * 2, seed=seed)
+        # Set instance-specific parameters if provided, otherwise use defaults
+        if num_days is not None:
+            self.num_days = num_days
+        if initial_inventory_per_item is not None:
+            self.initial_inventory_per_item = initial_inventory_per_item
+
+        # Initialize TextArena two-player state (always 2 players: VM and Demand)
+        self.state = TwoPlayerState(num_players=2, max_turns=self.num_days * 2, seed=seed)
 
         # Initialize environment state
         self.current_day = 1
@@ -141,9 +161,9 @@ class VendingMachineEnv(ta.Env):
         self.daily_logs = []
         self.pending_orders = []
         
-        # Initialize on-hand inventory to INITIAL_INVENTORY_PER_ITEM for each item
+        # Initialize on-hand inventory to initial_inventory_per_item for each item
         for item_id in self.items:
-            self.on_hand_inventory[item_id] = INITIAL_INVENTORY_PER_ITEM
+            self.on_hand_inventory[item_id] = self.initial_inventory_per_item
             self.total_ordered[item_id] = 0
             self.total_sold[item_id] = 0
 
@@ -200,7 +220,7 @@ class VendingMachineEnv(ta.Env):
         obs_list = self.state.get_current_player_observation()
 
         # Build game board with multi-item information
-        board_lines = [f"PERIOD {self.current_day} / {NUM_DAYS}"]
+        board_lines = [f"PERIOD {self.current_day} / {self.num_days}"]
         
         # Add news - only show today's news and past news (no future news visibility)
         if self.news_schedule:
@@ -490,8 +510,8 @@ class VendingMachineEnv(ta.Env):
             self.current_day += 1
             self.current_day_orders = {}
 
-            # If reached day > NUM_DAYS, finish the game
-            if self.current_day > NUM_DAYS:
+            # If reached day > num_days, finish the game
+            if self.current_day > self.num_days:
                 self._finalize_and_end()
                 return self.state.step(rotate_player=False)
 

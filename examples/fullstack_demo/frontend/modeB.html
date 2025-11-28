@@ -890,6 +890,7 @@
     let currentRunId = null;
     let pollTimer = null;
     let latestProposalAction = null;
+    let llmEventSource = null;  // SSE connection for LLM streaming
 
     const setupSection = document.getElementById("setup-section");
     const gameSection = document.getElementById("game-section");
@@ -1070,6 +1071,7 @@
             clearInterval(pollTimer);
             pollTimer = null;
           }
+          stopLLMStreaming();
         } else {
           decisionError.textContent = "";
           decisionError.className = "error";
@@ -1123,6 +1125,7 @@
           clearInterval(pollTimer);
           pollTimer = null;
         }
+        stopLLMStreaming();
         // Show completion message with reward
         const reward = state.final_reward || 0;
         if (decisionError) {
@@ -2007,17 +2010,79 @@
       }
     }
 
+    function startLLMStreaming() {
+      // Close existing SSE connection if any
+      stopLLMStreaming();
+      
+      if (!currentRunId) return;
+      
+      // Open SSE connection for LLM streaming
+      // Note: EventSource doesn't support custom headers, so we pass user_id as query param
+      const userId = localStorage.getItem('user_id') || "anonymous";
+      llmEventSource = new EventSource(`/runs/${currentRunId}/llm-stream?user_id=${encodeURIComponent(userId)}`);
+      
+      llmEventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.complete) {
+            // LLM proposal is complete, close SSE and refresh state
+            stopLLMStreaming();
+            // Poll once to get final state with proposal
+            pollOnce();
+            return;
+          }
+          
+          // Update streaming text in UI
+          if (data.streaming_text !== undefined) {
+            // Update reasoning textarea with streaming text
+            const reasoningTextEl = document.getElementById("reasoning-text");
+            if (reasoningTextEl) {
+              let displayText = data.streaming_text;
+              // Try to parse and extract rationale if it's JSON
+              if (!displayText.startsWith("Thinking") && displayText.trim().length > 10) {
+                try {
+                  const parsed = JSON.parse(displayText);
+                  if (parsed && typeof parsed === "object" && parsed.rationale) {
+                    displayText = String(parsed.rationale);
+                  }
+                } catch (e) {
+                  // Not JSON, use as-is
+                }
+              }
+              reasoningTextEl.value = displayText;
+              reasoningTextEl.scrollTop = reasoningTextEl.scrollHeight;
+            }
+          }
+        } catch (err) {
+          console.error("Error parsing SSE data:", err);
+        }
+      };
+      
+      llmEventSource.onerror = (error) => {
+        console.error("SSE connection error:", error);
+        stopLLMStreaming();
+        // Fall back to polling
+        startPolling();
+      };
+    }
+    
+    function stopLLMStreaming() {
+      if (llmEventSource) {
+        llmEventSource.close();
+        llmEventSource = null;
+      }
+    }
+    
     function startPolling() {
       if (pollTimer) clearInterval(pollTimer);
-      let pollInterval = 2000; // Default 2 seconds
+      const pollInterval = 2000; // Poll every 2 seconds for non-LLM updates
       
       const poll = async () => {
         try {
           const state = await apiRequest(`/runs/${currentRunId}`, { method: "GET" });
           updateUI(state);
           
-          // Check if streaming text is available - poll more frequently when streaming
-          const isStreaming = state.streaming_text && state.streaming_text.trim().length > 0;
           const currentPeriod = state.current_day || 1;
           const hasLLMProposal = state.transcript && state.transcript.some(
             evt => {
@@ -2029,39 +2094,24 @@
             }
           );
           
-          // Check if we're waiting for LLM (OR recommendation exists but no proposal yet)
+          // Check if we should start SSE for LLM streaming
           const hasORRecommendation = state.or_recommendation && 
                                       state.or_recommendation.recommendations && 
                                       Object.keys(state.or_recommendation.recommendations).length > 0;
           const waitingForLLM = hasORRecommendation && !hasLLMProposal && !state.completed;
           
-          // Debug logging - log when streaming text changes
-          if (isStreaming) {
-            const currentLength = state.streaming_text.length;
-            if (!window.lastStreamingLength || currentLength !== window.lastStreamingLength) {
-              console.log(`DEBUG: Streaming detected, text length: ${currentLength}, has proposal: ${hasLLMProposal}`);
-              window.lastStreamingLength = currentLength;
-            }
-          } else {
-            window.lastStreamingLength = 0;
+          // Start SSE if waiting for LLM and not already streaming
+          if (waitingForLLM && !llmEventSource) {
+            startLLMStreaming();
           }
           
-          // Poll more frequently (100ms) when streaming OR waiting for LLM, otherwise use normal interval (2000ms)
-          const newPollInterval = (isStreaming || waitingForLLM) && !hasLLMProposal ? 100 : 2000;
-          
-          // Stop polling only if:
+          // Stop polling if:
           // 1. Game is completed, OR
-          // 2. We're waiting for final action AND LLM proposal is available (user can now make decision)
+          // 2. We're waiting for final action AND LLM proposal is available
           if (state.completed || (state.waiting_for_final_action && hasLLMProposal)) {
             clearInterval(pollTimer);
             pollTimer = null;
-          } else if (newPollInterval !== pollInterval) {
-            // Restart polling with updated interval if it changed
-            clearInterval(pollTimer);
-            pollInterval = newPollInterval;
-            pollTimer = setInterval(poll, pollInterval);
-            // Immediately poll again with new interval
-            poll();
+            stopLLMStreaming();
           }
         } catch (err) {
           console.error("Polling error:", err);
@@ -2071,6 +2121,16 @@
       // Start with immediate poll, then continue with interval
       poll();
       pollTimer = setInterval(poll, pollInterval);
+    }
+    
+    async function pollOnce() {
+      if (!currentRunId) return;
+      try {
+        const state = await apiRequest(`/runs/${currentRunId}`, { method: "GET" });
+        updateUI(state);
+      } catch (err) {
+        console.error("Poll error:", err);
+      }
     }
 
     async function apiRequest(path, options = {}) {

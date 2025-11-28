@@ -50,6 +50,9 @@ def launch_uvicorn(*, reload_enabled: bool) -> None:
         port=port,
         reload=False,
         log_level="info",
+        limit_concurrency=1000,  # Maximum concurrent connections per worker
+        limit_max_requests=10000,  # Maximum requests before worker restart (prevents memory leaks)
+        timeout_keep_alive=30,  # Keep-alive timeout in seconds
     )
     server = Server(config=config)
     server.run()

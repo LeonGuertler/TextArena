@@ -559,6 +559,7 @@
 
     let currentRunId = null;
     let pollTimer = null;
+    let llmEventSource = null;  // SSE connection for LLM streaming
     let historicalDemandChartInstance = null;
     let historicalInventoryChartInstance = null;
     let showingRawTranscript = false;
@@ -680,6 +681,9 @@
         gameSection.classList.remove("hidden");
         updateUI(response);
         startPolling();
+        // Start SSE immediately for Mode C to receive period completion notifications
+        // (We don't use it for LLM streaming, only for period completion events)
+        startLLMStreaming();
       } catch (err) {
         startError.textContent = err.message || "Failed to start game";
       }
@@ -697,40 +701,178 @@
         });
         guidanceText.value = "";
         updateUI(response);
-        if (!response.completed) {
-          startPolling();
+        startPolling();  // Start polling to get updates
+        // Ensure SSE is connected for period completion notifications
+        if (!llmEventSource) {
+          startLLMStreaming();
         }
       } catch (err) {
         guidanceError.textContent = err.message || "Failed to submit guidance";
       }
     }
+    function startLLMStreaming() {
+      // Close existing SSE connection if any
+      stopLLMStreaming();
+      
+      if (!currentRunId) return;
+      
+      // Open SSE connection for period completion notifications (not LLM streaming)
+      // Mode C uses SSE only to detect when periods complete, not for streaming LLM text
+      const userId = localStorage.getItem('user_id') || "anonymous";
+      llmEventSource = new EventSource(`/runs/${currentRunId}/llm-stream?user_id=${encodeURIComponent(userId)}`);
+      
+      llmEventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          // Handle LLM proposal completion - LLM just finished, period will complete soon
+          if (data.llm_complete) {
+            console.log(`LLM proposal complete for period ${data.period || 'unknown'}`);
+            // LLM finished, poll immediately and again after a short delay
+            pollRun();
+            setTimeout(() => pollRun(), 200);
+          }
+          
+          // Handle period completion notification - period finished its LLM call and advanced
+          if (data.period_complete !== undefined) {
+            console.log(`Period ${data.period_complete} completed! Current period: ${data.current_period}`);
+            // Immediately poll to get updated state with period information
+            pollRun();
+            // Poll again after a short delay to ensure we get the full updated state
+            setTimeout(() => pollRun(), 300);
+          }
+          
+          // Handle period change notification - period advanced after completion
+          if (data.period_changed !== undefined) {
+            const completedPeriod = data.completed_period || data.previous_period;
+            console.log(`Period ${completedPeriod} finished! Period changed from ${data.previous_period} to ${data.period_changed}`);
+            // Immediately poll to get updated state with period information
+            pollRun();
+            // Poll again after a short delay to ensure we get the full updated state
+            setTimeout(() => pollRun(), 300);
+          }
+          
+          // Handle game completion
+          if (data.game_complete) {
+            stopLLMStreaming();
+            pollRun();
+            return;
+          }
+          
+          // Ignore streaming_text for Mode C - we don't want to show LLM streaming
+          // (data.streaming_text is ignored)
+        } catch (err) {
+          console.error("Error parsing SSE data:", err);
+        }
+      };
+      
+      llmEventSource.onerror = (error) => {
+        console.error("SSE connection error:", error);
+        // Don't stop completely - try to reconnect
+        stopLLMStreaming();
+        // Ensure polling continues even if SSE fails
+        if (isPollingActive && currentRunId) {
+          // Poll immediately to get latest state
+          pollRun();
+        }
+        // Reconnect after a short delay
+        setTimeout(() => {
+          if (currentRunId && isPollingActive) {
+            console.log("Reconnecting SSE after error...");
+            startLLMStreaming();
+          }
+        }, 1000);
+      };
+    }
+    
+    function stopLLMStreaming() {
+      if (llmEventSource) {
+        llmEventSource.close();
+        llmEventSource = null;
+      }
+    }
+    
+    let pollErrorCount = 0;
+    const MAX_POLL_ERRORS = 5;
+    let isPollingActive = false;
+
     function startPolling() {
       stopPolling();
-      pollTimer = setInterval(pollRun, 2500);
+      isPollingActive = true;
+      pollErrorCount = 0;
+      // Poll more frequently for Mode C to catch period updates quickly
+      // Start with immediate poll, then continue with interval
+      pollRun();  // Immediate poll
+      pollTimer = setInterval(() => {
+        if (isPollingActive) {
+          pollRun();
+        }
+      }, 500);  // Poll every 500ms
     }
 
     function stopPolling() {
+      isPollingActive = false;
       if (pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
       }
+      stopLLMStreaming();
     }
 
     async function pollRun() {
-      if (!currentRunId) return;
+      if (!currentRunId || !isPollingActive) return;
+      
+      let state = null;
       try {
-        const state = await apiRequest(`/runs/${currentRunId}`, { method: "GET" });
+        state = await apiRequest(`/runs/${currentRunId}`, { method: "GET" });
+        // Reset error count on successful poll
+        pollErrorCount = 0;
         updateUI(state);
+        
+        // For Mode C: Don't start SSE based on streaming_text (we don't want LLM streaming)
+        // Instead, keep SSE open for period completion notifications only
+        // SSE is started when Mode C begins (in startRun function)
+        
         if (state.completed) {
           stopPolling();
+          stopLLMStreaming();
         }
       } catch (err) {
-        console.error("Polling error:", err);
+        pollErrorCount++;
+        console.error(`Polling error (${pollErrorCount}/${MAX_POLL_ERRORS}):`, err);
+        
+        // If we've had too many errors, try to restart polling
+        if (pollErrorCount >= MAX_POLL_ERRORS) {
+          console.warn("Too many polling errors, attempting to restart polling...");
+          pollErrorCount = 0;
+          // Restart polling after a delay (only if game not completed)
+          setTimeout(() => {
+            if (currentRunId && isPollingActive && (!state || !state.completed)) {
+              console.log("Restarting polling after errors...");
+              startPolling();
+            }
+          }, 2000);
+        }
+        
+        // Even on error, continue polling (don't stop silently)
+        // The interval will continue, but we'll retry
       }
     }
 
+    let lastDisplayedPeriod = 0;
+    
     function updateUI(state) {
       if (!state) return;
+
+      const currentPeriod = state.current_day || 1;
+      
+      // Show period completion notification when period advances
+      if (currentPeriod > lastDisplayedPeriod && lastDisplayedPeriod > 0) {
+        console.log(`Period ${lastDisplayedPeriod} completed! Now on period ${currentPeriod}`);
+        // You could add a visual notification here if desired
+        // e.g., show a toast notification or highlight the period in the UI
+      }
+      lastDisplayedPeriod = currentPeriod;
 
       renderSnapshot(state);
       renderHistory(state.daily_logs || [], state.transcript || []);
@@ -1598,6 +1740,26 @@
 
     async function apiRequest(path, options = {}) {
       const userId = localStorage.getItem('user_id');
+      
+      // Create AbortController for timeout if AbortSignal.timeout is not available
+      let abortController = null;
+      let timeoutId = null;
+      
+      if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+        // Modern browsers support AbortSignal.timeout
+        try {
+          abortController = { signal: AbortSignal.timeout(30000) };
+        } catch (e) {
+          // Fallback if timeout not supported
+          abortController = new AbortController();
+          timeoutId = setTimeout(() => abortController.abort(), 30000);
+        }
+      } else {
+        // Fallback for older browsers
+        abortController = new AbortController();
+        timeoutId = setTimeout(() => abortController.abort(), 30000);
+      }
+      
       const fetchOptions = {
         method: "GET",
         ...options,
@@ -1606,13 +1768,30 @@
           "X-User-ID": userId || "anonymous",
           ...(options.headers || {}),
         },
+        signal: abortController.signal,
       };
-      const response = await fetch(path, fetchOptions);
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || response.statusText);
+      
+      try {
+        const response = await fetch(path, fetchOptions);
+        if (timeoutId) clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || response.statusText);
+        }
+        return response.json();
+      } catch (err) {
+        if (timeoutId) clearTimeout(timeoutId);
+        
+        // Handle timeout and network errors
+        if (err.name === 'TimeoutError' || err.name === 'AbortError' || err.message === 'The user aborted a request.') {
+          throw new Error('Request timeout - server may be overloaded');
+        }
+        if (err.name === 'TypeError' && err.message.includes('fetch')) {
+          throw new Error('Network error - check connection');
+        }
+        throw err;
       }
-      return response.json();
     }
 
     function formatCurrency(value) {

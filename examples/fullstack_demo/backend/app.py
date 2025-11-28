@@ -6,13 +6,21 @@ import json
 import logging
 import os
 import uuid
-from dataclasses import dataclass
+import time
+import threading
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Response, status
+try:
+    import psutil
+except ImportError:
+    psutil = None  # Optional dependency for memory monitoring
+
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field
 
@@ -35,6 +43,76 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TextArena VM Demo")
 
+# Track active LLM calls (threads)
+_active_llm_threads = threading.local()
+_active_llm_threads.count = 0
+_llm_thread_lock = threading.Lock()
+
+# Request monitoring
+_request_stats = {
+    "total_requests": 0,
+    "active_requests": 0,
+    "requests_by_endpoint": {},
+    "requests_by_status": {},
+    "request_times": [],  # Keep last 1000 request times
+    "max_active": 0,
+}
+_request_stats_lock = threading.Lock()
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all requests with timing and concurrency info."""
+    start_time = time.time()
+    path = request.url.path
+    method = request.method
+    
+    # Update active requests
+    with _request_stats_lock:
+        _request_stats["active_requests"] += 1
+        _request_stats["total_requests"] += 1
+        _request_stats["max_active"] = max(_request_stats["max_active"], _request_stats["active_requests"])
+        
+        # Track by endpoint
+        endpoint_key = f"{method} {path}"
+        _request_stats["requests_by_endpoint"][endpoint_key] = _request_stats["requests_by_endpoint"].get(endpoint_key, 0) + 1
+    
+    # Log request arrival
+    logger.info(f"[REQ] {method} {path} | Active: {_request_stats['active_requests']} | Total: {_request_stats['total_requests']}")
+    
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        
+        # Update stats
+        with _request_stats_lock:
+            _request_stats["active_requests"] -= 1
+            status_code = response.status_code
+            _request_stats["requests_by_status"][status_code] = _request_stats["requests_by_status"].get(status_code, 0) + 1
+            
+            # Keep last 1000 request times
+            _request_stats["request_times"].append(process_time)
+            if len(_request_stats["request_times"]) > 1000:
+                _request_stats["request_times"].pop(0)
+        
+        # Log response
+        logger.info(
+            f"[RES] {method} {path} | Status: {status_code} | "
+            f"Time: {process_time*1000:.1f}ms | Active: {_request_stats['active_requests']}"
+        )
+        
+        # Add timing header
+        response.headers["X-Process-Time"] = str(process_time)
+        response.headers["X-Active-Requests"] = str(_request_stats["active_requests"])
+        
+        return response
+    except Exception as e:
+        process_time = time.time() - start_time
+        with _request_stats_lock:
+            _request_stats["active_requests"] -= 1
+        logger.error(f"[ERR] {method} {path} | Error: {e} | Time: {process_time*1000:.1f}ms")
+        raise
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,6 +121,51 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+
+def cleanup_expired_runs() -> int:
+    """Remove runs older than TTL. Returns number of cleaned runs."""
+    now = time.time()
+    expired = [
+        run_id for run_id, entry in RUN_STORE.items()
+        if now - entry.created_at > RUN_STORE_TTL
+    ]
+    for run_id in expired:
+        del RUN_STORE[run_id]
+    return len(expired)
+
+
+@app.on_event("startup")
+async def start_cleanup_task():
+    """Start background task to clean up expired runs."""
+    async def cleanup_loop():
+        while True:
+            await asyncio.sleep(300)  # Run cleanup every 5 minutes
+            cleaned = cleanup_expired_runs()
+            if cleaned > 0:
+                logger.info(f"Cleaned up {cleaned} expired runs (TTL: {RUN_STORE_TTL/3600:.1f}h)")
+    
+    asyncio.create_task(cleanup_loop())
+    logger.info(f"Started RUN_STORE cleanup task (TTL: {RUN_STORE_TTL/3600:.1f}h, interval: 5min)")
+
+
+def get_memory_usage_mb() -> float:
+    """Get current memory usage in MB."""
+    try:
+        if psutil is None:
+            return 0.0
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / 1024 / 1024
+    except Exception:
+        return 0.0
+
+
+def get_active_thread_count() -> int:
+    """Get count of active threads (approximate for LLM calls)."""
+    try:
+        return threading.active_count()
+    except Exception:
+        return 0
 
 
 @app.get("/")
@@ -145,9 +268,12 @@ class RunEntry:
     user_index: Optional[int] = None
     user_uuid: Optional[str] = None
     instance: Optional[str] = None  # Instance folder name (e.g., "tutorial", "568601006")
+    created_at: float = field(default_factory=time.time)  # Timestamp for TTL cleanup
 
 
 RUN_STORE: Dict[str, RunEntry] = {}
+RUN_STORE_TTL = 3600  # 1 hour in seconds
+MAX_ACTIVE_SESSIONS = 1000
 
 
 def _get_user_info(user_id: str, user_manager: SupabaseUserManager) -> Dict[str, Any]:
@@ -179,6 +305,13 @@ def start_run(
     supabase_logger: SupabaseLogger = Depends(get_supabase_logger),
     user_manager: SupabaseUserManager = Depends(get_supabase_user_manager),
 ):
+    # Graceful degradation: check if server is at capacity
+    if len(RUN_STORE) >= MAX_ACTIVE_SESSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Server at capacity ({len(RUN_STORE)}/{MAX_ACTIVE_SESSIONS} active sessions). Please try again later."
+        )
+    
     _ensure_mode_choice(payload.mode, auth)
 
     # Map instance number to folder name
@@ -263,11 +396,26 @@ def start_run(
                 logging.warning(f"Failed to log step in modeC: {e}", exc_info=True)
         
         session._step_logging_callback = log_step_callback
+        
+        # Set up completion callback for modeC (to log game completion when async loop finishes)
+        def completion_callback(state: Dict[str, Any]) -> None:
+            try:
+                _maybe_persist(run_id, session, state, auth, supabase_logger)
+            except Exception as e:
+                logging.warning(f"Failed to persist game completion in modeC: {e}", exc_info=True)
+        
+        session._completion_callback = completion_callback
 
     # For modeB, trigger LLM proposal generation in the background
     # This allows the frontend to show OR recommendation and "thinking" state immediately
     if payload.mode == "modeB" and hasattr(session, "_trigger_llm_proposal_async"):
         background_tasks.add_task(session._trigger_llm_proposal_async)
+    
+    # For modeC, trigger auto-play loop in the background (creates its own async task)
+    # This allows the frontend to return immediately and poll for updates
+    if payload.mode == "modeC" and hasattr(session, "_trigger_modeC_auto_play_async"):
+        # Use BackgroundTasks to ensure proper async execution
+        background_tasks.add_task(session._trigger_modeC_auto_play_async)
 
     state = session.serialize_state()
     state.update({"run_id": run_id})
@@ -280,6 +428,117 @@ def get_run(run_id: str, auth: AuthContext = Depends(get_auth_context)):
     entry = _get_entry(run_id)
     _ensure_user_access(entry, auth)
     return entry.session.serialize_state()
+
+
+@app.get("/runs/{run_id}/llm-stream")
+async def stream_llm_updates(
+    run_id: str, 
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context)
+):
+    """Stream LLM generation updates via Server-Sent Events.
+    
+    This endpoint streams streaming_text updates while LLM is generating a proposal.
+    The connection closes automatically when the proposal is complete.
+    
+    Note: EventSource doesn't support custom headers, so user_id can be passed via
+    query parameter ?user_id=... as fallback.
+    """
+    entry = _get_entry(run_id)
+    
+    # Check query param as fallback (EventSource doesn't support headers)
+    # EventSource can't send custom headers, so we must use query parameter
+    query_user_id = request.query_params.get("user_id")
+    if query_user_id:
+        # Use query parameter user_id for EventSource requests
+        # Verify it matches the run owner
+        if entry.owner_id != query_user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Run owned by another user")
+    else:
+        # Fall back to header-based auth if no query param
+        _ensure_user_access(entry, auth)
+    session = entry.session
+    
+    async def event_generator():
+        last_streaming_text = ""
+        last_proposal_count = 0
+        last_period = session.current_day
+        last_proposal_periods = set()  # Track which periods have proposals
+        
+        while True:
+            # Check if run still exists
+            if run_id not in RUN_STORE:
+                break
+            
+            # Get current streaming text
+            streaming_text = session.get_streaming_text()
+            
+            # Get current period
+            current_period = session.current_day
+            
+            # Track proposals by period
+            proposal_periods = set()
+            for evt in session.transcript.events:
+                if evt.kind == "agent_proposal" and evt.payload:
+                    day = evt.payload.get("day")
+                    if day:
+                        proposal_periods.add(day)
+            
+            # Count proposals for current period
+            proposal_count = len([p for p in proposal_periods if p == current_period])
+            
+            # Send update if streaming text changed
+            if streaming_text != last_streaming_text:
+                yield f"data: {json.dumps({'streaming_text': streaming_text})}\n\n"
+                last_streaming_text = streaming_text
+            
+            # Send period completion notification when a new period gets a proposal
+            new_completed_periods = proposal_periods - last_proposal_periods
+            if new_completed_periods:
+                for period in sorted(new_completed_periods):
+                    yield f"data: {json.dumps({'period_complete': period, 'current_period': current_period})}\n\n"
+                last_proposal_periods = proposal_periods
+            
+            # Send period change notification (period advanced after completion)
+            if current_period != last_period:
+                # Period has advanced - this means the previous period completed
+                completed_period = last_period
+                # Send explicit period completion notification
+                yield f"data: {json.dumps({'period_complete': completed_period, 'current_period': current_period})}\n\n"
+                yield f"data: {json.dumps({'period_changed': current_period, 'previous_period': last_period, 'completed_period': completed_period})}\n\n"
+                last_period = current_period
+            
+            # Send notification when LLM proposal completes for a period
+            # This happens right after LLM finishes, before period advances
+            if proposal_count > last_proposal_count:
+                # LLM just finished for current period
+                yield f"data: {json.dumps({'llm_complete': True, 'period': current_period})}\n\n"
+                # Don't break - keep connection open for Mode C to track multiple periods
+                last_proposal_count = proposal_count
+            
+            # Close if game completed
+            if session.transcript.completed:
+                yield f"data: {json.dumps({'game_complete': True})}\n\n"
+                break
+            
+            # Close if streaming text is empty and we've been waiting (LLM finished without proposal)
+            if not streaming_text and last_streaming_text:
+                # Wait a bit to see if proposal appears
+                await asyncio.sleep(0.1)
+                if proposal_count == last_proposal_count:
+                    break
+            
+            await asyncio.sleep(0.05)  # Check every 50ms
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable buffering for nginx
+        }
+    )
 
 
 @app.get("/instances/{instance_num}/image")
@@ -444,6 +703,7 @@ class GuidancePayload(BaseModel):
 def submit_guidance(
     run_id: str,
     payload: GuidancePayload,
+    background_tasks: BackgroundTasks,
     auth: AuthContext = Depends(get_auth_context),
     supabase_logger: SupabaseLogger = Depends(get_supabase_logger),
 ):
@@ -498,7 +758,7 @@ def submit_guidance(
     else:
         session._step_logging_callback = None
 
-    result = session.submit_guidance(payload.message)
+    result = session.submit_guidance(payload.message, background_tasks)
     
     # Only persist when game is completed (non-blocking - don't fail if persistence fails)
     if result.get("completed"):
@@ -560,6 +820,76 @@ def _maybe_persist(
             )
         except Exception as e:
             logging.warning(f"Failed to log game completion to Supabase: {e}", exc_info=True)
+    else:
+        # Debug: log why completion wasn't logged
+        missing_fields = []
+        if not entry:
+            missing_fields.append("entry")
+        elif entry.user_index is None:
+            missing_fields.append("user_index")
+        elif not entry.user_uuid:
+            missing_fields.append("user_uuid")
+        elif not entry.instance:
+            missing_fields.append("instance")
+        logging.warning(
+            f"Game completion not logged for run {run_id} (mode={state.get('mode')}): "
+            f"missing fields: {', '.join(missing_fields)}"
+        )
+
+
+@app.get("/metrics")
+def get_metrics():
+    """Get server metrics for monitoring."""
+    cleaned = cleanup_expired_runs()  # Clean up expired runs when metrics are requested
+    
+    # Calculate request statistics
+    with _request_stats_lock:
+        request_times = _request_stats["request_times"].copy()
+        avg_time = sum(request_times) / len(request_times) if request_times else 0
+        max_time = max(request_times) if request_times else 0
+        min_time = min(request_times) if request_times else 0
+        
+        # Get top endpoints
+        top_endpoints = sorted(
+            _request_stats["requests_by_endpoint"].items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:10]
+    
+    return {
+        "active_sessions": len(RUN_STORE),
+        "max_active_sessions": MAX_ACTIVE_SESSIONS,
+        "memory_mb": round(get_memory_usage_mb(), 2),
+        "active_threads": get_active_thread_count(),
+        "run_store_ttl_hours": RUN_STORE_TTL / 3600,
+        "expired_runs_cleaned": cleaned,
+        "requests": {
+            "total": _request_stats["total_requests"],
+            "active": _request_stats["active_requests"],
+            "max_concurrent": _request_stats["max_active"],
+            "avg_response_time_ms": round(avg_time * 1000, 2),
+            "max_response_time_ms": round(max_time * 1000, 2),
+            "min_response_time_ms": round(min_time * 1000, 2),
+            "by_status": dict(_request_stats["requests_by_status"]),
+            "top_endpoints": [{"endpoint": k, "count": v} for k, v in top_endpoints],
+        },
+        "connection_limits": {
+            "max_active_sessions": MAX_ACTIVE_SESSIONS,
+            "note": "Browser limit: ~6 concurrent connections per domain. With 10 browsers: ~60 connections.",
+        },
+    }
+
+
+@app.get("/metrics/reset")
+def reset_metrics():
+    """Reset request statistics (for testing)."""
+    with _request_stats_lock:
+        _request_stats["total_requests"] = 0
+        _request_stats["max_active"] = 0
+        _request_stats["requests_by_endpoint"].clear()
+        _request_stats["requests_by_status"].clear()
+        _request_stats["request_times"].clear()
+    return {"message": "Metrics reset"}
 
 
 # Mount static files after all API routes to avoid conflicts
