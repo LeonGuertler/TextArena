@@ -472,7 +472,7 @@ class SimulationSession:
                 self._streaming_text = ""
     
     async def _run_until_pause_or_complete_async(self) -> None:
-        """Non-blocking version of _run_until_pause_or_complete with streaming support."""
+        """Non-blocking async auto-play loop for Mode C with streaming support."""
         loop = asyncio.get_event_loop()
         while not self.transcript.completed:
             # Yield control at the start of each iteration to allow FastAPI to handle GET requests
@@ -536,6 +536,9 @@ class SimulationSession:
 
             action_payload = json.dumps({"action": data.get("action", {})})
             
+            # Capture the period BEFORE advancing (so decision is logged for the same period as guidance)
+            decision_period = self.current_day
+            
             # Run _advance_with_vm_action in executor to avoid blocking event loop
             # This ensures FastAPI can handle GET requests during period advancement
             result = await loop.run_in_executor(None, self._advance_with_vm_action, action_payload)
@@ -550,7 +553,8 @@ class SimulationSession:
                 try:
                     action_dict = data.get("action", {})
                     # Get reward AFTER action is executed and logs are synced
-                    current_reward = self._running_reward if hasattr(self, "_running_reward") else 0.0
+                    # Use _get_current_total_reward() to ensure it matches final reward calculation
+                    current_reward = self._get_current_total_reward()
                     or_rec = self._or_recommendations if hasattr(self, "_or_recommendations") else None
                     
                     # Extract prompts
@@ -558,7 +562,7 @@ class SimulationSession:
                     output_prompt = data.get("rationale", "")
                     
                     self._step_logging_callback({
-                        "period": self.current_day,
+                        "period": decision_period,  # Use captured period (same as guidance period)
                         "inventory_decision": action_dict,
                         "total_reward": current_reward,
                         "input_prompt": input_prompt,
@@ -1092,101 +1096,6 @@ class SimulationSession:
         # Fallback for any other mode (shouldn't happen)
         return self.serialize_state()
 
-    def _run_until_pause_or_complete(self) -> None:
-        while not self.transcript.completed:
-            guidance_day = self._guidance_due_for_day(self.current_day)
-            if guidance_day is not None and guidance_day not in self._guidance_messages:
-                self._pending_guidance_day = guidance_day
-                # Get OR recommendation before pausing
-                if self._or_agent:
-                    self._update_or_recommendation()
-                print(f"\n{'='*70}")
-                print(f"Period {guidance_day} - WAITING FOR HUMAN GUIDANCE")
-                print(f"{'='*70}")
-                sys.stdout.flush()
-                break
-
-            # Get OR recommendation before LLM
-            if self._or_agent:
-                self._update_or_recommendation()
-
-            prompt = self._format_guided_prompt()
-            agent_output = self._agent(prompt)
-            cleaned = self._clean_json(agent_output)
-            try:
-                data = json.loads(cleaned)
-            except json.JSONDecodeError:
-                data = {"rationale": cleaned, "action": {}}
-            
-            # Print LLM decision for modeC
-            print(f"\n{'='*70}")
-            print(f"Period {self.current_day} - LLM AUTO-PLAY DECISION:")
-            print(f"{'='*70}")
-            
-            rationale = data.get("rationale", "")
-            if rationale:
-                print(f"\nLLM Rationale:")
-                print(f"{rationale}")
-            
-            action = data.get("action", {})
-            if action:
-                print(f"\nLLM Action:")
-                for item_id, qty in action.items():
-                    or_rec = self._or_recommendations.get(item_id, "N/A") if self._or_recommendations else "N/A"
-                    print(f"  {item_id}: {qty} units (OR recommended: {or_rec})")
-            
-            carry_over = data.get("carry_over_insight", "")
-            if carry_over:
-                print(f"\nCarry-over Insight: {carry_over}")
-            else:
-                print(f"\nCarry-over Insight: (empty)")
-            
-            print(f"{'='*70}")
-            sys.stdout.flush()
-            
-            self._store_carry_over_insight(self.current_day, data.get("carry_over_insight"))
-            self.transcript.append(
-                "agent_proposal", {"day": self.current_day, "content": data}
-            )
-
-            action_payload = json.dumps({"action": data.get("action", {})})
-            result = self._advance_with_vm_action(action_payload)
-            
-            # Ensure logs are synced after period completes
-            self._sync_ui_daily_logs()
-            
-            # Log this step AFTER action is executed and reward is updated
-            # This ensures we log the reward AFTER the action, not before
-            if self._step_logging_callback:
-                try:
-                    action_dict = data.get("action", {})
-                    # Get reward AFTER action is executed and logs are synced
-                    current_reward = self._running_reward if hasattr(self, "_running_reward") else 0.0
-                    or_rec = self._or_recommendations if hasattr(self, "_or_recommendations") else None
-                    
-                    # Extract prompts
-                    input_prompt = prompt  # The formatted prompt sent to LLM
-                    output_prompt = data.get("rationale", "")
-                    
-                    self._step_logging_callback({
-                        "period": self.current_day,
-                        "inventory_decision": action_dict,
-                        "total_reward": current_reward,
-                        "input_prompt": input_prompt,
-                        "output_prompt": output_prompt,
-                        "or_recommendation": or_rec,
-                    })
-                except Exception as e:
-                    # Don't fail the game if logging fails
-                    print(f"Warning: Failed to log step: {e}", file=sys.stderr)
-                    sys.stderr.flush()
-            if isinstance(result, dict) and result.get("completed"):
-                break
-            if self.transcript.completed:
-                break
-            if self._pending_guidance_day is not None:
-                break
-
     def _format_guided_prompt(self) -> str:
         lines = ["CURRENT OBSERVATION:", self._observation.strip(), ""]
         
@@ -1298,6 +1207,23 @@ class SimulationSession:
     def _reset_ui_tracking(self) -> None:
         self._ui_daily_logs.clear()
         self._running_reward = 0.0
+
+    def _get_current_total_reward(self) -> float:
+        """Get current total reward by summing all daily_logs from environment.
+        This matches the calculation used in _finalize_session() to ensure consistency."""
+        # Try to get logs from base environment (unwrap wrappers)
+        env_logs = getattr(self._base_env, "daily_logs", None)
+        
+        # Fallback: try getting from wrapped env if base_env doesn't have it
+        if not env_logs:
+            env_logs = getattr(self._env, "daily_logs", None)
+        
+        if not env_logs:
+            return self._running_reward if hasattr(self, "_running_reward") else 0.0
+        
+        # Calculate total reward by summing all daily_logs (same as environment does)
+        total_reward = sum(float(log.get("daily_reward", 0.0)) for log in env_logs)
+        return total_reward
 
     def _sync_ui_daily_logs(self) -> None:
         # Try to get logs from base environment (unwrap wrappers)

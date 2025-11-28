@@ -653,21 +653,29 @@ def submit_final_action(
         # If parsing fails, try to extract from the raw string
         action_dict = {}
     
-    # Get current period and reward
+    # Get current period BEFORE submitting (period doesn't change until after action)
     current_period = session.current_day
-    current_reward = session._running_reward if hasattr(session, "_running_reward") else 0.0
     
-    # Get OR recommendation
+    # Get OR recommendation BEFORE submitting (it might change after action)
     or_recommendation = session._or_recommendations if hasattr(session, "_or_recommendations") else None
     
-    # Extract prompts
+    # Extract prompts BEFORE submitting (from current period's LLM proposal)
     prompts = _extract_prompts_from_transcript(session, current_period)
     
+    # Submit the final decision (this executes the action and advances the game)
     result = session.submit_final_decision(payload.action_json)
     
-    # Log the step (non-blocking - don't fail if logging fails)
+    # Log the step AFTER action is executed and reward is updated
+    # This ensures we log the reward AFTER the action, matching the final reward
     if entry.user_index is not None and entry.user_uuid and entry.instance:
         try:
+            # Get reward AFTER action is executed using the same calculation as final reward
+            if hasattr(session, "_get_current_total_reward"):
+                current_reward = session._get_current_total_reward()
+            else:
+                # Fallback if method doesn't exist
+                current_reward = session._running_reward if hasattr(session, "_running_reward") else 0.0
+            
             supabase_logger.log_step(
                 user_index=entry.user_index,
                 user_uuid=entry.user_uuid,
