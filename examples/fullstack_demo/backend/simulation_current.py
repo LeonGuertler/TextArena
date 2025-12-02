@@ -305,8 +305,9 @@ class SimulationSession:
             raise RuntimeError("Final action only available in Mode A and B")
         if self._pid != 0:
             raise RuntimeError("Not waiting for VM turn")
-        action_dict, carry_memo = self._parse_action_json(action_json)
-        self._store_carry_over_insight(self.current_day, carry_memo)
+        action_dict, carry_memo, memo_provided = self._parse_action_json(action_json)
+        if memo_provided:
+            self._store_carry_over_insight(self.current_day, carry_memo)
         payload = json.dumps({"action": action_dict})
         
         # Print human decision to terminal
@@ -1130,14 +1131,17 @@ class SimulationSession:
             cleaned = cleaned.strip("`")
         return cleaned.strip()
 
-    def _parse_action_json(self, action_json: str) -> Tuple[Dict[str, int], Optional[str]]:
+    def _parse_action_json(self, action_json: str) -> Tuple[Dict[str, int], Optional[str], bool]:
         cleaned = self._clean_json(action_json)
         data = json.loads(cleaned)
         memo: Optional[str] = None
+        memo_provided = False
         if isinstance(data, dict):
-            memo_val = data.get("carry_over_insight")
-            if isinstance(memo_val, str):
-                memo = memo_val.strip() or None
+            if "carry_over_insight" in data:
+                memo_provided = True
+                memo_val = data.get("carry_over_insight")
+                if isinstance(memo_val, str):
+                    memo = memo_val.strip() or None
         if isinstance(data, dict) and "action" in data and isinstance(data["action"], dict):
             action_dict = data["action"]
         elif isinstance(data, dict):
@@ -1149,7 +1153,7 @@ class SimulationSession:
             if not isinstance(quantity, (int, float)) or quantity < 0:
                 raise ValueError(f"Invalid quantity for {item_id}: {quantity}")
             result[item_id] = int(quantity)
-        return result, memo
+        return result, memo, memo_provided
 
     def _finalize_session(self) -> Dict[str, Any]:
         self._sync_ui_daily_logs()
