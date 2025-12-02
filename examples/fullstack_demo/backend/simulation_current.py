@@ -68,33 +68,20 @@ class SimulationTranscript:
             self.events.append(TranscriptEvent(kind=kind, payload=payload))
 
 
-DAY_CONCLUDED_PATTERN = re.compile(
-    r'^(\s*(?:Day|Period)\s+(\d+)\s+conclud(?:e|ed):)(.*)$',
-    re.IGNORECASE
-)
-
-
 def _inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> str:
     if not insights:
         return observation
-
-    lines = observation.splitlines()
-    augmented: List[str] = []
-
-    for line in lines:
-        match = DAY_CONCLUDED_PATTERN.match(line)
-        if match:
-            day_num = int(match.group(2))
-            memo = insights.get(day_num)
-            if memo:
-                if "Insight:" in match.group(3):
-                    augmented.append(line)
-                else:
-                    augmented.append(f"{match.group(1)}{match.group(3)} | Insight: {memo}")
-                continue
-        augmented.append(line)
-
-    return "\n".join(augmented)
+    sorted_insights = sorted(insights.items())
+    header_lines = [
+        "=" * 70,
+        "CARRY-OVER INSIGHTS (Key Discoveries):",
+        "=" * 70,
+    ]
+    for period_num, memo in sorted_insights:
+        header_lines.append(f"Period {period_num}: {memo}")
+    header_lines.append("=" * 70)
+    header = "\n".join(header_lines) + "\n\n"
+    return header + observation
 
 
 def _make_base_agent(
