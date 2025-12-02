@@ -591,28 +591,14 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "Note: There is always a 1-period observation delay between when orders physically arrive\n"
         "and when you can observe the arrival in the 'conclude' message.\n"
         "\n"
-        "=== PERIOD TIMELINE TABLE ===\n"
-        "Understanding observation timing (example with Lead Time = 1):\n"
-        "┌─────────┬──────────────────────────────┬────────────────────────────┐\n"
-        "│ Period  │ VM Decision Phase            │ Resolution Phase           │\n"
-        "├─────────┼──────────────────────────────┼────────────────────────────┤\n"
-        "│ Period 1│ • You place order: 100 units │ • Arrivals: 0              │\n"
-        "│         │ • You see: (no history yet)  │ • Demand satisfied         │\n"
-        "│         │ • OR recommends: X units     │ • Logged: 'Period 1        │\n"
-        "│         │                              │   conclude: arrived=0'     │\n"
-        "├─────────┼──────────────────────────────┼────────────────────────────┤\n"
-        "│ Period 2│ • You see: 'Period 1         │ • Arrivals: 100            │\n"
-        "│         │   conclude: arrived=0'       │   (your Period 1 order)    │\n"
-        "│         │ • You place order: 120 units │ • Demand satisfied         │\n"
-        "│         │ • OR recommends: Y units     │ • Logged: 'Period 2        │\n"
-        "│         │                              │   conclude: arrived=100'   │\n"
-        "├─────────┼──────────────────────────────┼────────────────────────────┤\n"
-        "│ Period 3│ • You see: 'Period 2         │ • Arrivals: 120            │\n"
-        "│         │   conclude: arrived=100'     │   (your Period 2 order)    │\n"
-        "│         │ • Confirmation: Period 1     │ • Demand satisfied         │\n"
-        "│         │   order arrived Period 2     │ • Logged: 'Period 3        │\n"
-        "│         │   → Lead time = 1            │   conclude: arrived=120'   │\n"
-        "└─────────┴──────────────────────────────┴────────────────────────────┘\n"
+        "=== PERIOD TIMELINE EXAMPLE (LEAD TIME = 1) ===\n"
+        "A plain-language walkthrough clarifies what you can observe:\n"
+        "• Period 1 decision: you read no history yet, see the OR recommendation, and place your order. Arrivals/demand are resolved afterward but their summary is hidden until the next period.\n"
+        "• At the start of Period 2 you finally read \"Period 1 conclude\", which might include a line such as \"arrived=100 (ordered on Period 1, lead_time was 1 periods)\". That text is the canonical source of truth about actual lead time. You now decide Period 2’s order.\n"
+        "• The shipment ordered in Period 2 lands during the resolution between Period 2 and 3, yet you only learn the outcome when \"Period 2 conclude\" appears at the start of Period 3.\n"
+        "• Every decision therefore sees exactly one concluded period behind it; the current period’s arrivals are never visible until the following decision.\n"
+        "\n"
+        "Because of this cadence, the only confirmed lead-time evidence comes from those conclude lines. An order placed in Period Z can first appear in \"Period Z+W conclude\", where W is the true lead time (W might be 0, which would let it show up in the same period). Thus when you read \"Period N conclude: arrived=0\" it simply means nothing due to land in Period N actually arrived—it says nothing yet about the order you just placed unless the real lead time were 0. If the promised lead time passes and no conclude ever mentions that shipment, it remains unresolved and might be delayed or lost. Lost orders never produce a conclude record and stay counted in \"In-transit\" forever, so only a prolonged absence across multiple periods lets you infer a loss.\n"
         "\n"
         "=== KEY IMPLICATIONS ===\n"
         "- When deciding for Period N, you see 'Period N-1 conclude' message\n"
@@ -848,17 +834,14 @@ def main():
     print(f"Note: OR uses promised lead time for recommendations. Actual lead times in CSV may differ.")
     print(f"      LLM must infer actual lead time from arrivals and adjust OR recommendations accordingly.")
     
-    # Set NUM_DAYS based on CSV (each period = 14 days)
-    from textarena.envs.VendingMachine import env as vm_env_module
-    original_num_days = vm_env_module.NUM_DAYS
-    original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
-    vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
-    num_periods = csv_player.get_num_periods()
+    # Determine number of periods to run (each period = 14 days)
+    total_periods = csv_player.get_num_periods()
+    num_periods = total_periods
     if args.max_periods is not None:
-        num_periods = min(args.max_periods, num_periods)
-    vm_env_module.NUM_DAYS = num_periods
-    print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} periods based on CSV" + 
-          (f" (limited from {csv_player.get_num_periods()})" if args.max_periods is not None else ""))
+        num_periods = min(args.max_periods, total_periods)
+        print(f"Limiting run to {num_periods} periods (CSV has {total_periods})")
+    else:
+        print(f"Running full CSV horizon: {num_periods} periods")
     
     # Create OR agent (for recommendations only - uses promised lead time)
     or_items_config = {
@@ -898,8 +881,8 @@ def main():
     else:
         vm_agent = base_agent
     
-    # Reset environment
-    env.reset(num_players=2)
+    # Reset environment with explicit horizon
+    env.reset(num_players=2, num_days=num_periods, initial_inventory_per_item=0)
     
     # Run game
     done = False
@@ -1095,11 +1078,6 @@ def main():
     print(f"VM Final Reward: {rewards.get(0, 0):.2f}")
     print("="*60)
     
-    # Restore original NUM_DAYS
-    vm_env_module.NUM_DAYS = original_num_days
-    vm_env_module.INITIAL_INVENTORY_PER_ITEM = original_initial_inventory
-
-
 if __name__ == "__main__":
     main()
 

@@ -150,7 +150,8 @@ def run_script(script_path: str, instance_id: str, run_num: int, script_name: st
 def get_all_instances() -> List[str]:
     """Get all instance IDs from H&M_instances directory."""
     # Only test these specific instances
-    target_instances = ["706016001", "568601006", "599580017"]
+    #target_instances = ["706016001", "568601006"]
+    target_instances = ["599580017"]
     
     instances = []
     if not H_M_INSTANCES_DIR.exists():
@@ -218,7 +219,7 @@ def benchmark_all(max_periods=None, max_workers=None):
                     for run_num in range(1, NUM_RUNS + 1):
                         all_llm_tasks.append((
                             str(script_full_path), instance_id, run_num, script_name, 
-                            1, max_periods, str(BASE_DIR), str(H_M_INSTANCES_DIR)
+                            0, max_periods, str(BASE_DIR), str(H_M_INSTANCES_DIR)
                         ))
     
     # Run all LLM scripts in parallel
@@ -279,7 +280,7 @@ def benchmark_all(max_periods=None, max_workers=None):
             completed_runs += 1
             print(f"  Run {run_num}/{NUM_RUNS} ({completed_runs}/{total_runs})...", end=" ", flush=True)
             
-            reward, error, output = run_script(str(script_full_path), instance_id, run_num, script_name, 1, max_periods)
+            reward, error, output = run_script(str(script_full_path), instance_id, run_num, script_name, 0, max_periods)
             
             if error:
                 print(f"ERROR: {error}")

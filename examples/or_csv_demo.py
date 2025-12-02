@@ -578,17 +578,14 @@ def main():
     print(f"Promised lead time (used by OR algorithm): {args.promised_lead_time} periods (1 period = 14 days)")
     print(f"Note: Actual lead times in CSV may differ, creating a test scenario for OR robustness.")
     
-    # Set NUM_DAYS based on CSV (each period = 14 days)
-    from textarena.envs.VendingMachine import env as vm_env_module
-    original_num_days = vm_env_module.NUM_DAYS
-    original_initial_inventory = vm_env_module.INITIAL_INVENTORY_PER_ITEM
-    vm_env_module.INITIAL_INVENTORY_PER_ITEM = 0
-    num_periods = csv_player.get_num_periods()
+    # Determine number of periods to run (each period = 14 days)
+    total_periods = csv_player.get_num_periods()
+    num_periods = total_periods
     if args.max_periods is not None:
-        num_periods = min(args.max_periods, num_periods)
-    vm_env_module.NUM_DAYS = num_periods
-    print(f"Set NUM_DAYS to {vm_env_module.NUM_DAYS} periods based on CSV" + 
-          (f" (limited from {csv_player.get_num_periods()})" if args.max_periods is not None else ""))
+        num_periods = min(args.max_periods, total_periods)
+        print(f"Limiting run to {num_periods} periods (CSV has {total_periods})")
+    else:
+        print(f"Running full CSV horizon: {num_periods} periods")
     
     # Create OR agent (uses promised lead time, not actual CSV lead time)
     or_items_config = {
@@ -601,8 +598,8 @@ def main():
     }
     or_agent = ORAgent(or_items_config, initial_samples, policy=args.policy)
     
-    # Reset environment
-    env.reset(num_players=2)
+    # Reset environment with explicit horizon
+    env.reset(num_players=2, num_days=num_periods, initial_inventory_per_item=0)
     
     # Run game
     done = False
@@ -728,11 +725,6 @@ def main():
     print(f"VM Final Reward: {rewards.get(0, 0):.2f}")
     print("="*60)
     
-    # Restore original NUM_DAYS
-    vm_env_module.NUM_DAYS = original_num_days
-    vm_env_module.INITIAL_INVENTORY_PER_ITEM = original_initial_inventory
-
-
 if __name__ == "__main__":
     main()
 
