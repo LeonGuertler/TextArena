@@ -68,7 +68,10 @@ class SimulationTranscript:
             self.events.append(TranscriptEvent(kind=kind, payload=payload))
 
 
-DAY_CONCLUDED_PATTERN = re.compile(r'^(\s*Day\s+(\d+)\s+concluded:)(.*)$')
+DAY_CONCLUDED_PATTERN = re.compile(
+    r'^(\s*(?:Day|Period)\s+(\d+)\s+conclud(?:e|ed):)(.*)$',
+    re.IGNORECASE
+)
 
 
 def _inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> str:
