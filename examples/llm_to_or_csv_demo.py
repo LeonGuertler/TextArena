@@ -974,18 +974,29 @@ def main():
             exact_date = csv_player.get_exact_date(current_period)
             
             # Inject exact date into observation's CURRENT STATUS section
-            observation = observation.replace(
-                f"PERIOD {current_period} / ",
-                f"PERIOD {current_period} (Date: {exact_date}) / "
+            # Format is "PERIOD N / TOTAL", use robust regex (case-insensitive, flexible whitespace)
+            import re
+            period_pattern = re.compile(
+                rf'PERIOD\s+{current_period}\s+/\s+\d+',
+                re.IGNORECASE
+            )
+            observation = period_pattern.sub(
+                f'PERIOD {current_period} (Date: {exact_date}) / {csv_player.get_num_periods()}',
+                observation
             )
             
             # Inject exact dates into GAME HISTORY section
-            if "=== GAME HISTORY ===" in observation:
+            if "=== GAME HISTORY ===" in observation or "GAME HISTORY" in observation:
                 for p in range(1, current_period):
                     p_date = csv_player.get_exact_date(p)
-                    observation = observation.replace(
-                        f"Period {p} conclude:",
-                        f"Period {p} (Date: {p_date}) conclude:"
+                    # Use robust regex (case-insensitive, flexible whitespace)
+                    history_pattern = re.compile(
+                        rf'Period\s+{p}\s+conclude:',
+                        re.IGNORECASE
+                    )
+                    observation = history_pattern.sub(
+                        f'Period {p} (Date: {p_date}) conclude:',
+                        observation
                     )
             
             observation = _normalize_timeline_terms(observation)

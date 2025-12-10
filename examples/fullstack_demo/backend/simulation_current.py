@@ -68,6 +68,43 @@ class SimulationTranscript:
             self.events.append(TranscriptEvent(kind=kind, payload=payload))
 
 
+def _inject_exact_dates(observation: str, current_period: int, csv_player) -> str:
+    """
+    Inject exact dates into observation using robust regex matching.
+    
+    Handles:
+    - CURRENT STATUS: "PERIOD N / TOTAL" -> "PERIOD N (Date: {date}) / TOTAL"
+    - GAME HISTORY: "Period X conclude:" -> "Period X (Date: {date}) conclude:"
+    """
+    import re
+    
+    # Inject current period date into CURRENT STATUS section
+    # Match "PERIOD N / TOTAL" where N is current_period
+    period_pattern = re.compile(rf'PERIOD\s+{current_period}\s+/\s+\d+', re.IGNORECASE)
+    exact_date = csv_player.get_exact_date(current_period)
+    total_periods = csv_player.get_num_periods()
+    observation = period_pattern.sub(
+        f'PERIOD {current_period} (Date: {exact_date}) / {total_periods}',
+        observation
+    )
+    
+    # Inject dates into GAME HISTORY section for all past periods
+    if "=== GAME HISTORY ===" in observation or "GAME HISTORY" in observation:
+        for p in range(1, current_period):
+            p_date = csv_player.get_exact_date(p)
+            # Match "Period X conclude:" (case-insensitive, flexible whitespace)
+            history_pattern = re.compile(
+                rf'Period\s+{p}\s+conclude:',
+                re.IGNORECASE
+            )
+            observation = history_pattern.sub(
+                f'Period {p} (Date: {p_date}) conclude:',
+                observation
+            )
+    
+    return observation
+
+
 def _inject_carry_over_insights(observation: str, insights: Dict[int, str]) -> str:
     if not insights:
         return observation
@@ -183,6 +220,7 @@ class SimulationSession:
         # Ensure day 1 item configurations reflect CSV
         self._apply_day_item_configs(self.current_day)
         self._pid, initial_observation = self._env.get_observation()
+        initial_observation = _inject_exact_dates(initial_observation, self.current_day, self.csv_player)
         self._observation = _inject_carry_over_insights(initial_observation, self._carry_over_insights)
         if self._pid != 0:
             raise RuntimeError("VM should act first")
@@ -1004,6 +1042,7 @@ class SimulationSession:
             return self._finalize_session()
 
         self._pid, next_observation = self._env.get_observation()
+        next_observation = _inject_exact_dates(next_observation, self.current_day, self.csv_player)
         self._observation = _inject_carry_over_insights(next_observation, self._carry_over_insights)
         if self._pid != 1:
             raise RuntimeError("Expected demand turn after VM action")
@@ -1038,6 +1077,7 @@ class SimulationSession:
         # Apply new day item configurations before fetching the next observation
         self._apply_day_item_configs(self.current_day)
         self._pid, next_observation = self._env.get_observation()
+        next_observation = _inject_exact_dates(next_observation, self.current_day, self.csv_player)
         self._observation = _inject_carry_over_insights(next_observation, self._carry_over_insights)
         self.transcript.append(
             "observation", {"day": self.current_day, "content": self._observation}
