@@ -419,9 +419,7 @@ class SimulationSession:
 
         self.transcript.append("initial_samples", {"samples": self._initial_samples})
 
-        # News功能已移除 - H&M数据集没有news列
-        # for day, news in self.csv_player.get_news_schedule().items():
-        #     self._env.add_news(day, news)
+    
 
         self._env.reset(num_players=2, num_days=self._total_days, initial_inventory_per_item=0)
         self._reset_ui_tracking()

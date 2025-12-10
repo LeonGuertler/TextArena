@@ -327,7 +327,7 @@ def start_run(
     # Construct paths to H&M instance based on instance number
     backend_dir = Path(__file__).resolve().parent
     examples_dir = backend_dir.parent.parent
-    instance_dir = examples_dir / "H&M_instances" / instance_folder
+    instance_dir = examples_dir / "H&M_instances" / "biweely_H&M_instances" / instance_folder
     test_csv_path = instance_dir / "test.csv"
     train_csv_path = instance_dir / "train.csv"
     
@@ -557,7 +557,7 @@ def get_instance_image(instance_num: int):
     instance_folder = instance_folders[instance_num]
     backend_dir = Path(__file__).resolve().parent
     examples_dir = backend_dir.parent.parent
-    instance_dir = examples_dir / "H&M_instances" / instance_folder
+    instance_dir = examples_dir / "H&M_instances" / "biweely_H&M_instances" / instance_folder
     image_path = instance_dir / "image.jpg"
     
     if not image_path.exists():
@@ -582,7 +582,7 @@ def get_instance_description(instance_num: int):
     instance_folder = instance_folders[instance_num]
     backend_dir = Path(__file__).resolve().parent
     examples_dir = backend_dir.parent.parent
-    instance_dir = examples_dir / "H&M_instances" / instance_folder
+    instance_dir = examples_dir / "H&M_instances" / "biweely_H&M_instances" / instance_folder
     description_path = instance_dir / "description.csv"
     
     if not description_path.exists():
