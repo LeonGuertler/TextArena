@@ -5,7 +5,7 @@ This demo uses:
 - LLM Agent: Analyzes game state and proposes OR algorithm parameters (L, mu_hat, sigma_hat)
 - OR Calculator: Uses LLM-proposed parameters to compute optimal orders
 
-The LLM evaluates current conditions (inventory, news, demand patterns) and
+The LLM evaluates current conditions (inventory, demand patterns) and
 selects appropriate parameter estimation methods or explicit values. The backend
 then computes orders using the standard OR base-stock formula.
 
@@ -185,7 +185,7 @@ class CSVDemandPlayer:
         # Extract exact dates for each item
         self.dates = self._extract_dates()
         
-        print(f"Loaded CSV with {len(self.df)} periods of demand data (14-day periods)")
+        print(f"Loaded CSV with {len(self.df)} periods of demand data")
         print(f"Detected {len(self.item_ids)} items: {self.item_ids}")
         if self.dates:
             print(f"Date range: {self.dates[0]} to {self.dates[-1]}")
@@ -634,6 +634,29 @@ def robust_parse_json(text: str) -> dict:
     cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
     cleaned = re.sub(r'\s*```$', '', cleaned)
     
+    # Step 1.5: Fix invalid escape sequences in JSON strings
+    # JSON only supports: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
+    # Fix common invalid escapes:
+    # - \$ -> $ (dollar sign doesn't need escaping in JSON)
+    # - \xXX -> convert to \u00XX (hex escape to unicode escape)
+    def fix_invalid_escapes(text):
+        # Fix \$ -> $ (but not \\$ which is a literal backslash followed by $)
+        text = re.sub(r'(?<!\\)\\\$', '$', text)
+        # Fix \xXX -> \u00XX (convert hex escapes to unicode escapes)
+        def hex_to_unicode(match):
+            hex_val = match.group(1)
+            try:
+                # Convert hex to unicode code point
+                code_point = int(hex_val, 16)
+                # Convert to \uXXXX format
+                return f'\\u{code_point:04X}'
+            except ValueError:
+                return match.group(0)  # Keep original if invalid
+        text = re.sub(r'\\x([0-9a-fA-F]{2})', hex_to_unicode, text)
+        return text
+    
+    cleaned = fix_invalid_escapes(cleaned)
+    
     # Step 2: Try direct parse first
     try:
         return json.loads(cleaned)
@@ -644,6 +667,8 @@ def robust_parse_json(text: str) -> dict:
     # Pattern 1: "value": number" -> "value": number (handles cases like "value": 15.739624" or "value": 17.606")
     # This also handles cases without space: "value":15.739624" or "value":15.739624"}}
     repaired = re.sub(r'"value"\s*:\s*([+-]?\d+\.?\d*)"([,}\s\]])', r'"value": \1\2', cleaned)
+    # Also fix invalid escapes in repaired version
+    repaired = fix_invalid_escapes(repaired)
     
     # Pattern 2: More aggressive - fix any numeric value followed by quote before closing brace/bracket
     # Handles: "value": number"}} or "value": number"}
@@ -851,7 +876,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "  (L+1 because current period's demand occurs after your decision)\n"
         "\n"
         "=== ENVIRONMENT SNAPSHOT ===\n"
-        "- Period information and full history are provided; there is no ongoing news feed.\n"
+        "- Period information and full history are provided.\n"
         "- Calendar dates and product descriptions may or may not be provided in context.\n"
         "- When dates are available, ACTIVELY apply calendar + world knowledge:\n"
         "  * Identify major retail/cultural calendar events\n"
@@ -867,7 +892,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "    base_stock = μ̂ + z*·σ̂,  where z* = Φ⁻¹(q) and q = profit / (profit + holding_cost).\n"
         "- It always runs the capped policy: final order = min(base_stock − pipeline_inventory, cap), "
         "with cap = μ̂/(1+L) + Φ⁻¹(0.95)·σ̂/√(1+L).\n"
-        "- The OR engine only knows the promised lead time and historical demand statistics; it has no awareness of news, lost orders, or actual lead-time shifts. "
+        "- The OR engine only knows the promised lead time and historical demand statistics; it has no awareness of lost orders, or actual lead-time shifts. "
         "Your parameters must bridge that gap.\n"
         "\n"
         "=== LEAD-TIME INFERENCE (for L parameter) ===\n"
@@ -928,7 +953,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "   • default → (1+L) × mean of all samples.\n"
         "   • recent_N → (1+L) × mean of last N samples (N chosen per detected regime).\n"
         "   • EWMA_gamma → (1+L) × exponentially weighted mean (specify gamma ∈ [0,1]).\n"
-        "   • explicit → (1+L) × your forecast based on news/seasonality.\n"
+        "   • explicit → (1+L) × your forecast based on seasonality.\n"
         "3. sigma_hat:\n"
         "   • default → sqrt(1+L) × std of all samples.\n"
         "   • recent_N → sqrt(1+L) × std of last N samples.\n"
@@ -943,9 +968,9 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
     
     system += (
         "=== DECISION CHECKLIST ===\n"
-        "1. Summarize current date/news + demand context in your rationale.\n"
+        "1. Summarize current date + demand context in your rationale.\n"
         "2. Reconcile on-hand + pipeline against the orders you expect; flag overdue shipments or losses.\n"
-        "3. Decide how to set L, μ̂, σ̂ (method + parameters) based on detected changepoints or news-driven forecasts.\n"
+        "3. Decide how to set L, μ̂, σ̂ (method + parameters) based on detected changepoints.\n"
         "4. Explain how your parameters help the OR backend balance service level vs. holding cost.\n"
         "\n"
         "=== CARRY-OVER INSIGHTS ===\n"
@@ -956,7 +981,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "=== OUTPUT FORMAT ===\n"
         "Return valid JSON only:\n"
         "{\n"
-        '  "rationale": "Explain current context, changepoint evidence, chosen methods/values, and how they address news or missing shipments.",\n'
+        '  "rationale": "Explain current context, changepoint evidence, chosen methods/values, and how they address missing shipments.",\n'
         '  "carry_over_insight": "Summaries of NEW sustained changes with evidence, or \\"\\".",\n'
         '  "parameters": {\n'
         f'    "{primary_item}": {{\n'
@@ -1026,7 +1051,7 @@ def main():
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
     parser.add_argument('--promised-lead-time', type=int, default=0,
-                       help='Promised lead time to show to LLM in periods (default: 0, where 1 period = 14 days). This is what supplier promises, not the actual lead time in CSV.')
+                       help='Promised lead time to show to LLM in periods (default: 0). This is what supplier promises, not the actual lead time in CSV.')
     parser.add_argument('--human-feedback', action='store_true',
                        help='Enable periodic human feedback on agent decisions (Mode 1)')
     parser.add_argument('--guidance-frequency', type=int, default=0,
@@ -1091,10 +1116,10 @@ def main():
         initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
         print(f"\nUsing default unified initial samples: {unified_samples}")
     
-    print(f"Promised lead time (shown to LLM): {args.promised_lead_time} periods (1 period = 14 days)")
+    print(f"Promised lead time (shown to LLM): {args.promised_lead_time} periods")
     print(f"Note: Actual lead times in CSV may differ and will be inferred by LLM from arrivals.")
     
-    # Determine number of periods to run (each period = 14 days)
+    # Determine number of periods to run
     total_periods = csv_player.get_num_periods()
     num_periods = total_periods
     if args.max_periods is not None:
@@ -1249,12 +1274,6 @@ def main():
                 else:
                     carry_memo = None
                 
-                if carry_memo:
-                    carry_over_insights[current_period] = carry_memo
-                    _safe_print(f"\nCarry-over insight: {carry_memo}")
-                else:
-                    if current_period in carry_over_insights:
-                        del carry_over_insights[current_period]
                 if carry_memo:
                     carry_over_insights[current_period] = carry_memo
                     _safe_print(f"\nCarry-over insight: {carry_memo}")

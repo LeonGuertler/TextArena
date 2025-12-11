@@ -183,7 +183,7 @@ class CSVDemandPlayer:
         # Extract exact dates for each item
         self.dates = self._extract_dates()
         
-        print(f"Loaded CSV with {len(self.df)} periods of demand data (14-day periods)")
+        print(f"Loaded CSV with {len(self.df)} periods of demand data")
         print(f"Detected {len(self.item_ids)} items: {self.item_ids}")
         if self.dates:
             print(f"Date range: {self.dates[0]} to {self.dates[-1]}")
@@ -620,7 +620,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "  (L+1 because current period's demand occurs after your decision)\n"
         "\n"
         "=== ENVIRONMENT SNAPSHOT ===\n"
-        "- Period information and full history are provided; there is no ongoing news feed.\n"
+        "- Period information and full history are provided.\n"
         "- Calendar dates and product descriptions may or may not be provided in context.\n"
         "- When dates are available, ACTIVELY apply calendar + world knowledge:\n"
         "  * Identify major retail/cultural calendar events\n"
@@ -786,7 +786,7 @@ def main():
     parser.add_argument('--demand-file', type=str, required=True,
                        help='Path to CSV file with demand data')
     parser.add_argument('--promised-lead-time', type=int, default=0,
-                       help='Promised lead time used by OR and shown to LLM in periods (default: 0, where 1 period = 14 days). Actual lead time in CSV may differ.')
+                       help='Promised lead time used by OR and shown to LLM in periods (default: 0). Actual lead time in CSV may differ.')
     parser.add_argument('--human-feedback', action='store_true',
                        help='Enable periodic human feedback on agent decisions (Mode 1)')
     parser.add_argument('--guidance-frequency', type=int, default=0,
@@ -851,11 +851,11 @@ def main():
         initial_samples = {item_id: unified_samples.copy() for item_id in csv_player.get_item_ids()}
         print(f"\nUsing default unified initial samples: {unified_samples}")
     
-    print(f"Promised lead time (used by OR, shown to LLM): {args.promised_lead_time} periods (1 period = 14 days)")
+    print(f"Promised lead time (used by OR, shown to LLM): {args.promised_lead_time} periods")
     print(f"Note: OR uses promised lead time for recommendations. Actual lead times in CSV may differ.")
     print(f"      LLM must infer actual lead time from arrivals and adjust OR recommendations accordingly.")
     
-    # Determine number of periods to run (each period = 14 days)
+    # Determine number of periods to run
     total_periods = csv_player.get_num_periods()
     num_periods = total_periods
     if args.max_periods is not None:
