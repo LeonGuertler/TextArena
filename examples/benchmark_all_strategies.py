@@ -45,20 +45,21 @@ BASE_DIR = Path(__file__).parent.parent
 
 def extract_reward_from_output(output: str) -> float:
     """Extract total reward from script output."""
-    # Pattern to match: >>> Total Reward: $1234.56 <<<
+    # Pattern to match: >>> Total Reward: $1234.56 <<< or $-123.45 <<<
     # or variations like "Total Reward (OR Baseline): $1234.56"
+    # Note: Must handle negative numbers correctly!
     patterns = [
-        r">>>\s*Total Reward[^:]*:\s*\$([\d,]+\.?\d*)\s*<<<",  # With >>> ... <<<
-        r"Total Reward[^:]*:\s*\$([\d,]+\.?\d*)",  # Without >>> ... <<<
-        r"VM Final Reward:\s*([\d,]+\.?\d*)",  # Fallback to VM Final Reward
+        r">>>\s*Total Reward[^:]*:\s*\$(-?\s*[\d,]+\.?\d*)\s*<<<",  # With >>> ... <<< (supports negative)
+        r"Total Reward[^:]*:\s*\$(-?\s*[\d,]+\.?\d*)",  # Without >>> ... <<< (supports negative)
+        r"VM Final Reward:\s*(-?\s*[\d,]+\.?\d*)",  # Fallback to VM Final Reward (supports negative)
     ]
     
     for pattern in patterns:
         match = re.search(pattern, output)
         if match:
             try:
-                # Remove commas from number string
-                reward_str = match.group(1).replace(',', '')
+                # Remove commas and whitespace from number string
+                reward_str = match.group(1).replace(',', '').replace(' ', '')
                 return float(reward_str)
             except ValueError:
                 continue
@@ -67,12 +68,13 @@ def extract_reward_from_output(output: str) -> float:
     lines = output.split('\n')
     for line in lines:
         if 'Total Reward' in line or 'total_reward' in line.lower():
-            # Try to extract number (handle comma-separated numbers)
-            numbers = re.findall(r'[\d,]+\.?\d*', line)
+            # Try to extract number (handle comma-separated numbers and negative signs)
+            # Look for pattern: $ followed by optional minus, then number
+            numbers = re.findall(r'\$(-?\s*[\d,]+\.?\d*)', line)
             if numbers:
                 try:
-                    # Take the last number and remove commas
-                    reward_str = numbers[-1].replace(',', '')
+                    # Take the last number and remove commas and whitespace
+                    reward_str = numbers[-1].replace(',', '').replace(' ', '')
                     return float(reward_str)
                 except ValueError:
                     continue
