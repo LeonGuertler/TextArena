@@ -264,7 +264,7 @@ class CSVDemandPlayer:
             
             config = {
                 'item_id': item_id,
-                'description': str(first_row[f'description_{item_id}']),
+                'description': str(first_row.get(f'description_{item_id}', item_id)),
                 'lead_time': lead_time,
                 'profit': float(first_row[f'profit_{item_id}']),
                 'holding_cost': float(first_row[f'holding_cost_{item_id}'])
@@ -570,7 +570,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
     system = (
         "=== ROLE & OBJECTIVE ===\n"
         f"You control the vending machine for a single SKU \"{primary_item}\" while collaborating with an OR baseline. "
-        "Maximize total reward R_t = Profit × units_sold − HoldingCost × ending_inventory each 14‑day period.\n"
+        "Maximize total reward R_t = Profit × units_sold − HoldingCost × ending_inventory over total periods.\n"
         "\n"
         "=== GAME MECHANISM: PERIOD EXECUTION SEQUENCE ===\n"
         "Each period follows this strict execution order:\n"
@@ -621,10 +621,11 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "\n"
         "=== ENVIRONMENT SNAPSHOT ===\n"
         "- Period information and full history are provided; there is no ongoing news feed.\n"
-        "- Calendar dates may or may not be provided in context. When dates are available, ACTIVELY apply calendar + world knowledge:\n"
+        "- Calendar dates and product descriptions may or may not be provided in context.\n"
+        "- When dates are available, ACTIVELY apply calendar + world knowledge:\n"
         "  * Identify major retail/cultural calendar events\n"
         "  * Recognize seasonal demand drivers\n"
-        "  * Match SKU description to seasonal relevance\n"
+        "- When product description is available, match it to seasonal relevance.\n"
         "- When calendar dates are available, demand can spike or drop significantly around key calendar events—anticipate proactively.\n"
         "- On-hand inventory starts at 0 and incurs holding cost every period. \"In-transit\" shows total undelivered units, but you must infer ETAs.\n"
         f"- Supplier-promised lead time is {promised_lead_time} period(s); actual lead time can drift and must be inferred from CONCLUDED periods only.\n"
@@ -666,7 +667,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "YOUR ROLE: The OR recommendation is a data-driven baseline. You can override it by considering:\n"
         "- Actual vs. promised lead time (from concluded periods)\n"
         "- Demand regime changes (detected from recent history)\n"
-        "- Seasonality/world knowledge (from exact dates + SKU description)\n"
+        "- Seasonality/world knowledge (from calendar dates and product description when available)\n"
         "- Lost shipments or pipeline anomalies\n"
         "\n"
         "=== COLLABORATION STRATEGY ===\n"
@@ -683,12 +684,12 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "- If orders don't arrive for many periods beyond promised lead time, they may be lost\n"
         "\n"
         "Demand Forecasting:\n"
-        "- Use SKU description + exact date as PRIMARY forecasting anchors:\n"
-        "  * What product category is this?\n"
-        "  * What time of year is it?\n"
-        "  * Are there upcoming or recent calendar events that affect this category?\n"
+        "- When product description and/or calendar dates are available, use them as PRIMARY forecasting anchors:\n"
+        "  * What product category is this? (if description available)\n"
+        "  * What time of year is it? (if dates available)\n"
+        "  * Are there upcoming or recent calendar events that affect this category? (if dates available)\n"
         "- Historical samples provide initial intuition, but demand can shift suddenly\n"
-        "- When calendar knowledge suggests an upcoming demand shift, adjust BEFORE waiting for data confirmation\n"
+        "- Combine calendar knowledge with actual demand patterns to inform your forecast\n"
         "- Confirm sustained mean/variance changes before reacting to apparent regime shifts\n"
         "\n"
     )
@@ -734,7 +735,7 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
     
     system += (
         "=== DECISION CHECKLIST ===\n"
-        "1. Use world knowledge and SKU description to compare to historical demand for this SKU.\n"
+        "1. When available, use world knowledge and product description to compare to historical demand for this SKU.\n"
         "2. Reconcile on-hand + pipeline with expected arrivals; highlight overdue/lost shipments.\n"
         "3. Inspect the OR recommendation (quantity + stats) and decide how to adapt it.\n"
         "4. Justify your final quantity by tying it to demand outlook, lead-time belief, and OR's baseline.\n"

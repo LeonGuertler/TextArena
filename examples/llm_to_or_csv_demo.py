@@ -266,7 +266,7 @@ class CSVDemandPlayer:
             
             config = {
                 'item_id': item_id,
-                'description': str(first_row[f'description_{item_id}']),
+                'description': str(first_row.get(f'description_{item_id}', item_id)),
                 'lead_time': lead_time,
                 'profit': float(first_row[f'profit_{item_id}']),
                 'holding_cost': float(first_row[f'holding_cost_{item_id}'])
@@ -417,17 +417,50 @@ def parse_arrivals_from_history(observation: str) -> Dict[str, List[int]]:
     """
     observed_lead_times = {}
     
-    # Look for patterns like "chips(Regular): ordered=X, arrived=Y units (ordered on Period Z, lead_time was W periods)"
-    # More specific pattern to avoid matching "concluded:" or other false positives
-    # Pattern: item_id: ordered=... lead_time was X periods
-    pattern = r'(\S+?):\s+ordered=.*?lead_time was (\d+) periods?'
+    # Pattern 1: Match "item_id: ... arrived=X units (ordered on Period Y, lead_time was Z periods)"
+    # This handles both numeric item_ids (e.g., "706016001") and non-numeric (e.g., "chips(Regular)")
+    # More flexible pattern: matches item_id (can contain parentheses), then looks for "arrived=... units (ordered on Period X, lead_time was Y periods)"
+    # Example: "chips(Regular): ordered=140, arrived=141 units (ordered on Period 1, lead_time was 4 periods)"
+    pattern1 = r'([^\s:]+(?:\([^)]+\))?):\s+[^:]*?arrived=\d+\s+units\s+\(ordered\s+on\s+Period\s+\d+,\s+lead_time\s+was\s+(\d+)\s+periods?\)'
     
-    matches = re.findall(pattern, observation)
+    # Pattern 2: Match "item_id: ordered=... lead_time was X periods" (fallback for numeric item_ids)
+    # This handles cases where format is different
+    pattern2 = r'(\d\S*?):\s+ordered=.*?lead_time\s+was\s+(\d+)\s+periods?'
+    
+    # Try pattern 1 first (more specific, handles non-numeric item_ids)
+    matches = re.findall(pattern1, observation, re.IGNORECASE)
     for item_id, lead_time_str in matches:
-        lead_time = int(lead_time_str)
-        if item_id not in observed_lead_times:
-            observed_lead_times[item_id] = []
-        observed_lead_times[item_id].append(lead_time)
+        # Exclude common non-item-id words
+        item_id_lower = item_id.lower().strip()
+        if item_id_lower in ['conclude', 'concluded', 'period', 'date', 'summary', 'error']:
+            continue
+        # Skip if item_id is just a number (likely a period number, not an item_id)
+        if item_id.strip().isdigit():
+            continue
+        try:
+            lead_time = int(lead_time_str)
+            if item_id not in observed_lead_times:
+                observed_lead_times[item_id] = []
+            observed_lead_times[item_id].append(lead_time)
+        except ValueError:
+            continue
+    
+    # Try pattern 2 as fallback (only if pattern 1 didn't match this item_id)
+    matches2 = re.findall(pattern2, observation, re.IGNORECASE)
+    for item_id, lead_time_str in matches2:
+        # Skip if already found by pattern 1
+        if item_id in observed_lead_times:
+            continue
+        # Exclude common non-item-id words
+        if item_id.lower() in ['conclude', 'concluded', 'period', 'date', 'summary', 'error']:
+            continue
+        try:
+            lead_time = int(lead_time_str)
+            if item_id not in observed_lead_times:
+                observed_lead_times[item_id] = []
+            observed_lead_times[item_id].append(lead_time)
+        except ValueError:
+            continue
     
     return observed_lead_times
 
@@ -577,6 +610,100 @@ def compute_sigma_hat(method: str, params: dict, samples: List[float], L: float)
         raise ValueError(f"Invalid method for sigma_hat: {method}")
 
 
+def robust_parse_json(text: str) -> dict:
+    """
+    Robustly parse JSON from LLM output, attempting to fix common formatting errors.
+    
+    Common issues fixed:
+    - Extra quotes after numeric values (e.g., "value": 15.739624" -> "value": 15.739624)
+    - Missing quotes around string values
+    - Trailing commas
+    - Markdown code fences
+    
+    Args:
+        text: Raw text from LLM
+        
+    Returns:
+        Parsed JSON dict
+        
+    Raises:
+        json.JSONDecodeError: If JSON cannot be parsed even after repair attempts
+    """
+    # Step 1: Clean markdown code fences
+    cleaned = text.strip()
+    cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+    cleaned = re.sub(r'\s*```$', '', cleaned)
+    
+    # Step 2: Try direct parse first
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass  # Continue to repair attempts
+    
+    # Step 3: Fix common issues - extra quotes after numeric values
+    # Pattern 1: "value": number" -> "value": number (handles cases like "value": 15.739624" or "value": 17.606")
+    # This also handles cases without space: "value":15.739624" or "value":15.739624"}}
+    repaired = re.sub(r'"value"\s*:\s*([+-]?\d+\.?\d*)"([,}\s\]])', r'"value": \1\2', cleaned)
+    
+    # Pattern 2: More aggressive - fix any numeric value followed by quote before closing brace/bracket
+    # Handles: "value": number"}} or "value": number"}
+    repaired = re.sub(r':\s*([+-]?\d+\.?\d*)"([,}\s]*[}\]]+)', r': \1\2', repaired)
+    
+    # Pattern 3: Handle cases where value is already quoted but shouldn't be (for numeric values)
+    # Pattern: "value": "number" -> "value": number (only if it's a valid number)
+    def fix_quoted_number(match):
+        key = match.group(1)
+        num_str = match.group(2)
+        suffix = match.group(3)
+        try:
+            # Try to parse as number
+            float(num_str)
+            return f'"{key}": {num_str}{suffix}'
+        except ValueError:
+            # Keep as string if not a valid number
+            return match.group(0)
+    
+    repaired = re.sub(r'"value"\s*:\s*"([+-]?\d+\.?\d*)"([,}\s\]])', fix_quoted_number, repaired)
+    
+    # Step 4: Remove trailing commas before closing braces/brackets
+    repaired = re.sub(r',(\s*[}\]])', r'\1', repaired)
+    
+    # Step 5: Try parsing repaired version
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError:
+        pass
+    
+    # Step 6: Try to extract JSON object from text (in case there's extra text)
+    # Find the first { and last }
+    first_brace = repaired.find('{')
+    last_brace = repaired.rfind('}')
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        json_candidate = repaired[first_brace:last_brace + 1]
+        try:
+            return json.loads(json_candidate)
+        except json.JSONDecodeError:
+            pass
+    
+    # Step 7: Additional fix for any remaining quote issues after numeric values
+    # This is a catch-all for any pattern we might have missed
+    repaired2 = re.sub(r':\s*([+-]?\d+\.?\d*)"([,}\s\]])', r': \1\2', repaired)
+    try:
+        return json.loads(repaired2)
+    except json.JSONDecodeError:
+        pass
+    
+    # Step 8: Final attempt - raise original error with helpful message
+    try:
+        json.loads(cleaned)  # This will raise the original error
+    except json.JSONDecodeError as e:
+        raise json.JSONDecodeError(
+            f"Failed to parse JSON after repair attempts. Original error: {e.msg}",
+            e.doc,
+            e.pos
+        )
+
+
 def validate_parameters_json(params_json: dict, item_ids: List[str], current_configs: Dict[str, dict]):
     """
     Validate the parameters JSON structure and required fields.
@@ -674,7 +801,7 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "=== ROLE & OBJECTIVE ===\n"
         f"You run an LLM→OR controller for a single SKU \"{primary_item}\". "
         "Your job is to translate the observation into OR parameters so the backend can compute the order. "
-        "Maximize total reward R_t = Profit × units_sold − HoldingCost × ending_inventory each 14‑day period.\n"
+        "Maximize total reward R_t = Profit × units_sold − HoldingCost × ending_inventory each total periods.\n"
         "\n"
         "=== GAME MECHANISM: PERIOD EXECUTION SEQUENCE ===\n"
         "Each period follows this strict execution order:\n"
@@ -725,10 +852,11 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "\n"
         "=== ENVIRONMENT SNAPSHOT ===\n"
         "- Period information and full history are provided; there is no ongoing news feed.\n"
-        "- Calendar dates may or may not be provided in context. When dates are available, ACTIVELY apply calendar + world knowledge:\n"
+        "- Calendar dates and product descriptions may or may not be provided in context.\n"
+        "- When dates are available, ACTIVELY apply calendar + world knowledge:\n"
         "  * Identify major retail/cultural calendar events\n"
         "  * Recognize seasonal demand drivers\n"
-        "  * Match SKU description to seasonal relevance\n"
+        "- When product description is available, match it to seasonal relevance.\n"
         "- When calendar dates are available, demand can spike or drop significantly around key calendar events—anticipate proactively.\n"
         "- Inventory view: on-hand starts at 0, holding cost applies every period, and \"in-transit\" shows total undelivered units.\n"
         f"- Promised lead time is {promised_lead_time} period(s) but actual lead time can drift and must be inferred from CONCLUDED periods only.\n"
@@ -750,13 +878,13 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "- If orders don't arrive for many periods beyond promised lead time, they may be lost\n"
         "\n"
         "=== DEMAND & LEAD-TIME ANALYSIS ===\n"
-        "- Use the exact date and SKU description as PRIMARY forecasting anchors:\n"
-        "  * What product category is this?\n"
-        "  * What time of year is it?\n"
-        "  * Are there upcoming or recent calendar events that affect this category?\n"
+        "- When product description and/or calendar dates are available, use them as PRIMARY forecasting anchors:\n"
+        "  * What product category is this? (if description available)\n"
+        "  * What time of year is it? (if dates available)\n"
+        "  * Are there upcoming or recent calendar events that affect this category? (if dates available)\n"
         "- Compare historical demand segments to confirm mean/variance changes before altering μ̂/σ̂.\n"
         "- Historical samples seed your prior, but demand can shift abruptly—validate each changepoint with evidence.\n"
-        "- When calendar knowledge suggests an upcoming demand shift, adjust parameters BEFORE waiting for data confirmation.\n"
+        "- Combine calendar knowledge with actual demand patterns to inform your parameter choices.\n"
         "- Promised lead time may fail any period; reconcile expected vs. actual arrivals (including possible lost shipments).\n"
         "\n"
     )
@@ -811,10 +939,6 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         "   - N = max(min(regime_length, 20), 3), capped by available sample count.\n"
         "   - Document the changepoint evidence and chosen N in your rationale.\n"
         "\n"
-        "=== HUMAN GUIDANCE & HISTORY ===\n"
-        "- If strategic guidance mode is active, new instructions will be prepended to your observation; follow them until superseded.\n"
-        "- Carry-over insights you write are also prepended, so keep them concise, current, and evidence-based.\n"
-        "\n"
     )
     
     system += (
@@ -836,15 +960,57 @@ def make_llm_to_or_agent(initial_samples: dict, current_configs: dict,
         '  "carry_over_insight": "Summaries of NEW sustained changes with evidence, or \\"\\".",\n'
         '  "parameters": {\n'
         f'    "{primary_item}": {{\n'
-        '      "L": {"method": "...", "N": ..., "value": ...},\n'
-        '      "mu_hat": {"method": "...", "N": ..., "gamma": ..., "value": ...},\n'
-        '      "sigma_hat": {"method": "...", "N": ..., "value": ...}\n'
-        "    }\n"
+        '      "L": {"method": "..."},\n'
+        '      "mu_hat": {"method": "..."},\n'
+        '      "sigma_hat": {"method": "..."}\n'
+        "    }}\n"
         "  }\n"
         "}\n"
-        "- Include only the fields required by the selected method (omit N/gamma/value when not needed).\n"
+        "\n"
+        "=== CRITICAL: METHOD VALUES MUST BE EXACT STRINGS ===\n"
+        "The 'method' field for each parameter MUST be one of the exact strings listed below. "
+        "DO NOT use descriptive text, explanations, or variations. Use ONLY the exact method names.\n"
+        "\n"
+        "=== FIELD REQUIREMENTS BY METHOD ===\n"
+        "IMPORTANT: Only include fields required by your chosen method. DO NOT include 'value' field unless using 'explicit' method.\n"
+        "\n"
+        "For L parameter:\n"
+        '  - "default": Only include {"method": "default"} (backend uses promised lead time)\n'
+        '  - "calculate": Only include {"method": "calculate"} (backend computes average from observed lead times)\n'
+        '  - "recent_N": Include {"method": "recent_N", "N": <integer>} (backend computes average of last N lead times)\n'
+        '  - "explicit": Include {"method": "explicit", "value": <number>} (ONLY method that requires "value")\n'
+        "\n"
+        "For mu_hat parameter:\n"
+        '  - "default": Only include {"method": "default"} (backend computes (1+L)×mean of all samples)\n'
+        '  - "recent_N": Include {"method": "recent_N", "N": <integer>} (backend computes (1+L)×mean of last N samples)\n'
+        '  - "EWMA_gamma": Include {"method": "EWMA_gamma", "gamma": <float 0-1>} (backend computes (1+L)×EWMA)\n'
+        '  - "explicit": Include {"method": "explicit", "value": <number>} (ONLY method that requires "value")\n'
+        "\n"
+        "For sigma_hat parameter:\n"
+        '  - "default": Only include {"method": "default"} (backend computes sqrt(1+L)×std of all samples)\n'
+        '  - "recent_N": Include {"method": "recent_N", "N": <integer>} (backend computes sqrt(1+L)×std of last N samples)\n'
+        '  - "explicit": Include {"method": "explicit", "value": <number>} (ONLY method that requires "value")\n'
+        "\n"
+        "=== EXAMPLES ===\n"
+        "CORRECT example (using recent_N for mu_hat, default for others):\n"
+        '  "mu_hat": {"method": "recent_N", "N": 5}  ✓ (no value field)\n'
+        '  "sigma_hat": {"method": "default"}  ✓ (no value field)\n'
+        "\n"
+        "INCORRECT example (DO NOT include value when not using explicit):\n"
+        '  "mu_hat": {"method": "recent_N", "N": 5, "value": 604}  ✗ (remove value)\n'
+        '  "sigma_hat": {"method": "recent_N", "N": 3, "value": 112.33}  ✗ (remove value)\n'
+        "\n"
+        "CORRECT example (using explicit method):\n"
+        '  "mu_hat": {"method": "explicit", "value": 604}  ✓ (value required for explicit)\n'
+        "\n"
+        "=== GENERAL RULES ===\n"
+        "- Include ONLY the fields required by your chosen method.\n"
+        "- DO NOT include 'value' field unless method is 'explicit'.\n"
+        "- DO NOT include 'N' field unless method is 'recent_N'.\n"
+        "- DO NOT include 'gamma' field unless method is 'EWMA_gamma'.\n"
         "- All numeric values must be floats/ints; all N values are integers ≥ 1.\n"
         "- No extra commentary outside the JSON.\n"
+        "- The method field must be an exact match to one of the valid strings listed above.\n"
     )
     
     # return ta.agents.OpenAIAgent(model_name="gpt-4o-mini", system_prompt=system, temperature=0)
@@ -1037,7 +1203,12 @@ def main():
             # Parse observed lead times from arrivals in history
             new_lead_times = parse_arrivals_from_history(observation)
             for item_id, lt_list in new_lead_times.items():
-                observed_lead_times[item_id].extend(lt_list)
+                # Safety check: only process item_ids that exist in observed_lead_times
+                if item_id in observed_lead_times:
+                    observed_lead_times[item_id].extend(lt_list)
+                else:
+                    # Skip invalid item_ids (e.g., false positives from regex matching)
+                    print(f"Warning: Skipping invalid item_id '{item_id}' from arrival parsing")
             
             # Recreate agent with updated configs (for system prompt)
             base_agent = make_llm_to_or_agent(
@@ -1060,14 +1231,9 @@ def main():
             # Get LLM response
             llm_response = vm_agent(observation)
             
-            # Parse JSON response
+            # Parse JSON response with robust parser
             try:
-                # Clean markdown code fences
-                cleaned_response = llm_response.strip()
-                cleaned_response = re.sub(r'^```(?:json)?\s*', '', cleaned_response)
-                cleaned_response = re.sub(r'\s*```$', '', cleaned_response)
-                
-                params_json = json.loads(cleaned_response)
+                params_json = robust_parse_json(llm_response)
                 
                 # Validate JSON structure
                 validate_parameters_json(params_json, csv_player.get_item_ids(), current_item_configs)
@@ -1100,12 +1266,30 @@ def main():
                 print("\n" + "="*70)
                 
             except json.JSONDecodeError as e:
-                print(f"\nERROR: Failed to parse LLM output as JSON: {e}")
+                error_msg = f"\nERROR: Failed to parse LLM output as JSON: {e}"
+                print(error_msg, file=sys.stderr)
+                print(error_msg)
                 _safe_print(f"Raw output:\n{llm_response}")
+                print("\n" + "="*70)
+                print("=== ERROR SUMMARY ===")
+                print("="*70)
+                print(f"Period: {current_period}")
+                print(f"Error: JSON parsing failed")
+                print(f"Details: {e}")
+                print("="*70)
                 sys.exit(1)
             except ValueError as e:
-                print(f"\nERROR: Invalid parameter specification: {e}")
+                error_msg = f"\nERROR: Invalid parameter specification: {e}"
+                print(error_msg, file=sys.stderr)
+                print(error_msg)
                 _safe_print(f"Raw output:\n{llm_response}")
+                print("\n" + "="*70)
+                print("=== ERROR SUMMARY ===")
+                print("="*70)
+                print(f"Period: {current_period}")
+                print(f"Error: Parameter validation failed")
+                print(f"Details: {e}")
+                print("="*70)
                 sys.exit(1)
             
             # Compute orders using OR formula with LLM-proposed parameters
@@ -1199,7 +1383,17 @@ def main():
                     orders[item_id] = order
                     
                 except ValueError as e:
-                    print(f"  ERROR computing order: {e}")
+                    error_msg = f"  ERROR computing order for {item_id}: {e}"
+                    print(error_msg, file=sys.stderr)
+                    print(error_msg)
+                    print("\n" + "="*70)
+                    print("=== ERROR SUMMARY ===")
+                    print("="*70)
+                    print(f"Period: {current_period}")
+                    print(f"Item: {item_id}")
+                    print(f"Error: Order computation failed")
+                    print(f"Details: {e}")
+                    print("="*70)
                     sys.exit(1)
             
             # Create action JSON
@@ -1277,7 +1471,7 @@ def main():
     print("="*70)
     print(f"Total Profit from Sales: ${total_profit:.2f}")
     print(f"Total Holding Cost: ${total_holding:.2f}")
-    _safe_print(f"\n>>> Total Reward (LLM->OR Strategy): ${total_reward:.2f} <<<")
+    print(f"\n>>> Total Reward (LLM->OR Strategy): ${total_reward:.2f} <<<")
     print(f"VM Final Reward: {rewards.get(0, 0):.2f}")
     print("="*70)
     

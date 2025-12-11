@@ -263,7 +263,7 @@ class CSVDemandPlayer:
             
             config = {
                 'item_id': item_id,
-                'description': str(first_row[f'description_{item_id}']),
+                'description': str(first_row.get(f'description_{item_id}', item_id)),
                 'lead_time': lead_time,
                 'profit': float(first_row[f'profit_{item_id}']),
                 'holding_cost': float(first_row[f'holding_cost_{item_id}'])
@@ -374,15 +374,15 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
     system = (
         "=== ROLE & OBJECTIVE ===\n"
         f"You control a single vending SKU \"{primary_item}\". "
-        "Maximize total reward (R_t = Profit × units_sold − HoldingCost × ending_inventory) over 14‑day periods.\n"
+        "Maximize total reward (R_t = Profit × units_sold − HoldingCost × ending_inventory) over total periods.\n"
         "\n"
         "=== TIMELINE & DATA ===\n"
         "- Observations contain period information plus complete history to date; there is no future information feed.\n"
-        "- Calendar dates may or may not be provided in context. When dates are available, ACTIVELY apply calendar + world knowledge:\n"
+        "- Calendar dates and product descriptions may or may not be provided in context.\n"
+        "- When dates are available, ACTIVELY apply calendar + world knowledge:\n"
         "  * Identify major retail/cultural calendar events from the date\n"
         "  * Recognize seasonal demand drivers\n"
-        "  * Consider weekly/monthly cycles\n"
-        "  * Match SKU description to seasonal relevance\n"
+        "- When product description is available, match it to seasonal relevance.\n"
         "- When calendar dates are available, demand can spike or drop significantly around key calendar events—anticipate and act proactively.\n"
         "\n"
         "=== GAME MECHANISM: PERIOD EXECUTION SEQUENCE ===\n"
@@ -439,13 +439,13 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "- Orders may also never CONCLUDE.\n"
         "\n"
         "=== DEMAND REASONING ===\n"
-        "- Treat the SKU description plus exact date as PRIMARY anchors for forecasting:\n"
-        "  * What product category is this?\n"
-        "  * What time of year is it?\n"
-        "  * Are there upcoming or recent calendar events that affect this category?\n"
+        "- When product description and/or calendar dates are available, use them as PRIMARY anchors for forecasting:\n"
+        "  * What product category is this? (if description available)\n"
+        "  * What time of year is it? (if dates available)\n"
+        "  * Are there upcoming or recent calendar events that affect this category? (if dates available)\n"
         "- Compare historical demand segments to detect sustained mean/variance changes or new regimes.\n"
         "- Historical samples seed your prior, but demand can shift abruptly—confirm each change with evidence.\n"
-        "- When calendar knowledge suggests an upcoming demand shift, adjust BEFORE waiting for data confirmation.\n"
+        "- Combine calendar knowledge with actual demand patterns to inform your forecast.\n"
         "\n"
         "=== LEAD-TIME INFERENCE ===\n"
         "ONLY use 'Period X conclude' messages from history to infer actual lead time:\n"
@@ -500,7 +500,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
     
     system += (
         "=== DECISION CHECKLIST ===\n"
-        "1. Use world knowledge and SKU description to compare to historical demand for this SKU.\n"
+        "1. When available, use world knowledge and product description to compare to historical demand for this SKU.\n"
         "2. Reconcile on-hand + in-transit vs. expected arrivals; flag overdue orders.\n"
         "3. Infer lead time (or order loss) from arrivals/absences and adjust safety stock.\n"
         "4. Forecast demand using calendar knowledge plus recent data regimes.\n"
@@ -515,7 +515,7 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "=== OUTPUT FORMAT ===\n"
         "Respond with valid JSON only:\n"
         "{\n"
-        '  "rationale": "Step-by-step reasoning covering (a) world knowledge and SKU description, (b) demand regime analysis, '
+        '  "rationale": "Step-by-step reasoning covering (a) world knowledge and product description (when available), (b) demand regime analysis, '
         ' (c) lead_time vs. missing orders, (d) inventory & pipeline assessment, (e) final order logic.",\n'
         '  "carry_over_insight": "Summarize all NEW sustained changes with evidence, or \\"\\" if none.",\n'
         f'  "action": {{{example_action}}}\n'

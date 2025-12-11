@@ -178,7 +178,7 @@ class CSVDemandPlayer:
             
             config = {
                 'item_id': item_id,
-                'description': str(first_row[f'description_{item_id}']),
+                'description': str(first_row.get(f'description_{item_id}', item_id)),
                 'lead_time': lead_time,
                 'profit': float(first_row[f'profit_{item_id}']),
                 'holding_cost': float(first_row[f'holding_cost_{item_id}'])
