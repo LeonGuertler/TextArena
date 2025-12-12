@@ -407,9 +407,13 @@ class ORAgent:
         empirical_mean = np.mean(all_samples)
         empirical_std = np.std(all_samples, ddof=1) if len(all_samples) > 1 else 0
         
+        # Handle infinite lead time: use a large finite value for calculations
+        # When L is inf, it means orders never arrive, so we use a conservative approach
+        L_for_calc = L if not np.isinf(L) else 1000  # Use large finite value for inf
+        
         # Calculate μ̂ and σ̂ for lead time + review period
-        mu_hat = (1 + L) * empirical_mean
-        sigma_hat = np.sqrt(1 + L) * empirical_std
+        mu_hat = (1 + L_for_calc) * empirical_mean
+        sigma_hat = np.sqrt(1 + L_for_calc) * empirical_std
         
         # Calculate critical fractile and z*
         q = p / (p + h)
@@ -423,7 +427,7 @@ class ORAgent:
             'empirical_std': empirical_std,
             'mu_hat': mu_hat,
             'sigma_hat': sigma_hat,
-            'L': L,
+            'L': L,  # Keep original L (may be inf) for display
             'z_star': z_star,
             'q': q,
             'base_stock': base_stock,
@@ -439,11 +443,28 @@ class ORAgent:
             order_uncapped = max(int(np.ceil(base_stock - current_inventory)), 0)
             
             # Cap calculation: μ̂/(1+L) + Φ^(-1)(0.95) × σ̂/√(1+L)
+            # When L is inf, use L_for_calc to avoid nan
             cap_z = norm.ppf(0.95)
-            cap = mu_hat / (1 + L) + cap_z * sigma_hat / np.sqrt(1 + L)
+            if np.isinf(L):
+                # When lead time is inf, cap should be based on single period demand
+                # Use a conservative cap: empirical_mean + safety stock
+                cap = empirical_mean + cap_z * empirical_std
+            else:
+                cap = mu_hat / (1 + L) + cap_z * sigma_hat / np.sqrt(1 + L)
             
-            # Capped order
-            order = max(min(int(np.ceil(base_stock - current_inventory)), int(np.ceil(cap))), 0)
+            # Ensure cap is finite and valid (defensive check)
+            if np.isnan(cap) or np.isinf(cap):
+                cap = empirical_mean + cap_z * empirical_std
+            
+            # Capped order - ensure cap is valid before using in int(np.ceil())
+            try:
+                cap_int = int(np.ceil(cap))
+            except (ValueError, OverflowError):
+                # If cap is still invalid, use conservative fallback
+                cap = empirical_mean + cap_z * empirical_std
+                cap_int = int(np.ceil(cap))
+            
+            order = max(min(order_uncapped, cap_int), 0)
             
             result['order'] = order
             result['order_uncapped'] = order_uncapped
@@ -727,4 +748,3 @@ def main():
     
 if __name__ == "__main__":
     main()
-

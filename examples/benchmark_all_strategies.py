@@ -118,7 +118,8 @@ def run_script(script_path: str, run_num: int, script_name: str,
             cwd=base_dir,
             capture_output=True,
             text=True,
-            timeout=2000,  # 33 minute timeout
+            timeout=2000,  # 33 minute timeout (2000 seconds)
+            stdin=subprocess.DEVNULL,  # Prevent waiting for stdin input
         )
         
         output = result.stdout + result.stderr
@@ -143,8 +144,9 @@ def run_script(script_path: str, run_num: int, script_name: str,
         
         return reward, None, output
         
-    except subprocess.TimeoutExpired:
-        return None, "Script timed out after 20 minutes", ""
+    except subprocess.TimeoutExpired as e:
+        timeout_minutes = 2000 / 60
+        return None, f"Script timed out after {timeout_minutes:.1f} minutes ({2000} seconds)", ""
     except Exception as e:
         return None, f"Error running script: {str(e)}", ""
 
