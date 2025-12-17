@@ -1,10 +1,13 @@
 """
 Benchmark script to compare all strategies.
 
-Runs each strategy 5 times per instance and calculates:
+Runs each strategy and calculates:
 - Average reward
 - Standard deviation
 - Min/Max rewards
+
+Deterministic strategies (or, perfect_score) run once.
+LLM-based strategies (llm, simple_llm_to_or, or_to_llm) run 5 times.
 
 Usage:
   uv run python D:\\TextArena\\examples\\benchmark_all_strategies.py --promised-lead-time 0 --directory D:\\TextArena\\examples\\initial_synthetic_demand_files\\case1_iid_normal
@@ -28,15 +31,22 @@ PYTHON_EXECUTABLE = sys.executable
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Scripts to benchmark (all 4 strategies)
+# Scripts to benchmark (5 strategies)
 SCRIPTS = {
     "or": "examples/or_csv_demo.py",
     "llm": "examples/llm_csv_demo.py",
-    "llm_to_or": "examples/llm_to_or_csv_demo.py",
+    "simple_llm_to_or": "examples/simple_llm_to_or_demo.py",
     "or_to_llm": "examples/or_to_llm_csv_demo.py",
+    "perfect_score": "examples/perfect_score.py",
 }
 
-# Number of runs per script-instance combination
+# Deterministic scripts (run only once, no LLM involved)
+DETERMINISTIC_SCRIPTS = {"or", "perfect_score"}
+
+# LLM-based scripts (run multiple times due to stochasticity)
+LLM_SCRIPTS = {"llm", "simple_llm_to_or", "or_to_llm"}
+
+# Number of runs for LLM-based scripts
 NUM_RUNS = 5
 
 # Base directory
@@ -47,8 +57,10 @@ def extract_reward_from_output(output: str) -> float:
     """Extract total reward from script output."""
     # Pattern to match: >>> Total Reward: $1234.56 <<< or $-123.45 <<<
     # or variations like "Total Reward (OR Baseline): $1234.56"
+    # or Perfect Score: $1234.56
     # Note: Must handle negative numbers correctly!
     patterns = [
+        r">>>\s*Perfect Score:\s*\$(-?\s*[\d,]+\.?\d*)\s*<<<",  # Perfect Score format
         r">>>\s*Total Reward[^:]*:\s*\$(-?\s*[\d,]+\.?\d*)\s*<<<",  # With >>> ... <<< (supports negative)
         r"Total Reward[^:]*:\s*\$(-?\s*[\d,]+\.?\d*)",  # Without >>> ... <<< (supports negative)
         r"VM Final Reward:\s*(-?\s*[\d,]+\.?\d*)",  # Fallback to VM Final Reward (supports negative)
@@ -100,17 +112,26 @@ def run_script(script_path: str, run_num: int, script_name: str,
     
     if not os.path.exists(test_file):
         return None, f"Test file not found: {test_file}", ""
-    if not os.path.exists(train_file):
-        return None, f"Train file not found: {train_file}", ""
     
-    cmd = [
-        PYTHON_EXECUTABLE, script_path,
-        "--demand-file", test_file,
-        "--promised-lead-time", str(promised_lead_time),
-        "--real-instance-train", train_file,
-    ]
-    if max_periods is not None:
-        cmd.extend(["--max-periods", str(max_periods)])
+    # perfect_score.py only needs --demand-file
+    if script_name == "perfect_score":
+        cmd = [
+            PYTHON_EXECUTABLE, script_path,
+            "--demand-file", test_file,
+        ]
+    else:
+        # Other scripts need full parameters
+        if not os.path.exists(train_file):
+            return None, f"Train file not found: {train_file}", ""
+        
+        cmd = [
+            PYTHON_EXECUTABLE, script_path,
+            "--demand-file", test_file,
+            "--promised-lead-time", str(promised_lead_time),
+            "--real-instance-train", train_file,
+        ]
+        if max_periods is not None:
+            cmd.extend(["--max-periods", str(max_periods)])
     
     try:
         result = subprocess.run(
@@ -180,13 +201,14 @@ def benchmark_all(promised_lead_time: int, instance_dir: str, max_periods: int =
     
     instance_name = os.path.basename(instance_dir)
     
-    # Determine which scripts use LLM (for parallel processing)
-    llm_scripts = {"llm", "llm_to_or", "or_to_llm"}
-    or_scripts = {"or"}
-    
     # Set default max_workers for LLM scripts
     if max_workers is None:
         max_workers = min(30, (os.cpu_count() or 4) * 3)
+    
+    # Calculate total runs
+    total_llm_runs = len(LLM_SCRIPTS) * NUM_RUNS
+    total_deterministic_runs = len(DETERMINISTIC_SCRIPTS)
+    total_runs = total_llm_runs + total_deterministic_runs
     
     print("=" * 80)
     print("BENCHMARK CONFIGURATION")
@@ -195,8 +217,9 @@ def benchmark_all(promised_lead_time: int, instance_dir: str, max_periods: int =
     print(f"Instance name: {instance_name}")
     print(f"Promised lead time: {promised_lead_time}")
     print(f"Strategies: {', '.join(SCRIPTS.keys())}")
-    print(f"Runs per strategy: {NUM_RUNS}")
-    print(f"Total runs: {len(SCRIPTS) * NUM_RUNS}")
+    print(f"  - Deterministic (1 run each): {', '.join(DETERMINISTIC_SCRIPTS)}")
+    print(f"  - LLM-based ({NUM_RUNS} runs each): {', '.join(LLM_SCRIPTS)}")
+    print(f"Total runs: {total_runs}")
     if max_periods:
         print(f"Max periods: {max_periods}")
     else:
@@ -208,13 +231,12 @@ def benchmark_all(promised_lead_time: int, instance_dir: str, max_periods: int =
     results = defaultdict(list)
     errors = defaultdict(list)
     
-    total_runs = len(SCRIPTS) * NUM_RUNS
     completed_runs = 0
     
     # Prepare all LLM tasks upfront
     all_llm_tasks = []
     for script_name, script_path in SCRIPTS.items():
-        if script_name in llm_scripts:
+        if script_name in LLM_SCRIPTS:
             script_full_path = BASE_DIR / script_path
             if script_full_path.exists():
                 for run_num in range(1, NUM_RUNS + 1):
@@ -226,7 +248,7 @@ def benchmark_all(promised_lead_time: int, instance_dir: str, max_periods: int =
     # Run all LLM scripts in parallel
     if all_llm_tasks:
         print(f"\nRunning {len(all_llm_tasks)} LLM tasks in parallel ({max_workers} workers)...")
-        print("This includes: llm, llm_to_or, or_to_llm\n")
+        print(f"This includes: {', '.join(LLM_SCRIPTS)}\n")
         
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             future_to_task = {executor.submit(run_single_task, task): task for task in all_llm_tasks}
@@ -250,35 +272,33 @@ def benchmark_all(promised_lead_time: int, instance_dir: str, max_periods: int =
                     print(f"[{script_name}] Run {run_num}/{NUM_RUNS} ({completed_runs}/{len(all_llm_tasks)}): EXCEPTION: {str(e)}")
                     errors[script_name].append(f"Exception: {str(e)}")
     
-    # Run OR script sequentially (fast, no need for parallel)
+    # Run deterministic scripts sequentially (fast, no need for parallel, only 1 run each)
     print(f"\n{'='*80}")
-    print("Running OR script sequentially (fast execution)...")
+    print("Running deterministic scripts (1 run each)...")
     print(f"{'='*80}\n")
     
-    script_name = "or"
-    script_path = SCRIPTS[script_name]
-    script_full_path = BASE_DIR / script_path
-    
-    if not script_full_path.exists():
-        print(f"[{script_name}] ERROR: Script not found: {script_full_path}")
-    else:
-        print(f"[{script_name}] Running {NUM_RUNS} runs...")
+    for script_name in DETERMINISTIC_SCRIPTS:
+        script_path = SCRIPTS[script_name]
+        script_full_path = BASE_DIR / script_path
         
-        for run_num in range(1, NUM_RUNS + 1):
-            completed_runs += 1
-            print(f"  Run {run_num}/{NUM_RUNS} ({completed_runs}/{total_runs})...", end=" ", flush=True)
-            
-            reward, error, output = run_script(
-                str(script_full_path), run_num, script_name,
-                promised_lead_time, instance_dir, max_periods
-            )
-            
-            if error:
-                print(f"ERROR: {error}")
-                errors[script_name].append(error)
-            else:
-                print(f"Reward: ${reward:.2f} (log saved)")
-                results[script_name].append(reward)
+        if not script_full_path.exists():
+            print(f"[{script_name}] ERROR: Script not found: {script_full_path}")
+            continue
+        
+        completed_runs += 1
+        print(f"[{script_name}] Running 1 run ({completed_runs}/{total_runs})...", end=" ", flush=True)
+        
+        reward, error, output = run_script(
+            str(script_full_path), 1, script_name,
+            promised_lead_time, instance_dir, max_periods
+        )
+        
+        if error:
+            print(f"ERROR: {error}")
+            errors[script_name].append(error)
+        else:
+            print(f"Reward: ${reward:.2f} (log saved)")
+            results[script_name].append(reward)
     
     # Calculate statistics
     print("\n" + "=" * 80)
@@ -296,7 +316,7 @@ def benchmark_all(promised_lead_time: int, instance_dir: str, max_periods: int =
         if rewards:
             overall_stats[script_name] = {
                 'mean': np.mean(rewards),
-                'std': np.std(rewards),
+                'std': np.std(rewards) if len(rewards) > 1 else 0.0,
                 'min': np.min(rewards),
                 'max': np.max(rewards),
                 'count': len(rewards),
@@ -328,13 +348,14 @@ def benchmark_all(promised_lead_time: int, instance_dir: str, max_periods: int =
         'instance_dir': instance_dir,
         'instance_name': instance_name,
         'promised_lead_time': promised_lead_time,
-        'num_runs': NUM_RUNS,
+        'num_runs_llm': NUM_RUNS,
+        'num_runs_deterministic': 1,
         'max_periods': max_periods,
         'results': {
             script_name: {
                 'rewards': [float(r) for r in rewards],
                 'mean': float(np.mean(rewards)) if rewards else None,
-                'std': float(np.std(rewards)) if rewards else None,
+                'std': float(np.std(rewards)) if len(rewards) > 1 else 0.0 if rewards else None,
                 'min': float(np.min(rewards)) if rewards else None,
                 'max': float(np.max(rewards)) if rewards else None,
                 'count': len(rewards),
@@ -360,9 +381,13 @@ def benchmark_all(promised_lead_time: int, instance_dir: str, max_periods: int =
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Benchmark all strategies (or, llm, llm_to_or, or_to_llm)',
+        description='Benchmark all strategies (or, llm, simple_llm_to_or, or_to_llm, perfect_score)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Strategies:
+  - Deterministic (1 run): or, perfect_score
+  - LLM-based (5 runs): llm, simple_llm_to_or, or_to_llm
+
 Example:
   python benchmark_all_strategies.py --promised-lead-time 1 --directory D:\\TextArena\\examples\\initial_synthetic_demand_files\\case1_iid_normal
         """

@@ -507,10 +507,32 @@ def make_vm_agent(initial_samples: dict = None, promised_lead_time: int = 0,
         "5. Place an order that balances service level vs. holding cost while respecting pipeline.\n"
         "\n"
         "=== CARRY-OVER INSIGHTS ===\n"
-        "- Only log NEW, non-duplicated insights when a sustained, evidence-backed shift occurs (demand mean/variance, lead time, seasonality confirmation) and future periods need that reminder.\n"
-        "- Stay conservative: if the effect is already recorded or not yet significant, leave the field empty instead of restating it.\n"
-        "- Provide concrete stats (date ranges, averages, lead-time values). If multiple independent changes exist, list each separated by '; ' or newlines.\n"
-        "- Remove or update insights when the effect ends. Default output is an empty string \"\".\n"
+        "This is a critical mechanism for cross-period memory.\n"
+        "\n"
+        "PURPOSE: Record NEW, sustained, actionable pattern shifts that "
+        "future periods must remember for accurate decision-making.\n"
+        "\n"
+        "WHAT TO RECORD:\n"
+        "- Confirmed demand regime changes (mean/variance shifts)\n"
+        "- Lead time changes with evidence (e.g., 'Actual lead time is 3, not promised 2')\n"
+        "- Seasonal patterns with evidence (e.g., 'Holiday demand spike confirmed')\n"
+        "- Missing/delayed shipment patterns\n"
+        "- Any observation helpful for future inventory decisions\n"
+        "\n"
+        "FORMAT REQUIREMENTS:\n"
+        "- Include concrete numerical evidence (date ranges, averages, percentages)\n"
+        "- **CRITICAL - BE CONSERVATIVE**: Only record if the signal is SIGNIFICANT and SUSTAINED "
+        "(at least 3+ periods of consistent evidence). When in doubt, output empty string.\n"
+        "- Do NOT repeat insights already captured in previous periods\n"
+        "- If multiple changes exist, separate with '; ' or newline\n"
+        "- Retire/update insights when they no longer hold\n"
+        "- Output empty string \"\" if no new significant pattern detected\n"
+        "\n"
+        "EXAMPLES:\n"
+        "- \"Demand regime shift at Period 5: avg increased from 280 to 365 (+30%)\"\n"
+        "- \"Lead time confirmed as 3 periods (observed: P1 order arrived P4)\"\n"
+        "- \"Seasonal peak confirmed: Dec weeks show 40% higher demand\"\n"
+        "- \"\" (empty - no new pattern)\n"
         "\n"
         "=== OUTPUT FORMAT ===\n"
         "Respond with valid JSON only:\n"
@@ -695,7 +717,7 @@ def main():
             
             # Print complete JSON output with proper formatting
             print(f"\nPeriod {current_period} ({exact_date}) VM Action:")
-            print("="*60)
+            print("="*70)
             try:
                 # Remove markdown code block markers if present
                 # Strip markdown code fences (```json or ``` at start/end)
@@ -727,7 +749,7 @@ def main():
                 print(f"[DEBUG: JSON parsing failed: {e}]")
                 _safe_print(action)
                 sys.stdout.flush()
-            print("="*60)
+            print("="*70)
             sys.stdout.flush()
         else:  # Demand from CSV
             exact_date = csv_player.get_exact_date(current_period)
@@ -741,9 +763,9 @@ def main():
     rewards, game_info = env.close()
     vm_info = game_info[0]
     
-    print("\n" + "="*60)
+    print("\n" + "="*70)
     print("=== Final Results ===")
-    print("="*60)
+    print("="*70)
     
     # Per-item statistics
     total_ordered = vm_info.get('total_ordered', {})
@@ -766,9 +788,9 @@ def main():
         print(f"  Total Profit: ${total_profit}")
     
     # Period breakdown
-    print("\n" + "="*60)
+    print("\n" + "="*70)
     print("Period Breakdown:")
-    print("="*60)
+    print("="*70)
     for day_log in vm_info.get('daily_logs', []):
         period = day_log['day']
         exact_date = csv_player.get_exact_date(period)
@@ -783,14 +805,14 @@ def main():
     total_profit = vm_info.get('total_sales_profit', 0)
     total_holding = vm_info.get('total_holding_cost', 0)
     
-    print("\n" + "="*60)
+    print("\n" + "="*70)
     print("=== TOTAL SUMMARY ===")
-    print("="*60)
+    print("="*70)
     print(f"Total Profit from Sales: ${total_profit:.2f}")
     print(f"Total Holding Cost: ${total_holding:.2f}")
     print(f"\n>>> Total Reward: ${total_reward:.2f} <<<")
     print(f"VM Final Reward: {rewards.get(0, 0):.2f}")
-    print("="*60)
+    print("="*70)
     
 if __name__ == "__main__":
     main()

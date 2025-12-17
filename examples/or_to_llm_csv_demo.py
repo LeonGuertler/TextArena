@@ -675,15 +675,14 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "2. Compare OR's assumptions to reality: inferred demand regimes, arrivals, and missing shipments.\n"
         "3. Decide whether to follow, scale, or override OR's quantity. Explain the adjustment path explicitly in your rationale.\n"
         "\n"
-        "=== DEMAND & LEAD-TIME REASONING ===\n"
-        "Lead-Time Inference:\n"
-        "- ONLY use 'Period X conclude' messages from history to infer actual lead time\n"
+        "=== LEAD-TIME INFERENCE ===\n"
+        "ONLY use 'Period X conclude' messages from history to infer actual lead time:\n"
         "- Message format: 'arrived=Y units (ordered on Period Z, lead_time was W periods)'\n"
         "- Actual lead time calculation: W = X - Z\n"
         "- NEVER infer lead-time from current period's observations (you haven't seen arrivals yet)\n"
         "- If orders don't arrive for many periods beyond promised lead time, they may be lost\n"
         "\n"
-        "Demand Forecasting:\n"
+        "=== DEMAND REASONING ===\n"
         "- When product description and/or calendar dates are available, use them as PRIMARY forecasting anchors:\n"
         "  * What product category is this? (if description available)\n"
         "  * What time of year is it? (if dates available)\n"
@@ -751,9 +750,32 @@ def make_hybrid_vm_agent(initial_samples: dict = None, promised_lead_time: int =
         "   - BE SPECIFIC with numbers and reasons\n"
         "\n"
         "=== CARRY-OVER INSIGHTS ===\n"
-        "- Only record NEW, non-duplicated insights for sustained, evidence-backed shifts (demand mean/variance, lead time, seasonality) that future decisions must remember.\n"
-        "- Stay conservative: if the observation is already captured or not yet material, leave the field empty instead of restating it.\n"
-        "- Provide concrete stats (date ranges, averages, lead-time values). List multiple insights separated by '; ' or newline. Remove insights once they stop being true. Default output is \"\".\n"
+        "This is a critical mechanism for cross-period memory.\n"
+        "\n"
+        "PURPOSE: Record NEW, sustained, actionable pattern shifts that "
+        "future periods must remember for accurate decision-making.\n"
+        "\n"
+        "WHAT TO RECORD:\n"
+        "- Confirmed demand regime changes (mean/variance shifts)\n"
+        "- Lead time changes with evidence (e.g., 'Actual lead time is 3, not promised 2')\n"
+        "- Seasonal patterns with evidence (e.g., 'Holiday demand spike confirmed')\n"
+        "- Missing/delayed shipment patterns\n"
+        "- Any observation helpful for adjusting OR recommendations\n"
+        "\n"
+        "FORMAT REQUIREMENTS:\n"
+        "- Include concrete numerical evidence (date ranges, averages, percentages)\n"
+        "- **CRITICAL - BE CONSERVATIVE**: Only record if the signal is SIGNIFICANT and SUSTAINED "
+        "(at least 3+ periods of consistent evidence). When in doubt, output empty string.\n"
+        "- Do NOT repeat insights already captured in previous periods\n"
+        "- If multiple changes exist, separate with '; ' or newline\n"
+        "- Retire/update insights when they no longer hold\n"
+        "- Output empty string \"\" if no new significant pattern detected\n"
+        "\n"
+        "EXAMPLES:\n"
+        "- \"Demand regime shift at Period 5: avg increased from 280 to 365 (+30%)\"\n"
+        "- \"Lead time confirmed as 3 periods (observed: P1 order arrived P4)\"\n"
+        "- \"Seasonal peak confirmed: Dec weeks show 40% higher demand\"\n"
+        "- \"\" (empty - no new pattern)\n"
         "\n"
     )
     
@@ -981,13 +1003,13 @@ def main():
             print(f"{'='*70}\n")
             
             # Format OR recommendations for LLM
-            or_text = "\n" + "="*60 + "\n"
+            or_text = "\n" + "="*70 + "\n"
             or_text += "OR ALGORITHM RECOMMENDATIONS (capped policy):\n"
             for item_id, rec_qty in or_recommendations.items():
                 or_text += f"  {item_id}: {rec_qty} units\n"
             or_text += "\nNote: OR uses the promised lead time and historical demand only.\n"
             or_text += "It cannot see lost shipments, or actual lead-time shifts—adjust accordingly.\n"
-            or_text += "="*60 + "\n"
+            or_text += "="*70 + "\n"
             
             # Enhance observation with OR recommendations
             enhanced_observation = observation + or_text
@@ -997,7 +1019,7 @@ def main():
             
             # Print complete JSON output with proper formatting
             print(f"\nPeriod {current_period} ({exact_date}) Hybrid Decision:")
-            print("="*60)
+            print("="*70)
             try:
                 # Remove markdown code block markers if present
                 # Strip markdown code fences (```json or ``` at start/end)
@@ -1034,7 +1056,7 @@ def main():
                 print(f"[DEBUG: JSON parsing failed: {e}]")
                 _safe_print(action)
                 sys.stdout.flush()
-            print("="*60)
+            print("="*70)
             print(f"  (OR recommended: {or_recommendations})")
             sys.stdout.flush()
         else:  # Demand from CSV
@@ -1059,9 +1081,9 @@ def main():
     rewards, game_info = env.close()
     vm_info = game_info[0]
     
-    print("\n" + "="*60)
+    print("\n" + "="*70)
     print("=== Final Results (Hybrid: LLM + OR) ===")
-    print("="*60)
+    print("="*70)
     
     # Per-item statistics
     total_ordered = vm_info.get('total_ordered', {})
@@ -1084,9 +1106,9 @@ def main():
         print(f"  Total Profit: ${total_profit}")
     
     # Period breakdown
-    print("\n" + "="*60)
+    print("\n" + "="*70)
     print("Period Breakdown:")
-    print("="*60)
+    print("="*70)
     for day_log in vm_info.get('daily_logs', []):
         period = day_log['day']
         exact_date = csv_player.get_exact_date(period)
@@ -1101,14 +1123,14 @@ def main():
     total_profit = vm_info.get('total_sales_profit', 0)
     total_holding = vm_info.get('total_holding_cost', 0)
     
-    print("\n" + "="*60)
+    print("\n" + "="*70)
     print("=== TOTAL SUMMARY ===")
-    print("="*60)
+    print("="*70)
     print(f"Total Profit from Sales: ${total_profit:.2f}")
     print(f"Total Holding Cost: ${total_holding:.2f}")
     print(f"\n>>> Total Reward (Hybrid Strategy): ${total_reward:.2f} <<<")
     print(f"VM Final Reward: {rewards.get(0, 0):.2f}")
-    print("="*60)
+    print("="*70)
     
 if __name__ == "__main__":
     main()

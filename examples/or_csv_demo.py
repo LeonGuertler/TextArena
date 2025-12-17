@@ -695,9 +695,9 @@ def main():
     rewards, game_info = env.close()
     vm_info = game_info[0]
     
-    print("\n" + "="*60)
+    print("\n" + "="*70)
     print("=== Final Results (OR Algorithm Baseline) ===")
-    print("="*60)
+    print("="*70)
     
     # Per-item statistics
     total_ordered = vm_info.get('total_ordered', {})
@@ -720,9 +720,9 @@ def main():
         print(f"  Total Profit: ${total_profit}")
     
     # Period breakdown
-    print("\n" + "="*60)
+    print("\n" + "="*70)
     print("Period Breakdown:")
-    print("="*60)
+    print("="*70)
     for day_log in vm_info.get('daily_logs', []):
         period = day_log['day']
         exact_date = csv_player.get_exact_date(period)
@@ -737,14 +737,14 @@ def main():
     total_profit = vm_info.get('total_sales_profit', 0)
     total_holding = vm_info.get('total_holding_cost', 0)
     
-    print("\n" + "="*60)
+    print("\n" + "="*70)
     print("=== TOTAL SUMMARY ===")
-    print("="*60)
+    print("="*70)
     print(f"Total Profit from Sales: ${total_profit:.2f}")
     print(f"Total Holding Cost: ${total_holding:.2f}")
     print(f"\n>>> Total Reward (OR Baseline): ${total_reward:.2f} <<<")
     print(f"VM Final Reward: {rewards.get(0, 0):.2f}")
-    print("="*60)
+    print("="*70)
     
 if __name__ == "__main__":
     main()
