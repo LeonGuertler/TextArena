@@ -5,7 +5,7 @@ Date range: Period_1 to Period_50
 Using initial samples from train.csv: D:\TextArena\examples\initial_synthetic_demand_files\case3_increasing\train.csv
   Samples: [112, 97, 116, 138, 94]
   Mean: 111.4, Count: 5
-Promised lead time (used by OR): 4 periods
+Promised lead time (used by OR): 2 periods
 Running full CSV horizon: 50 periods
 
 ======================================================================
@@ -16,7 +16,7 @@ SIMPLE LLM->OR STRATEGY (LLM as Demand Forecaster)
 Period 1 (Period_1) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern summary: past demands = [112, 97, 116, 138, 94], overall mean = 111.4, recent 3-period mean = 116. (2) Seasonal/calendar considerations: no calendar or event information provided, so no adjustments. (3) Recent trend analysis: no clear sustained upward or downward trend\u2014values fluctuate around ~110\u2013116 with one higher observation (138) and one lower (94). (4) Final forecast logic: use a conservative estimate based on the overall mean, weighted modestly toward recent observations; round to nearest integer.
+(1) Historical pattern summary: past demands = [112, 97, 116, 138, 94], overall mean = 111. (2) Seasonal/calendar considerations: no calendar or product-season signals provided. (3) Recent trend analysis: recent three-period average = 116, but sequence shows volatility (138 then 94) with no sustained trend. (4) Final forecast logic: combine overall mean and recent average, slightly prefer overall mean due to noise; forecast = round((111 + 116)/2) = 111.
 
 Carry-over insight: (empty)
 
@@ -29,15 +29,15 @@ Period 1 (Period_1) OR Backend Computation (CAPPED POLICY):
 
 chips(Regular):
   LLM predicted single-period demand: 111
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 111 = 555.00
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 111 = 333.00
   empirical_std (all 5 samples): 17.60
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 17.60 = 39.36
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 17.60 = 30.49
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 588.12
+  Base stock = 358.66
   Total inventory (on-hand + in-transit): 0
   Cap value: 139.95
-  Order (uncapped): 589
+  Order (uncapped): 359
   Order (capped): 140
 
 ======================================================================
@@ -63,11 +63,11 @@ Daily Reward (R_t): $0.00
 Period 2 (Period_2) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern summary: training demands = [112, 97, 116, 138, 94], mean \u2248 111, range 94\u2013138, moderate variability. (2) Seasonal/calendar considerations: no calendar or date-specific events provided for Period_2, so no calendar adjustments. (3) Recent trend analysis: single test observation Period_1 = 91 is below historical mean but is only one period \u2014 insufficient to confirm a regime shift. (4) Final forecast logic: blend historical mean (\u2248111) with the single recent observation (91) to cautiously adjust downward; predicted demand = 101.
+(1) Historical pattern summary: Training periods demand = [112, 97, 116, 138, 94]; mean \u2248 111. (2) Seasonal/calendar considerations: No calendar or event information provided for Period_2; no expected holiday or seasonal spike applied. (3) Recent trend analysis: One observed test-period value = 91, below training mean but only a single observation\u2014insufficient to declare a sustained shift. (4) Final forecast logic: blend training mean with recent observation, weighting recent data moderately to reflect potential short-term change but avoid overreacting to a single point. Forecast = round(0.6*111.4 + 0.4*91) \u2248 103.
 
 Carry-over insight: (empty)
 
-Predicted demand: 101 units
+Predicted demand: 103 units
 ======================================================================
 
 ======================================================================
@@ -75,23 +75,23 @@ Period 2 (Period_2) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 101
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 101 = 505.00
+  LLM predicted single-period demand: 103
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 103 = 309.00
   empirical_std (all 6 samples): 17.81
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 17.81 = 39.82
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 17.81 = 30.85
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 538.52
+  Base stock = 334.96
   Total inventory (on-hand + in-transit): 140
-  Cap value: 130.30
-  Order (uncapped): 399
-  Order (capped): 131
+  Cap value: 132.30
+  Order (uncapped): 195
+  Order (capped): 133
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 131
+    "chips(Regular)": 133
   }
 }
 ======================================================================
@@ -103,18 +103,18 @@ Period 2 (Period_2) Demand: {
 }
 
 === Period 2 Summary ===
-chips(Regular): ordered=131, arrived=0, starting on-hand inventory=0, demand=246, sold=0, ending on-hand inventory=0
+chips(Regular): ordered=133, arrived=0, starting on-hand inventory=0, demand=246, sold=0, ending on-hand inventory=0
 Daily Profit: $0.00, Daily Holding Cost: $0.00
 Daily Reward (R_t): $0.00
 
 Period 3 (Period_3) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern summary: Training-period average = 111 (values: 112, 97, 116, 138, 94) with low-to-moderate variability. (2) Seasonal/calendar considerations: No calendar or event info provided for Period_3; chips(Regular) can spike around events, but no explicit event is given. (3) Recent trend analysis: Test-phase shows a sharp jump from 91 (Period_1) to 246 (Period_2), indicating a strong upward shock but only 2 data points (insufficient to confirm sustained regime change). (4) Final forecast logic: Combine baseline (training mean ~111) with strong recent upward signal, weighting recent observations more (70% weight to recent mean 168.5, 30% to training mean 111) while remaining conservative due to volatility. Result rounded to nearest integer.
+(1) Historical pattern summary: Training mean ~111 units (values: 112,97,116,138,94). (2) Seasonal/calendar considerations: No calendar/date specifics provided for Period_3; no known events to explain a spike. (3) Recent trend analysis: Test observations show a large single spike in Period_2 (91 -> 246) but only one high period so far \u2014 insufficient evidence for a sustained regime change. (4) Final forecast logic: blend baseline (training mean) with recent behavior, weighting recent periods more (recent mean = 168.5). Combined estimate = 0.7*168.5 + 0.3*111.4 \u2248 151.
 
 Carry-over insight: (empty)
 
-Predicted demand: 180 units
+Predicted demand: 151 units
 ======================================================================
 
 ======================================================================
@@ -122,23 +122,23 @@ Period 3 (Period_3) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 180
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 180 = 900.00
+  LLM predicted single-period demand: 151
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 151 = 453.00
   empirical_std (all 7 samples): 54.63
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 54.63 = 122.17
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 54.63 = 94.63
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 1002.82
-  Total inventory (on-hand + in-transit): 271
-  Cap value: 269.87
-  Order (uncapped): 732
-  Order (capped): 270
+  Base stock = 532.64
+  Total inventory (on-hand + in-transit): 273
+  Cap value: 240.87
+  Order (uncapped): 260
+  Order (capped): 241
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 270
+    "chips(Regular)": 241
   }
 }
 ======================================================================
@@ -150,18 +150,18 @@ Period 3 (Period_3) Demand: {
 }
 
 === Period 3 Summary ===
-chips(Regular): ordered=270, arrived=0, starting on-hand inventory=0, demand=285, sold=0, ending on-hand inventory=0
+chips(Regular): ordered=241, arrived=0, starting on-hand inventory=0, demand=285, sold=0, ending on-hand inventory=0
 Daily Profit: $0.00, Daily Holding Cost: $0.00
 Daily Reward (R_t): $0.00
 
 Period 4 (Period_4) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical training mean ~111 (training data: [112,97,116,138,94], avg=111.4). (2) No calendar/date events provided for Period_4; product is chips (regular) which can see spikes around events but none specified. (3) Recent test observations show a sharp rise: Period_1=91, Period_2=246, Period_3=285 \u2014 momentum present but only two high periods (not yet a sustained regime change). (4) Forecast logic: weight recent observations heavily while retaining some influence from prior baseline. Using weighted average (weights 0.6, 0.3, 0.1 on most recent to oldest test points) yields ~254, adjusted conservatively given limited sustained evidence.
+(1) Historical pattern summary: Training mean = 111.4 (periods prior: [112,97,116,138,94]). Test observed Period_1-3 demands = [91,246,285]. (2) Seasonal/calendar considerations: No calendar dates provided; no event-based adjustment applied. (3) Recent trend analysis: Strong upward shift in test window: 91 -> 246 -> 285, recent 3-period test mean = 207.3, substantially above training mean. Last-step absolute change = +39 (15.9%). (4) Final forecast logic: Weight recent momentum; simple extrapolation using last-step increase (285 + 39) to capture ongoing upward trajectory resulting in next-period demand ~324.
 
-Carry-over insight: (empty)
+Carry-over insight: Upward trend confirmed in test Periods 1-3: avg increased from training mean 111.4 to test mean 207.3 (+86.2%), sustained over 3 consecutive periods.
 
-Predicted demand: 254 units
+Predicted demand: 324 units
 ======================================================================
 
 ======================================================================
@@ -169,23 +169,23 @@ Period 4 (Period_4) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 254
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 254 = 1270.00
+  LLM predicted single-period demand: 324
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 324 = 972.00
   empirical_std (all 8 samples): 75.17
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 75.17 = 168.09
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 75.17 = 130.20
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 1411.47
-  Total inventory (on-hand + in-transit): 541
-  Cap value: 377.65
-  Order (uncapped): 871
-  Order (capped): 378
+  Base stock = 1081.58
+  Total inventory (on-hand + in-transit): 514
+  Cap value: 447.65
+  Order (uncapped): 568
+  Order (capped): 448
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 378
+    "chips(Regular)": 448
   }
 }
 ======================================================================
@@ -197,18 +197,18 @@ Period 4 (Period_4) Demand: {
 }
 
 === Period 4 Summary ===
-chips(Regular): ordered=378, arrived=0, starting on-hand inventory=0, demand=437, sold=0, ending on-hand inventory=0
-Daily Profit: $0.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $0.00
+chips(Regular): ordered=448, arrived=140 units (ordered on Period 1, lead_time was 3 periods), 133 units (ordered on Period 2, lead_time was 2 periods), 241 units (ordered on Period 3, lead_time was 1 periods), starting on-hand inventory=514, demand=437, sold=437, ending on-hand inventory=77
+Daily Profit: $1748.00, Daily Holding Cost: $77.00
+Daily Reward (R_t): $1671.00
 
 Period 5 (Period_5) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern summary: training period demands were low and stable (112, 97, 116, 138, 94). (2) Calendar/calendar considerations: no calendar info provided; no known seasonal events to apply. (3) Recent trend analysis: test-phase observed demands show a sustained strong upward trajectory across 4 periods: 91 -> 246 -> 285 -> 437, with period-to-period changes of +155, +39, +152. Recent mean of last two periods = 361 vs mean of first two = 168.5, indicating a large increase. (4) Final forecast logic: given a clear upward regime over 4 periods, use the average absolute period-to-period increase (~115) added to the most recent observation (437) to produce a conservative next-period forecast.
+(1) Historical summary: training mean = 111.4 (training demands [112,97,116,138,94]). Test periods show strong uptick: [91,246,285,437]. (2) Calendar/world: no specific dates provided; chips(Regular) can spike for events but none indicated. (3) Recent trend: clear upward linear trend across test periods; linear regression on test periods 1-4 yields slope \u2248 107.7 units/period. (4) Forecast logic: project linear trend to next period (Period 5): predicted = intercept + slope*5 \u2248 534.0 \u2192 534 units.
 
-Carry-over insight: Upward trend confirmed (Period_1 to Period_4): mean increased from 168.5 (Periods 1-2) to 361 (Periods 3-4), +114% over two-window averages; sustained increase across 4 consecutive periods.
+Carry-over insight: (empty)
 
-Predicted demand: 552 units
+Predicted demand: 534 units
 ======================================================================
 
 ======================================================================
@@ -216,23 +216,23 @@ Period 5 (Period_5) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 552
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 552 = 2760.00
+  LLM predicted single-period demand: 534
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 534 = 1602.00
   empirical_std (all 9 samples): 119.44
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 119.44 = 267.07
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 119.44 = 206.87
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 2984.77
-  Total inventory (on-hand + in-transit): 919
-  Cap value: 748.45
-  Order (uncapped): 2066
-  Order (capped): 749
+  Base stock = 1776.10
+  Total inventory (on-hand + in-transit): 525
+  Cap value: 730.45
+  Order (uncapped): 1252
+  Order (capped): 731
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 749
+    "chips(Regular)": 731
   }
 }
 ======================================================================
@@ -244,18 +244,18 @@ Period 5 (Period_5) Demand: {
 }
 
 === Period 5 Summary ===
-chips(Regular): ordered=749, arrived=140 units (ordered on Period 1, lead_time was 4 periods), starting on-hand inventory=140, demand=448, sold=140, ending on-hand inventory=0
-Daily Profit: $560.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $560.00
+chips(Regular): ordered=731, arrived=0, starting on-hand inventory=77, demand=448, sold=77, ending on-hand inventory=0
+Daily Profit: $308.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $308.00
 
 Period 6 (Period_6) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical pattern summary: Observed demands for Periods 1-5: [91, 246, 285, 437, 448]. Overall upward movement since Period 1 with largest jumps between Periods 2->4. 2) Seasonal/calendar considerations: No calendar or date-specific events provided for Period_6, so no event-driven adjustments. 3) Recent trend analysis: Last three periods (285, 437, 448) show sustained higher demand vs earlier periods. Avg(P1-2)=168.5; Avg(P3-5)=390 (285+437+448)/3 = 390, a +131% increase vs early window, and the last two periods show a modest increment (437 -> 448 = +11), suggesting growth continuing but moderating. 4) Final forecast logic: Blend recent level and modest ongoing growth by taking the recent level (last period 448) and adding a conservative growth increment (~+14% of recent average growth), yielding a next-period forecast of 462.
+(1) Historical pattern summary: Training mean = 111.4 (from [112,97,116,138,94]). Test observations show large increases: [91,246,285,437,448]. (2) Calendar/world: No calendar events provided and none obvious for 'chips(Regular)'. (3) Recent trend analysis: Strong upward regime since Period_2; last two periods (437,448) show stabilization at a higher level with slight upward movement. (4) Final forecast logic: weight recent high-level regime more heavily; use recent average and trend (last 4 avg = 354, last 2 avg = 442) and lean toward the recent level => forecast next period near 450.
 
-Carry-over insight: Upward trend confirmed: avg Periods 1-2 = 168.5 vs avg Periods 3-5 = 390 (+131%), sustained higher demand across Periods 3-5 (3 consecutive periods).
+Carry-over insight: Demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 354 (Periods 2-5) (+217%), sustained over 4 consecutive periods (Periods 2-5).
 
-Predicted demand: 462 units
+Predicted demand: 450 units
 ======================================================================
 
 ======================================================================
@@ -263,23 +263,23 @@ Period 6 (Period_6) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 462
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 462 = 2310.00
+  LLM predicted single-period demand: 450
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 450 = 1350.00
   empirical_std (all 10 samples): 141.02
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 141.02 = 315.33
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 141.02 = 244.25
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 2575.38
-  Total inventory (on-hand + in-transit): 1528
-  Cap value: 693.95
-  Order (uncapped): 1048
-  Order (capped): 694
+  Base stock = 1555.57
+  Total inventory (on-hand + in-transit): 1179
+  Cap value: 681.95
+  Order (uncapped): 377
+  Order (capped): 377
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 694
+    "chips(Regular)": 377
   }
 }
 ======================================================================
@@ -291,18 +291,18 @@ Period 6 (Period_6) Demand: {
 }
 
 === Period 6 Summary ===
-chips(Regular): ordered=694, arrived=131 units (ordered on Period 2, lead_time was 4 periods), starting on-hand inventory=131, demand=587, sold=131, ending on-hand inventory=0
-Daily Profit: $524.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $524.00
+chips(Regular): ordered=377, arrived=448 units (ordered on Period 4, lead_time was 2 periods), 731 units (ordered on Period 5, lead_time was 1 periods), starting on-hand inventory=1179, demand=587, sold=587, ending on-hand inventory=592
+Daily Profit: $2348.00, Daily Holding Cost: $592.00
+Daily Reward (R_t): $1756.00
 
 Period 7 (Period_7) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: demands = [91,246,285,437,448,587]; overall strong upward movement since Period_2 with especially large increases from Period_3 onward. (2) Calendar/world: no dates or seasonal events provided for Period_7, so no calendar adjustments. (3) Recent trend: last four periods show sustained high demand and acceleration (285->437->448->587); recent period-on-period changes = [+155, +39, +152, +11, +139] \u2014 focusing on most recent three increases [+152, +11, +139] gives average increase \u2248 +101. (4) Forecast logic: project recent average absolute increase onto latest observation (587 + ~101), rounded to nearest integer and conservatively reflecting sustained upward regime.
+(1) Historical summary: Training mean = 111.4 (past demands [112,97,116,138,94]). Test observations show a clear upward regime from Period_2 onward: [246,285,437,448,587]. (2) Calendar/world: No calendar dates provided for Period_7; no event adjustments applied. (3) Recent trend: Strong upward trend since Period_2; linear regression on Periods 2-6 yields slope \u2248 +84.5 units/period and intercept \u2248 62.6, implying continued increase. (4) Forecast logic: use linear trend projection to Period_7 (x=7) => 654.1, rounded to integer 654.
 
-Carry-over insight: (empty)
+Carry-over insight: Updated demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 400.6 (Periods 2-6) (+259.5%), sustained over 5 consecutive periods (Periods 2-6).
 
-Predicted demand: 688 units
+Predicted demand: 654 units
 ======================================================================
 
 ======================================================================
@@ -310,23 +310,23 @@ Period 7 (Period_7) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 688
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 688 = 3440.00
+  LLM predicted single-period demand: 654
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 654 = 1962.00
   empirical_std (all 11 samples): 176.26
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 176.26 = 394.12
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 176.26 = 305.28
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 3771.70
-  Total inventory (on-hand + in-transit): 2091
-  Cap value: 977.92
-  Order (uncapped): 1681
-  Order (capped): 978
+  Base stock = 2218.93
+  Total inventory (on-hand + in-transit): 969
+  Cap value: 943.92
+  Order (uncapped): 1250
+  Order (capped): 944
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 978
+    "chips(Regular)": 944
   }
 }
 ======================================================================
@@ -338,18 +338,18 @@ Period 7 (Period_7) Demand: {
 }
 
 === Period 7 Summary ===
-chips(Regular): ordered=978, arrived=270 units (ordered on Period 3, lead_time was 4 periods), starting on-hand inventory=270, demand=637, sold=270, ending on-hand inventory=0
-Daily Profit: $1080.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $1080.00
+chips(Regular): ordered=944, arrived=0, starting on-hand inventory=592, demand=637, sold=592, ending on-hand inventory=0
+Daily Profit: $2368.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $2368.00
 
 Period 8 (Period_8) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical pattern summary: recent test-phase demands show a clear upward regime: 91, 246, 285, 437, 448, 587, 637. 2) Seasonal/calendar: no date-specific events provided; no calendar adjustments applied. 3) Recent trend analysis: strong upward momentum with recent multipliers 1.025, 1.31, 1.085 (avg ~1.14) and absolute recent increases averaging ~67 units. 4) Forecast logic: project recent multiplicative momentum onto Period 7 (637 * 1.14 \u2248 726) and round to nearest integer, yielding the forecast.
+(1) Historical summary: Training mean = 111.4 (past demands [112,97,116,138,94]). Test observations show much higher volumes: [91,246,285,437,448,587,637]. (2) Calendar/seasonality: No calendar info provided; treat as non-seasonal short-term series. (3) Recent trend: Strong upward regime from Period_2 onward; linear growth from Period_2 (246) to Period_7 (637) ~ +78 units/period; recent 3-period average (Periods 5-7) = 557, last observed = 637. (4) Forecast logic: combine recent level (last obs 637), linear trend (+78/period), and smoothing toward 3-period mean -> projected next period = 637 + 78 \u2248 715 (rounded).
 
-Carry-over insight: (empty)
+Carry-over insight: Demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 440.0 (Periods 2-7) (+295%), sustained over 6 consecutive periods (Periods 2-7).
 
-Predicted demand: 726 units
+Predicted demand: 715 units
 ======================================================================
 
 ======================================================================
@@ -357,23 +357,23 @@ Period 8 (Period_8) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 726
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 726 = 3630.00
+  LLM predicted single-period demand: 715
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 715 = 2145.00
   empirical_std (all 12 samples): 203.25
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 203.25 = 454.48
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 203.25 = 352.04
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 4012.50
-  Total inventory (on-hand + in-transit): 2799
-  Cap value: 1060.31
-  Order (uncapped): 1214
-  Order (capped): 1061
+  Base stock = 2441.28
+  Total inventory (on-hand + in-transit): 1321
+  Cap value: 1049.31
+  Order (uncapped): 1121
+  Order (capped): 1050
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1061
+    "chips(Regular)": 1050
   }
 }
 ======================================================================
@@ -385,18 +385,18 @@ Period 8 (Period_8) Demand: {
 }
 
 === Period 8 Summary ===
-chips(Regular): ordered=1061, arrived=378 units (ordered on Period 4, lead_time was 4 periods), starting on-hand inventory=378, demand=776, sold=378, ending on-hand inventory=0
-Daily Profit: $1512.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $1512.00
+chips(Regular): ordered=1050, arrived=0, starting on-hand inventory=0, demand=776, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 9 (Period_9) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: demand has risen sharply across recent periods: [91,246,285,437,448,587,637,776]. (2) Seasonal/calendar: no date-specific events provided; product is non-seasonal snack so no calendar adjustment. (3) Recent trend: strong, sustained upward trend since Period_3 with alternating larger (~+130\u2013155) and smaller (~+10\u201350) increments; last change was a large jump (+139). 3-period average (Periods 6-8) = 666.7. (4) Forecast logic: assume continuation of upward trend with a smaller incremental increase following the observed large jump pattern; forecast = 776 + ~50 \u2248 826.
+(1) Historical summary: Training demands: [112,97,116,138,94] mean=111.4. Test (Periods1-8): [91,246,285,437,448,587,637,776] showing a strong upward shift beginning Period_2. (2) Calendar/world: No specific calendar info provided for Period_9; product is regular chips (seasonal spikes possible around holidays, but no date given). (3) Recent trend: Clear sustained upward regime since Period_2. Mean of Periods 2-8 = 488.0 (+337% vs training mean). Recent period-to-period growth rates (Periods 5->8): +31.0%, +8.5%, +21.8% \u2014 average ~20% growth over last three transitions. (4) Forecast logic: Weight recent level and growth (use last observed 776 and apply conservative recent average growth ~21%), yielding 776 * 1.21 \u2248 940. Final forecast rounded to integer.
 
-Carry-over insight: Upward trend extended: avg Periods 1-2 = 168.5 vs avg Periods 3-8 = 528.33 (+214%), sustained higher demand across Periods 3-8 (6 consecutive periods).
+Carry-over insight: Demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 488.0 (Periods 2-8) (+337%), sustained over 7 consecutive periods (Periods 2-8).
 
-Predicted demand: 826 units
+Predicted demand: 940 units
 ======================================================================
 
 ======================================================================
@@ -404,23 +404,23 @@ Period 9 (Period_9) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 826
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 826 = 4130.00
+  LLM predicted single-period demand: 940
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 940 = 2820.00
   empirical_std (all 13 samples): 239.27
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 239.27 = 535.03
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 239.27 = 414.44
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 4580.30
-  Total inventory (on-hand + in-transit): 3482
-  Cap value: 1219.57
-  Order (uncapped): 1099
-  Order (capped): 1099
+  Base stock = 3168.80
+  Total inventory (on-hand + in-transit): 2371
+  Cap value: 1333.57
+  Order (uncapped): 798
+  Order (capped): 798
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1099
+    "chips(Regular)": 798
   }
 }
 ======================================================================
@@ -432,18 +432,18 @@ Period 9 (Period_9) Demand: {
 }
 
 === Period 9 Summary ===
-chips(Regular): ordered=1099, arrived=749 units (ordered on Period 5, lead_time was 4 periods), starting on-hand inventory=749, demand=963, sold=749, ending on-hand inventory=0
-Daily Profit: $2996.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $2996.00
+chips(Regular): ordered=798, arrived=0, starting on-hand inventory=0, demand=963, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 10 (Period_10) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical summary: Periods 1-9 demands = [91,246,285,437,448,587,637,776,963]. Overall strong upward pattern since Period 3. 2) Calendar/seasonal: no date-specific events provided; product (chips) often sees steady/gradual growth and spikes around events, but none specified. 3) Recent trend analysis: consecutive increases from Period 3 onward with recent increments of +50, +139, +187; recent multiplicative growth ~1.18x (mean of last three ratios). 4) Forecast logic: weight recent periods more heavily and project continuation of the upward trend. Using average recent absolute increase (~125) and recent multiplicative trend (\u22481.18), a conservative blend yields forecast \u22481,120 units.
+(1) Historical summary: Training mean = 111.4 (past demands [112,97,116,138,94]). Test series shows a strong sustained upward regime since Period_2 (246 through 963). (2) Calendar/seasonality: No calendar events provided; product is non-seasonal snack so no immediate calendar adjustment. (3) Recent trend: Recent growth strong and accelerating \u2014 recent multiplicative ratios (Periods 7-9) average \u22481.182; recent absolute increases (Periods 5-9) average \u2248129 units. (4) Forecast logic: I weight recent proportional growth more heavily to capture acceleration; apply recent avg ratio (\u22481.182) to Period_9 (963) => 963 * 1.182 \u2248 1,138. Forecast rounded to integer.
 
-Carry-over insight: Upward trend extended through Period 9: avg Periods 3-9 = 590.43 vs avg Periods 1-2 = 168.5 (+250%), sustained higher demand across Periods 3-9 (7 consecutive periods).
+Carry-over insight: (empty)
 
-Predicted demand: 1120 units
+Predicted demand: 1138 units
 ======================================================================
 
 ======================================================================
@@ -451,23 +451,23 @@ Period 10 (Period_10) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 1120
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 1120 = 5600.00
+  LLM predicted single-period demand: 1138
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 1138 = 3414.00
   empirical_std (all 14 samples): 288.21
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 288.21 = 644.45
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 288.21 = 499.19
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 6142.38
-  Total inventory (on-hand + in-transit): 3832
-  Cap value: 1594.06
-  Order (uncapped): 2311
-  Order (capped): 1595
+  Base stock = 3834.13
+  Total inventory (on-hand + in-transit): 3169
+  Cap value: 1612.06
+  Order (uncapped): 666
+  Order (capped): 666
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1595
+    "chips(Regular)": 666
   }
 }
 ======================================================================
@@ -479,18 +479,18 @@ Period 10 (Period_10) Demand: {
 }
 
 === Period 10 Summary ===
-chips(Regular): ordered=1595, arrived=694 units (ordered on Period 6, lead_time was 4 periods), starting on-hand inventory=694, demand=863, sold=694, ending on-hand inventory=0
-Daily Profit: $2776.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $2776.00
+chips(Regular): ordered=666, arrived=0, starting on-hand inventory=0, demand=863, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 11 (Period_11) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: Periods 1-10 show a strong upward regime from Period 3 onward (values rising from 285 to a peak 963 at P9), with overall recent high demand. (2) Calendar/seasonality: no calendar events provided; treat demand as trend-driven. (3) Recent trend analysis: last 5 periods = [587,637,776,963,863], 5-period avg = 765.2, last 3 avg = 867.3; P10 dipped from P9 but remains within a high plateau. (4) Forecast logic: weight recent observations more heavily (60% on last-3 avg, 40% on last-5 avg) to capture the recent high level while smoothing the P9 spike => forecast = round(0.6*867.33 + 0.4*765.2) = 824.
+(1) Historical pattern: training mean = 111.4 (past demands [112,97,116,138,94]). Test period shows a strong upward regime beginning Period_2 with values much higher than training. (2) Calendar/world: no calendar dates or events provided for Period_11; no holiday adjustment applied. (3) Recent trend: large rise from Period_2\u2192Period_9 (246\u2192963), then a pullback at Period_10 to 863. Last 3 periods (8\u201310) average = 867.3, last value = 863, so short-term level appears around mid-800s. No new sustained regime change detected. (4) Forecast logic: use recent 3-period average to capture recent level while smoothing volatility.
 
 Carry-over insight: (empty)
 
-Predicted demand: 824 units
+Predicted demand: 870 units
 ======================================================================
 
 ======================================================================
@@ -498,15 +498,15 @@ Period 11 (Period_11) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 824
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 824 = 4120.00
+  LLM predicted single-period demand: 870
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 870 = 2610.00
   empirical_std (all 15 samples): 306.69
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 306.69 = 685.78
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 306.69 = 531.20
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 4697.17
-  Total inventory (on-hand + in-transit): 4733
-  Cap value: 1328.46
+  Base stock = 3057.07
+  Total inventory (on-hand + in-transit): 3835
+  Cap value: 1374.46
   Order (uncapped): 0
   Order (capped): 0
 
@@ -526,18 +526,18 @@ Period 11 (Period_11) Demand: {
 }
 
 === Period 11 Summary ===
-chips(Regular): ordered=0, arrived=978 units (ordered on Period 7, lead_time was 4 periods), starting on-hand inventory=978, demand=1136, sold=978, ending on-hand inventory=0
-Daily Profit: $3912.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $3912.00
+chips(Regular): ordered=0, arrived=798 units (ordered on Period 9, lead_time was 2 periods), starting on-hand inventory=798, demand=1136, sold=798, ending on-hand inventory=0
+Daily Profit: $3192.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $3192.00
 
 Period 12 (Period_12) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: Periods 1-11 show a strong upward regime from early low values (P1=91, P2=246) to much higher recent values (P3-P11 range 285-1136). (2) Calendar/seasonality: No calendar or product-specific seasonality provided for Period_12; no known holidays indicated, so rely on observed series. (3) Recent trend: strong upward trend with some volatility: last three periods = 963, 863, 1136 (3-period avg = 987); overall avg P3-11 = 681.33 vs avg P1-2 = 168.5, indicating a sustained regime shift. (4) Forecast logic: weight recent periods more heavily (use 3-period average to capture current level and short-term variability) => forecast rounded to nearest integer.
+(1) Historical pattern summary: Training mean = 111.4; test observed demands show a large sustained increase beginning Period_2 (Period_1=91; Periods_2-11 = [246,285,437,448,587,637,776,963,863,1136]). (2) Seasonal/calendar considerations: No calendar/date specifics provided; no expected holiday effects applied. (3) Recent trend analysis: Strong regime shift sustained since Period_2 with accelerating demand through Period_11; short-term volatility but overall upward trajectory (Period_9\u219211: 963 \u2192 863 \u2192 1136). Recent 3-period average (Periods 9-11) = 987. (4) Final forecast logic: Use recent demand levels with upward weighting due to latest increase (Period_11 jump to 1136) and sustained regime shift. Blend recent 3-period average with last observation to reflect upward momentum: round((987*0.5 + 1136*0.5)) = 1050.
 
-Carry-over insight: Upward trend confirmed through Period 11: avg Periods 1-2 = 168.5 vs avg Periods 3-11 = 681.33 (+304%), sustained higher demand across Periods 3-11 (9 consecutive periods).
+Carry-over insight: Demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 637.8 (Periods 2-11) (+472.7%), sustained over 10 consecutive periods (Periods 2-11).
 
-Predicted demand: 987 units
+Predicted demand: 1050 units
 ======================================================================
 
 ======================================================================
@@ -545,23 +545,23 @@ Period 12 (Period_12) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 987
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 987 = 4935.00
+  LLM predicted single-period demand: 1050
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 1050 = 3150.00
   empirical_std (all 16 samples): 349.75
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 349.75 = 782.06
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 349.75 = 605.78
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 5593.20
-  Total inventory (on-hand + in-transit): 3755
-  Cap value: 1562.28
-  Order (uncapped): 1839
-  Order (capped): 1563
+  Base stock = 3659.84
+  Total inventory (on-hand + in-transit): 3037
+  Cap value: 1625.28
+  Order (uncapped): 623
+  Order (capped): 623
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1563
+    "chips(Regular)": 623
   }
 }
 ======================================================================
@@ -573,18 +573,18 @@ Period 12 (Period_12) Demand: {
 }
 
 === Period 12 Summary ===
-chips(Regular): ordered=1563, arrived=1061 units (ordered on Period 8, lead_time was 4 periods), starting on-hand inventory=1061, demand=1221, sold=1061, ending on-hand inventory=0
-Daily Profit: $4244.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $4244.00
+chips(Regular): ordered=623, arrived=666 units (ordered on Period 10, lead_time was 2 periods), starting on-hand inventory=666, demand=1221, sold=666, ending on-hand inventory=0
+Daily Profit: $2664.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $2664.00
 
 Period 13 (Period_13) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: demand rose from early low values (91,246) to a sustained high regime from Period 3 onward (285,437,...,1221). Recent levels are much higher than initial periods. (2) Calendar/world: no specific calendar events provided; product (chips) often sees steady or rising demand but no calendar adjustments applied. (3) Recent trend: strong upward regime across many periods; last three periods = 863, 1136, 1221 (avg 1073), last five avg \u2248 992; recent per-period slope (Periods 8-12) \u2248 +106 units/period. (4) Forecast logic: project continuation of the upward regime using recent trend slope added to last observed value (1221 + 106 \u2248 1327).
+(1) Historical pattern summary: Training mean = 111.4 (past demands [112,97,116,138,94]). Test period shows a clear, sustained regime shift upward beginning Period_2 with recent test values: [246,285,437,448,587,637,776,963,863,1136,1221]. (2) Calendar/seasonal: No calendar dates provided; no known seasonality to override observed large upward regime. (3) Recent trend analysis: Recent periods show strong upward momentum \u2014 last 5 periods (Periods 8-12) avg = 991.8, last 3 (10-12) avg = 1073.3; recent period-to-period percent changes average ~8\u201320% with some volatility. (4) Final forecast logic: weight recent observations more heavily, apply modest positive continuation of recent trend to Period_12 value (1221) \u2014 producing a conservative upward forecast.
 
-Carry-over insight: Upward trend extended through Period 12: avg Periods 3-12 = 735.3 vs avg Periods 1-2 = 168.5 (+336%), sustained higher demand across Periods 3-12 (10 consecutive periods).
+Carry-over insight: (empty)
 
-Predicted demand: 1327 units
+Predicted demand: 1300 units
 ======================================================================
 
 ======================================================================
@@ -592,23 +592,23 @@ Period 13 (Period_13) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 1327
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 1327 = 6635.00
+  LLM predicted single-period demand: 1300
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 1300 = 3900.00
   empirical_std (all 17 samples): 388.12
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 388.12 = 867.87
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 388.12 = 672.25
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 7365.41
-  Total inventory (on-hand + in-transit): 4257
-  Cap value: 1965.40
-  Order (uncapped): 3109
-  Order (capped): 1966
+  Base stock = 4465.78
+  Total inventory (on-hand + in-transit): 2994
+  Cap value: 1938.40
+  Order (uncapped): 1472
+  Order (capped): 1472
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1966
+    "chips(Regular)": 1472
   }
 }
 ======================================================================
@@ -620,18 +620,18 @@ Period 13 (Period_13) Demand: {
 }
 
 === Period 13 Summary ===
-chips(Regular): ordered=1966, arrived=1099 units (ordered on Period 9, lead_time was 4 periods), starting on-hand inventory=1099, demand=1246, sold=1099, ending on-hand inventory=0
-Daily Profit: $4396.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $4396.00
+chips(Regular): ordered=1472, arrived=0, starting on-hand inventory=0, demand=1246, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 14 (Period_14) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: demand rose from 91,246 in Periods 1-2 to a sustained higher level from Period 3 onward, with values 285,437,448,587,637,776,963,863,1136,1221,1246. (2) Calendar/events: no date-specific events provided; product is chips(Regular), typically stable with occasional spikes but no known calendar effects here. (3) Recent trend: strong upward regime established from Period 3 and continuing; last three periods show high but slightly plateauing values (1136,1221,1246). (4) Forecast logic: weight recent observations more heavily\u2014use the average of the most recent 3 periods (1136,1221,1246 = 1201) and adjust slightly upward for ongoing regime strength. Predicted next-period demand = 1220.
+(1) Historical pattern: training mean = 111.4 (past demands [112,97,116,138,94]). Test period shows a large, sustained uplift beginning Period_2 with values: [246,285,437,448,587,637,776,963,863,1136,1221,1246]. (2) Calendar/world: no calendar dates or events provided for Period_14; no seasonal adjustments applied. (3) Recent trend: strong upward regime from Period_2 onward; recent 4 periods (Periods 10-13) = [863,1136,1221,1246], averaging 1116.5 and showing continued increase but smaller increments (~+20\u2013100 units). (4) Forecast logic: weight recent trend and last observation, allow modest continued rise from Period_13 (1246) toward recent average and trend; predict a moderate increase to 1300.
 
-Carry-over insight: Upward trend extended through Period 13: avg Periods 3-13 = 781.73 vs avg Periods 1-2 = 168.5 (+364%), sustained higher demand across Periods 3-13 (11 consecutive periods).
+Carry-over insight: Updated demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 737.1 (Periods 2-13) (+561.6%), sustained over 12 consecutive periods (Periods 2-13).
 
-Predicted demand: 1220 units
+Predicted demand: 1300 units
 ======================================================================
 
 ======================================================================
@@ -639,23 +639,23 @@ Period 14 (Period_14) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 1220
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 1220 = 6100.00
+  LLM predicted single-period demand: 1300
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 1300 = 3900.00
   empirical_std (all 18 samples): 417.06
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 417.06 = 932.58
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 417.06 = 722.37
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 6884.88
-  Total inventory (on-hand + in-transit): 5124
-  Cap value: 1906.01
-  Order (uncapped): 1761
-  Order (capped): 1761
+  Base stock = 4507.96
+  Total inventory (on-hand + in-transit): 4466
+  Cap value: 1986.01
+  Order (uncapped): 42
+  Order (capped): 42
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1761
+    "chips(Regular)": 42
   }
 }
 ======================================================================
@@ -667,18 +667,18 @@ Period 14 (Period_14) Demand: {
 }
 
 === Period 14 Summary ===
-chips(Regular): ordered=1761, arrived=1595 units (ordered on Period 10, lead_time was 4 periods), starting on-hand inventory=1595, demand=1265, sold=1265, ending on-hand inventory=330
-Daily Profit: $5060.00, Daily Holding Cost: $330.00
-Daily Reward (R_t): $4730.00
+chips(Regular): ordered=42, arrived=623 units (ordered on Period 12, lead_time was 2 periods), 1472 units (ordered on Period 13, lead_time was 1 periods), starting on-hand inventory=2095, demand=1265, sold=1265, ending on-hand inventory=830
+Daily Profit: $5060.00, Daily Holding Cost: $830.00
+Daily Reward (R_t): $4230.00
 
 Period 15 (Period_15) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand rose from 91/246 in Periods 1-2 to a sustained high regime from Period 3 onward, with values: 285,437,448,587,637,776,963,863,1136,1221,1246,1265. Recent mean (Periods 12-14) = 1244. (2) Calendar/seasonality: no calendar dates or seasonal events provided for Period_15, so none applied. (3) Recent trend: continued upward but decelerating growth: increments +25 (12->13) and +19 (13->14), showing small incremental increases. (4) Forecast logic: project a modest continuation of the recent small upward increments (use recent trend smoothing), so next period = 1265 + 18 \u2248 1283.
+(1) Historical pattern: training mean ~111.4 (past demands [112,97,116,138,94]) then large regime shift beginning Period_2 with test demands rising from 246 to 1265 by Period_14. (2) Calendar/world: no explicit dates or holidays provided for Period_15, so no calendar adjustments applied. (3) Recent trend: strong sustained high-demand regime since Period_2; last four periods show smaller incremental increases: Period_11\u219214 = 1136\u21921221\u21921246\u21921265 (deltas +85, +25, +19), indicating continuing growth but decelerating. (4) Forecast logic: project a modest near-term increase consistent with recent small increments, using recent average delta (~43) but weighting latest smaller deltas more heavily; forecast = 1265 + 20 => 1285.
 
 Carry-over insight: (empty)
 
-Predicted demand: 1283 units
+Predicted demand: 1285 units
 ======================================================================
 
 ======================================================================
@@ -686,23 +686,23 @@ Period 15 (Period_15) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 1283
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 1283 = 6415.00
+  LLM predicted single-period demand: 1285
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 1285 = 3855.00
   empirical_std (all 19 samples): 439.22
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 439.22 = 982.12
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 439.22 = 760.75
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 7241.57
-  Total inventory (on-hand + in-transit): 5620
-  Cap value: 2005.45
-  Order (uncapped): 1622
-  Order (capped): 1622
+  Base stock = 4495.26
+  Total inventory (on-hand + in-transit): 3243
+  Cap value: 2007.45
+  Order (uncapped): 1253
+  Order (capped): 1253
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1622
+    "chips(Regular)": 1253
   }
 }
 ======================================================================
@@ -714,18 +714,18 @@ Period 15 (Period_15) Demand: {
 }
 
 === Period 15 Summary ===
-chips(Regular): ordered=1622, arrived=0, starting on-hand inventory=330, demand=1507, sold=330, ending on-hand inventory=0
-Daily Profit: $1320.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $1320.00
+chips(Regular): ordered=1253, arrived=42 units (ordered on Period 14, lead_time was 1 periods), starting on-hand inventory=872, demand=1507, sold=872, ending on-hand inventory=0
+Daily Profit: $3488.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $3488.00
 
 Period 16 (Period_16) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical pattern summary: Past 15 periods show a clear sustained upward regime: early low mean (Periods 1-2 avg=168.5) vs much higher recent levels. 2) Calendar/calendar events: no date-specific holidays provided for Period_16, so no specific event adjustments. 3) Recent trend analysis: demand has risen consecutively from Period_3 onward, with strong increases in recent periods (Periods 13-15 = 1246, 1265, 1507 \u2014 a sharp +19% jump from P14\u2192P15). 4) Final forecast logic: continue the validated upward regime. Blend recent momentum and short-term smoothing (give weight to last period surge but moderate volatility). Predicted next-period demand \u2248 1507 * 1.10 \u2248 1658 (rounded).
+(1) Historical summary: training mean = 111.4; test series shows a clear, large uplift starting Period_2 with values: [246,285,437,448,587,637,776,963,863,1136,1221,1246,1265,1507]. (2) Calendar/product: no calendar events provided; chips(Regular) often steady demand with occasional promotional/seasonal spikes\u2014no explicit calendar adjustments applied. (3) Recent trend: strong sustained upward regime since Period_2; recent acceleration\u2014Periods 13-15 = 1246,1265,1507 (last three avg = 1339). Recent multiperiod growth rates: 1221->1246 (+2.0%), 1246->1265 (+1.5%), 1265->1507 (+19.1%) average multiplier \u22481.075. (4) Forecast logic: project continuation of the upward regime with a short-run multiplier from recent growth applied to last observed demand (1507 * 1.075 \u2248 1619). Final forecast rounded to integer.
 
-Carry-over insight: Upward trend extended through Period 15: avg Periods 3-15 = 874.69 vs avg Periods 1-2 = 168.5 (+~419%), sustained higher demand across Periods 3-15 (13 consecutive periods).
+Carry-over insight: Demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 829.8 (Periods 2-15) (+645%), sustained over 14 consecutive periods (Periods 2-15).
 
-Predicted demand: 1658 units
+Predicted demand: 1620 units
 ======================================================================
 
 ======================================================================
@@ -733,23 +733,23 @@ Period 16 (Period_16) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 1658
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 1658 = 8290.00
+  LLM predicted single-period demand: 1620
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 1620 = 4860.00
   empirical_std (all 20 samples): 476.46
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 476.46 = 1065.39
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 476.46 = 825.25
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 9186.66
-  Total inventory (on-hand + in-transit): 6912
-  Cap value: 2441.71
-  Order (uncapped): 2275
-  Order (capped): 2275
+  Base stock = 5554.55
+  Total inventory (on-hand + in-transit): 3624
+  Cap value: 2403.71
+  Order (uncapped): 1931
+  Order (capped): 1931
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 2275
+    "chips(Regular)": 1931
   }
 }
 ======================================================================
@@ -761,18 +761,18 @@ Period 16 (Period_16) Demand: {
 }
 
 === Period 16 Summary ===
-chips(Regular): ordered=2275, arrived=1563 units (ordered on Period 12, lead_time was 4 periods), starting on-hand inventory=1563, demand=1547, sold=1547, ending on-hand inventory=16
-Daily Profit: $6188.00, Daily Holding Cost: $16.00
-Daily Reward (R_t): $6172.00
+chips(Regular): ordered=1931, arrived=0, starting on-hand inventory=0, demand=1547, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 17 (Period_17) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: demand rises steadily from Period_3 (285) to Period_16 (1547) with accelerating growth and occasional larger jumps (e.g., P8\u2192P9, P14\u2192P15). (2) Calendar/seasonality: no calendar date info provided for Period_17; no holiday adjustments applied. (3) Recent trend: growth continues but has moderated recently: P14=1265, P15=1507 (+19%), P16=1547 (+2.7%). 3\u2010period average (P14\u2013P16)=1440. (4) Forecast logic: weight most recent observation and short-term average to reflect continued but slowing growth; predicted demand near recent level with a modest uptick from P16.
+(1) Historical pattern: training mean = 111.4 (past demands [112,97,116,138,94]). Test series shows a clear, large step-up starting Period_2 with rapidly rising values through Period_16 (Period_2..16 values: 246,285,437,448,587,637,776,963,863,1136,1221,1246,1265,1507,1547). (2) Calendar/seasonal: no calendar dates beyond period labels provided; product (chips) can see sustained higher baseline due to changed demand regime\u2014no holiday-specific spikes identified. (3) Recent trend: strong upward regime since Period_2; recent periods (P14-P16 = 1265,1507,1547) show continued increases but more moderate week-over-week growth (~+2.7% from P15\u2192P16). Overall mean of Periods 2\u201316 = 877.6, much higher than training. (4) Forecast logic: weight recent observations more heavily while acknowledging the sustained elevated regime; using recent two/three-period growth (~+2\u20134%) and last value 1547, I project a modest increase to reflect continuing regime: predicted_demand = 1580.
 
-Carry-over insight: (empty)
+Carry-over insight: Demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 877.6 (Periods 2-16) (+687.8%), sustained over 15 consecutive periods (Periods 2-16).
 
-Predicted demand: 1575 units
+Predicted demand: 1580 units
 ======================================================================
 
 ======================================================================
@@ -780,23 +780,23 @@ Period 17 (Period_17) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 1575
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 1575 = 7875.00
+  LLM predicted single-period demand: 1580
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 1580 = 4740.00
   empirical_std (all 21 samples): 507.13
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 507.13 = 1133.98
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 507.13 = 878.38
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 8829.38
-  Total inventory (on-hand + in-transit): 7640
-  Cap value: 2409.16
-  Order (uncapped): 1190
-  Order (capped): 1190
+  Base stock = 5479.26
+  Total inventory (on-hand + in-transit): 5555
+  Cap value: 2414.16
+  Order (uncapped): 0
+  Order (capped): 0
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1190
+    "chips(Regular)": 0
   }
 }
 ======================================================================
@@ -808,18 +808,18 @@ Period 17 (Period_17) Demand: {
 }
 
 === Period 17 Summary ===
-chips(Regular): ordered=1190, arrived=1966 units (ordered on Period 13, lead_time was 4 periods), starting on-hand inventory=1982, demand=1724, sold=1724, ending on-hand inventory=258
-Daily Profit: $6896.00, Daily Holding Cost: $258.00
-Daily Reward (R_t): $6638.00
+chips(Regular): ordered=0, arrived=0, starting on-hand inventory=0, demand=1724, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 18 (Period_18) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand shows a strong sustained upward regime from Period_3 onward, with recent values: P15=1507, P16=1547, P17=1724. (2) Calendar/seasonality: no specific dates provided; product (chips) typically benefits from continuing demand spikes but no holiday adjustment applied. (3) Recent trend: acceleration present \u2014 recent increases of +40 (P15->P16) and +177 (P16->P17); 3-period average increase (P14->P17 diffs 242,40,177) = ~153 units. (4) Forecast logic: project recent average absolute increase forward from P17 (1724 + 153) to capture accelerating but variable growth.
+(1) Historical pattern: training mean = 111.4; test series shows a clear sustained upward regime starting Period_2 with values rising from 246 to 1724 by Period_17. (2) Calendar: no dates or seasonality provided for Period_18; no calendar events applied. (3) Recent trend: growth rates recent periods = [1.016,1.19,1.0266,1.114] (Periods 13->17); recent average growth \u2248 1.0867 (~8.7%); last-period growth = 1.114 (11.4%). (4) Forecast logic: apply conservative recent-average growth (\u22488.7%) to last observed demand 1724 \u2192 1724 * 1.0867 \u2248 1872. Final forecast rounded to integer.
 
 Carry-over insight: (empty)
 
-Predicted demand: 1877 units
+Predicted demand: 1872 units
 ======================================================================
 
 ======================================================================
@@ -827,23 +827,23 @@ Period 18 (Period_18) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 1877
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 1877 = 9385.00
+  LLM predicted single-period demand: 1872
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 1872 = 5616.00
   empirical_std (all 22 samples): 544.62
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 544.62 = 1217.81
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 544.62 = 943.32
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 10409.94
-  Total inventory (on-hand + in-transit): 7106
-  Cap value: 2772.83
-  Order (uncapped): 3304
-  Order (capped): 2773
+  Base stock = 6409.91
+  Total inventory (on-hand + in-transit): 5555
+  Cap value: 2767.83
+  Order (uncapped): 855
+  Order (capped): 855
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 2773
+    "chips(Regular)": 855
   }
 }
 ======================================================================
@@ -855,18 +855,18 @@ Period 18 (Period_18) Demand: {
 }
 
 === Period 18 Summary ===
-chips(Regular): ordered=2773, arrived=1761 units (ordered on Period 14, lead_time was 4 periods), starting on-hand inventory=2019, demand=1802, sold=1802, ending on-hand inventory=217
-Daily Profit: $7208.00, Daily Holding Cost: $217.00
-Daily Reward (R_t): $6991.00
+chips(Regular): ordered=855, arrived=1253 units (ordered on Period 15, lead_time was 3 periods), 1931 units (ordered on Period 16, lead_time was 2 periods), starting on-hand inventory=3184, demand=1802, sold=1802, ending on-hand inventory=1382
+Daily Profit: $7208.00, Daily Holding Cost: $1382.00
+Daily Reward (R_t): $5826.00
 
 Period 19 (Period_19) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demands show a strong sustained upward regime from Period_3 onward with values rising from 285 to 1802 by Period_18. Recent values: P16=1547, P17=1724, P18=1802. (2) Calendar/seasonal: no calendar info provided; product (chips) often stable or rises slightly for general demand\u2014no specific holiday spike indicated. (3) Recent trend analysis: continuing upward trend; recent period-to-period changes: +40 (P15\u2192P16), +177 (P16\u2192P17), +78 (P17\u2192P18). Average recent growth \u2248 +95 units per period, 3-period average demand \u2248 1691. (4) Forecast logic: combine recent average demand and recent average growth to project next period: 1802 + 95 \u2248 1897, rounded to integer.
+(1) Historical summary: Training mean ~111.4; test data shows a sustained large upward regime starting Period_2 with values rising from 246 to 1802 by Period_18. (2) Calendar/seasonality: No calendar or seasonal events provided; chips(Regular) steady-demand snack \u2014 no explicit seasonal adjustment. (3) Recent trend: Strong upward trend persists. Recent values: Period_15=1507, P16=1547, P17=1724, P18=1802 \u2014 recent increases: +40, +177, +78; recent growth rate ~4.5% from P17\u2192P18. (4) Forecast logic: Projecting continued moderate growth, using a blend of recent absolute and percentage increases (approx +80\u2013+100). 1802 + 83 \u2248 1885.
 
 Carry-over insight: (empty)
 
-Predicted demand: 1897 units
+Predicted demand: 1885 units
 ======================================================================
 
 ======================================================================
@@ -874,23 +874,23 @@ Period 19 (Period_19) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 1897
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 1897 = 9485.00
+  LLM predicted single-period demand: 1885
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 1885 = 5655.00
   empirical_std (all 23 samples): 579.09
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 579.09 = 1294.88
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 579.09 = 1003.01
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 10574.80
-  Total inventory (on-hand + in-transit): 8077
-  Cap value: 2849.51
-  Order (uncapped): 2498
-  Order (capped): 2498
+  Base stock = 6499.15
+  Total inventory (on-hand + in-transit): 4608
+  Cap value: 2837.51
+  Order (uncapped): 1892
+  Order (capped): 1892
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 2498
+    "chips(Regular)": 1892
   }
 }
 ======================================================================
@@ -902,18 +902,18 @@ Period 19 (Period_19) Demand: {
 }
 
 === Period 19 Summary ===
-chips(Regular): ordered=2498, arrived=1622 units (ordered on Period 15, lead_time was 4 periods), starting on-hand inventory=1839, demand=2075, sold=1839, ending on-hand inventory=0
-Daily Profit: $7356.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $7356.00
+chips(Regular): ordered=1892, arrived=0, starting on-hand inventory=1382, demand=2075, sold=1382, ending on-hand inventory=0
+Daily Profit: $5528.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $5528.00
 
 Period 20 (Period_20) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: Demand has shown a strong, sustained upward regime from Period_3 onward (values rising from 285 to 2075). Recent five periods: 1507,1547,1724,1802,2075 showing continued acceleration. (2) Calendar/seasonal: No specific calendar flags provided; product (chips) is non-seasonal but benefits from general increasing demand and possible event-driven spikes. (3) Recent trend analysis: Recent growth rates: Period15->16 +2.7%, 16->17 +11.4%, 17->18 +4.6%, 18->19 +15.2% \u2014 average recent growth \u22488.5% with volatility. (4) Forecast logic: Extrapolate recent upward trend weighting most recent increases; apply a conservative uplift (~10%) to Period_19 (2075) to account for recent acceleration without overfitting.
+(1) Historical summary: Training mean = 111.4 (past demands [112,97,116,138,94]). Test period shows a clear and large upward regime beginning Period_2 with values rising from 246 to 2075 by Period_19. (2) Calendar/seasonal: No calendar dates or seasonal drivers provided for Period_20; no holiday adjustments applied. (3) Recent trend: strong sustained growth \u2014 last 3 periods: 1724, 1802, 2075 (growth factors ~1.114, 1.046, 1.151). Recent average multiplicative growth \u2248 1.104. (4) Forecast logic: project next period using recent average growth applied to Period_19 (2075 * 1.104 \u2248 2291). Final forecast rounded to integer.
 
-Carry-over insight: Upward trend extended through Period 19: avg Periods 3-19 = 1089.35 vs avg Periods 1-2 = 168.5 (+546.7%), sustained higher demand across Periods 3-19 (17 consecutive periods).
+Carry-over insight: Demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 1042.5 (Periods 2-19) (+836%), sustained over 18 consecutive periods (Periods 2-19).
 
-Predicted demand: 2283 units
+Predicted demand: 2291 units
 ======================================================================
 
 ======================================================================
@@ -921,23 +921,23 @@ Period 20 (Period_20) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 2283
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2283 = 11415.00
+  LLM predicted single-period demand: 2291
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2291 = 6873.00
   empirical_std (all 24 samples): 627.29
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 627.29 = 1402.66
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 627.29 = 1086.50
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 12595.51
-  Total inventory (on-hand + in-transit): 8736
-  Cap value: 3314.80
-  Order (uncapped): 3860
-  Order (capped): 3315
+  Base stock = 7787.42
+  Total inventory (on-hand + in-transit): 5118
+  Cap value: 3322.80
+  Order (uncapped): 2670
+  Order (capped): 2670
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 3315
+    "chips(Regular)": 2670
   }
 }
 ======================================================================
@@ -949,14 +949,14 @@ Period 20 (Period_20) Demand: {
 }
 
 === Period 20 Summary ===
-chips(Regular): ordered=3315, arrived=2275 units (ordered on Period 16, lead_time was 4 periods), starting on-hand inventory=2275, demand=1973, sold=1973, ending on-hand inventory=302
-Daily Profit: $7892.00, Daily Holding Cost: $302.00
-Daily Reward (R_t): $7590.00
+chips(Regular): ordered=2670, arrived=855 units (ordered on Period 18, lead_time was 2 periods), 1892 units (ordered on Period 19, lead_time was 1 periods), starting on-hand inventory=2747, demand=1973, sold=1973, ending on-hand inventory=774
+Daily Profit: $7892.00, Daily Holding Cost: $774.00
+Daily Reward (R_t): $7118.00
 
 Period 21 (Period_21) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern summary: demand shows a clear sustained upward regime from Period_3 onward with values rising from 285 to 1973 by Period_20. (2) Seasonal/calendar considerations: no calendar dates provided beyond period indices, so no holiday adjustments applied. (3) Recent trend analysis: last 3 periods = [1802, 2075, 1973], 3-period average = 1950; last 5-period average = 1824, indicating continued high plateau with slight short-term volatility. (4) Final forecast logic: weigh recent 3-period average more heavily to reflect current level and momentum, producing forecast ~1950.
+1) Historical pattern: training mean ~111.4 with low, stable values; test data shows a strong, sustained upward regime starting Period_2 with much higher means. 2) Calendar/world: no calendar date info provided for Period_21, so no holiday adjustments applied. 3) Recent trend: demand has generally increased across test periods with some volatility; last 3 periods = [1802, 2075, 1973], 3-period average = 1950, last 5 average = 1824. 4) Forecast logic: weight most recent observations more heavily given clear upward regime; use 3-period average as best short-term estimator while acknowledging slight volatility. Forecast = 1950.
 
 Carry-over insight: (empty)
 
@@ -969,22 +969,22 @@ Period 21 (Period_21) OR Backend Computation (CAPPED POLICY):
 
 chips(Regular):
   LLM predicted single-period demand: 1950
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 1950 = 9750.00
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 1950 = 5850.00
   empirical_std (all 25 samples): 656.74
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 656.74 = 1468.51
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 656.74 = 1137.50
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 10985.93
-  Total inventory (on-hand + in-transit): 10078
+  Base stock = 6807.34
+  Total inventory (on-hand + in-transit): 5815
   Cap value: 3030.24
-  Order (uncapped): 908
-  Order (capped): 908
+  Order (uncapped): 993
+  Order (capped): 993
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 908
+    "chips(Regular)": 993
   }
 }
 ======================================================================
@@ -996,14 +996,14 @@ Period 21 (Period_21) Demand: {
 }
 
 === Period 21 Summary ===
-chips(Regular): ordered=908, arrived=1190 units (ordered on Period 17, lead_time was 4 periods), starting on-hand inventory=1492, demand=1983, sold=1492, ending on-hand inventory=0
-Daily Profit: $5968.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $5968.00
+chips(Regular): ordered=993, arrived=0, starting on-hand inventory=774, demand=1983, sold=774, ending on-hand inventory=0
+Daily Profit: $3096.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $3096.00
 
 Period 22 (Period_22) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand rose sharply from Period_1 (91) to a sustained high regime from Period_3 onward, reaching ~2k in recent periods. (2) Calendar/world: no date-specific events provided; product (chips) can see occasional spikes around holidays but none indicated. (3) Recent trend: last 3 periods = [2075,1973,1983], short-term mean = 2010; recent values show stabilization around 1.97\u20132.08k. (4) Forecast logic: use short-term average (last 3) to capture current regime while smoothing noise -> round to nearest unit.
+(1) Historical pattern: training mean = 111.4; test series shows a strong, sustained upward regime starting at Period_2 with values rising from 246 to 1983 by Period_21. (2) Calendar/seasonal: no calendar info provided for Period_22; product (chips) can be stable but recent data dominates. (3) Recent trend: last 3 periods = [2075,1973,1983], 3-period avg = 2010.3, slight plateau/soft decline from the peak at Period_19 but no reversal. (4) Forecast logic: use recent average weighted toward latest stability; predict next period \u2248 round(3-period average) = 2010.
 
 Carry-over insight: (empty)
 
@@ -1016,22 +1016,22 @@ Period 22 (Period_22) OR Backend Computation (CAPPED POLICY):
 
 chips(Regular):
   LLM predicted single-period demand: 2010
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2010 = 10050.00
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2010 = 6030.00
   empirical_std (all 26 samples): 680.40
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 680.40 = 1521.43
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 680.40 = 1178.50
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 11330.47
-  Total inventory (on-hand + in-transit): 9494
+  Base stock = 7021.85
+  Total inventory (on-hand + in-transit): 6034
   Cap value: 3129.17
-  Order (uncapped): 1837
-  Order (capped): 1837
+  Order (uncapped): 988
+  Order (capped): 988
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1837
+    "chips(Regular)": 988
   }
 }
 ======================================================================
@@ -1043,18 +1043,18 @@ Period 22 (Period_22) Demand: {
 }
 
 === Period 22 Summary ===
-chips(Regular): ordered=1837, arrived=2773 units (ordered on Period 18, lead_time was 4 periods), starting on-hand inventory=2773, demand=2221, sold=2221, ending on-hand inventory=552
-Daily Profit: $8884.00, Daily Holding Cost: $552.00
-Daily Reward (R_t): $8332.00
+chips(Regular): ordered=988, arrived=2670 units (ordered on Period 20, lead_time was 2 periods), starting on-hand inventory=2670, demand=2221, sold=2221, ending on-hand inventory=449
+Daily Profit: $8884.00, Daily Holding Cost: $449.00
+Daily Reward (R_t): $8435.00
 
 Period 23 (Period_23) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand shows a strong, sustained upward regime from Period_3 onward (values rising from 285 to 2221 by Period_22). (2) Calendar/seasonality: no calendar-specific information provided; product (chips) typically steady or slightly higher in events, but no event indicated for Period_23. (3) Recent trend analysis: recent observations show continued growth\u2014Period_20=1973, P21=1983, P22=2221. Recent incremental changes (P18\u2192P22) average ~99 units per period; last-period change was +238, indicating continued upward momentum. (4) Forecast logic: combine recent average level (mean of P20\u2013P22 \u22482059) with observed recent incremental trend (~+99) and weight toward upward momentum -> conservative projection around 2320 units.
+(1) Historical pattern summary: Training mean = 111.4; test series shows a large and sustained regime shift beginning Period_2 with steadily increasing demand through Period_22 (values rising from 246 to 2221). (2) Seasonal/calendar considerations: No calendar or holiday information provided for Period_23; product (chips) can have elevated demand around events but no specific date cues given. (3) Recent trend analysis: Recent periods show continued growth but with variability: Period_19=2075, 20=1973, 21=1983, 22=2221 \u2014 3-period mean (20-22)=2059; 4-period mean (19-22)=2063; last observation =2221, indicating short-term uptick. (4) Final forecast logic: use recent 3\u20134 period average to smooth volatility while acknowledging upward momentum; round to integer.
 
 Carry-over insight: (empty)
 
-Predicted demand: 2320 units
+Predicted demand: 2060 units
 ======================================================================
 
 ======================================================================
@@ -1062,23 +1062,23 @@ Period 23 (Period_23) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 2320
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2320 = 11600.00
+  LLM predicted single-period demand: 2060
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2060 = 6180.00
   empirical_std (all 27 samples): 714.07
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 714.07 = 1596.70
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 714.07 = 1236.80
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 12943.82
-  Total inventory (on-hand + in-transit): 9110
-  Cap value: 3494.54
-  Order (uncapped): 3834
-  Order (capped): 3495
+  Base stock = 7220.92
+  Total inventory (on-hand + in-transit): 4801
+  Cap value: 3234.54
+  Order (uncapped): 2420
+  Order (capped): 2420
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 3495
+    "chips(Regular)": 2420
   }
 }
 ======================================================================
@@ -1090,18 +1090,18 @@ Period 23 (Period_23) Demand: {
 }
 
 === Period 23 Summary ===
-chips(Regular): ordered=3495, arrived=2498 units (ordered on Period 19, lead_time was 4 periods), starting on-hand inventory=3050, demand=2326, sold=2326, ending on-hand inventory=724
-Daily Profit: $9304.00, Daily Holding Cost: $724.00
-Daily Reward (R_t): $8580.00
+chips(Regular): ordered=2420, arrived=0, starting on-hand inventory=449, demand=2326, sold=449, ending on-hand inventory=0
+Daily Profit: $1796.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $1796.00
 
 Period 24 (Period_24) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand shows a strong, persistent upward regime from Period_3 onward (values rising from 285 to 2326 by Period_23). (2) Calendar/world knowledge: no specific date/event provided for Period_24, so no calendar-driven spike/decline applied. (3) Recent trend analysis: last 6 periods (Periods 18-23) show net increases with an average period-over-period gain \u2248 +105 units. Recent three-period changes: +238, +105 (averaging \u2248 +172) but smoothing across six yields \u2248 +105. (4) Forecast logic: project continuation of the recent upward trend using the smoothed recent average increase (~+105) applied to Period_23 (2326) => 2326 + 105 \u2248 2431. Conservatively round to integer.
+(1) Historical summary: Training mean = 111.4; test series shows a clear, sustained step-up starting Period_2 with values rising from 246 up to 2326 by Period_23. (2) Calendar/seasonal: No calendar info provided; product (chips) often benefits from general demand increases but no specific event is indicated. (3) Recent trend: Periods 21-23 = [1983,2221,2326] show continued upward momentum; recent average = 2176.7 and average two-period increment = +171.5. (4) Forecast logic: project the upward trend forward by adding the recent average increment (~171.5) to Period_23 (2326) to produce a conservative next-period forecast while respecting sustained regime shift evidence.
 
-Carry-over insight: (empty)
+Carry-over insight: Demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 1239.5 (Periods 2-23) (+1012%), sustained over 22 consecutive periods (Periods 2-23).
 
-Predicted demand: 2431 units
+Predicted demand: 2498 units
 ======================================================================
 
 ======================================================================
@@ -1109,23 +1109,23 @@ Period 24 (Period_24) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 2431
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2431 = 12155.00
+  LLM predicted single-period demand: 2498
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2498 = 7494.00
   empirical_std (all 28 samples): 747.56
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 747.56 = 1671.60
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 747.56 = 1294.81
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 13561.85
-  Total inventory (on-hand + in-transit): 10279
-  Cap value: 3660.63
-  Order (uncapped): 3283
-  Order (capped): 3283
+  Base stock = 8583.74
+  Total inventory (on-hand + in-transit): 6772
+  Cap value: 3727.63
+  Order (uncapped): 1812
+  Order (capped): 1812
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 3283
+    "chips(Regular)": 1812
   }
 }
 ======================================================================
@@ -1137,18 +1137,18 @@ Period 24 (Period_24) Demand: {
 }
 
 === Period 24 Summary ===
-chips(Regular): ordered=3283, arrived=3315 units (ordered on Period 20, lead_time was 4 periods), starting on-hand inventory=4039, demand=2566, sold=2566, ending on-hand inventory=1473
-Daily Profit: $10264.00, Daily Holding Cost: $1473.00
-Daily Reward (R_t): $8791.00
+chips(Regular): ordered=1812, arrived=993 units (ordered on Period 21, lead_time was 3 periods), starting on-hand inventory=993, demand=2566, sold=993, ending on-hand inventory=0
+Daily Profit: $3972.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $3972.00
 
 Period 25 (Period_25) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand shows a clear sustained upward regime after Period_2; values rise from 285 (P3) to 2566 (P24). (2) Calendar/world: no date-specific events provided; product (chips) often follows steady growth and occasional promotional spikes but nothing explicit here. (3) Recent trend: last 5 periods (P20-P24) = [1973,1983,2221,2326,2566] with average multiplicative growth \u2248 +6.9% per period and average additive increase \u2248 +148 units. (4) Forecast logic: apply recent growth (slightly favoring multiplicative acceleration) to P24 (2566 * 1.069 \u2248 2744).
+(1) Historical summary: Training mean = 111.4; test series shows a clear sustained upward regime starting Period_2 with values rising from 246 to 2566 by Period_24. (2) Calendar/seasonal: No specific calendar events provided; product (chips) often shows steady demand with occasional promotional spikes \u2014 current pattern is a secular increase, not a single holiday spike. (3) Recent trend: last 3 period increments = +238 (P21->P22), +105 (P22->P23), +240 (P23->P24); average recent increment \u2248 +194. Recent relative growth rates: P22->P23 +4.7%, P23->P24 +10.3%; momentum strong. (4) Forecast logic: combine average recent absolute increment (~+194) with modest upward momentum (~+9% on latest), leaning slightly to momentum given sustained increases. Base = 2566; forecast \u2248 2566 + 234 \u2248 2800 (rounded).
 
-Carry-over insight: Upward trend extended through Period 24: avg Periods 3-24 = 1,345 vs avg Periods 1-2 = 168.5 (+~699%), sustained higher demand across Periods 3-24 (22 consecutive periods).
+Carry-over insight: (empty)
 
-Predicted demand: 2744 units
+Predicted demand: 2800 units
 ======================================================================
 
 ======================================================================
@@ -1156,23 +1156,23 @@ Period 25 (Period_25) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 2744
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2744 = 13720.00
+  LLM predicted single-period demand: 2800
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2800 = 8400.00
   empirical_std (all 29 samples): 789.80
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 789.80 = 1766.04
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 789.80 = 1367.97
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 15206.33
-  Total inventory (on-hand + in-transit): 10996
-  Cap value: 4043.10
-  Order (uncapped): 4211
-  Order (capped): 4044
+  Base stock = 9551.31
+  Total inventory (on-hand + in-transit): 7591
+  Cap value: 4099.10
+  Order (uncapped): 1961
+  Order (capped): 1961
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 4044
+    "chips(Regular)": 1961
   }
 }
 ======================================================================
@@ -1184,18 +1184,18 @@ Period 25 (Period_25) Demand: {
 }
 
 === Period 25 Summary ===
-chips(Regular): ordered=4044, arrived=908 units (ordered on Period 21, lead_time was 4 periods), starting on-hand inventory=2381, demand=2604, sold=2381, ending on-hand inventory=0
-Daily Profit: $9524.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $9524.00
+chips(Regular): ordered=1961, arrived=988 units (ordered on Period 22, lead_time was 3 periods), 1812 units (ordered on Period 24, lead_time was 1 periods), starting on-hand inventory=2800, demand=2604, sold=2604, ending on-hand inventory=196
+Daily Profit: $10416.00, Daily Holding Cost: $196.00
+Daily Reward (R_t): $10220.00
 
 Period 26 (Period_26) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand shows a strong sustained upward regime since Period 3, rising from 285 to 2604 by Period 25. (2) Calendar/seasonality: no calendar info provided; product (chips) often stable or increases with general upward trend. (3) Recent trend: recent incremental changes (Periods 21-25) = [+10, +238, +105, +240, +38], 5-period average increase \u2248 +126 units. (4) Forecast logic: extrapolate recent average increment to next period: 2604 + 126 \u2248 2730 (rounded to integer).
+(1) Historical summary: training mean = 111.4; test shows a clear, sustained upward regime starting Period_2 with much higher levels (Periods 2-25). (2) Calendar/events: no calendar or product-season signals provided for Period_26. (3) Recent trend: demand rose rapidly early in test then growth slowed recently \u2014 Periods 23-25 = 2326, 2566, 2604 (avg \u2248 2499), recent increments +240, +38. (4) Forecast logic: project a modest continuation of recent small upward change; use recent 3-period average with slight upward bias.
 
 Carry-over insight: (empty)
 
-Predicted demand: 2730 units
+Predicted demand: 2500 units
 ======================================================================
 
 ======================================================================
@@ -1203,23 +1203,23 @@ Period 26 (Period_26) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 2730
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2730 = 13650.00
+  LLM predicted single-period demand: 2500
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2500 = 7500.00
   empirical_std (all 30 samples): 826.23
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 826.23 = 1847.50
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 826.23 = 1431.07
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 15204.89
-  Total inventory (on-hand + in-transit): 12659
-  Cap value: 4089.02
-  Order (uncapped): 2546
-  Order (capped): 2546
+  Base stock = 8704.42
+  Total inventory (on-hand + in-transit): 6948
+  Cap value: 3859.02
+  Order (uncapped): 1757
+  Order (capped): 1757
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 2546
+    "chips(Regular)": 1757
   }
 }
 ======================================================================
@@ -1231,14 +1231,14 @@ Period 26 (Period_26) Demand: {
 }
 
 === Period 26 Summary ===
-chips(Regular): ordered=2546, arrived=1837 units (ordered on Period 22, lead_time was 4 periods), starting on-hand inventory=1837, demand=2645, sold=1837, ending on-hand inventory=0
-Daily Profit: $7348.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $7348.00
+chips(Regular): ordered=1757, arrived=2420 units (ordered on Period 23, lead_time was 3 periods), 1961 units (ordered on Period 25, lead_time was 1 periods), starting on-hand inventory=4577, demand=2645, sold=2645, ending on-hand inventory=1932
+Daily Profit: $10580.00, Daily Holding Cost: $1932.00
+Daily Reward (R_t): $8648.00
 
 Period 27 (Period_27) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand has shown a strong sustained upward regime from Period_3 onward, rising from low hundreds to mid-2,000s; recent levels: P24=2566, P25=2604, P26=2645. (2) Calendar/seasonality: no date-specific events provided; product (chips) typically stable or slightly higher in general retail\u2014no adjustments made. (3) Recent trend: last three periods show steady incremental increases: P24\u2192P25 = +38, P25\u2192P26 = +41 (avg +39.5 units per period). (4) Forecast logic: extrapolate recent linear increment, rounding to integer: 2645 + 39.5 \u2248 2685.
+(1) Historical pattern: training mean = 111.4; test data shows a clear, sustained regime shift upward starting Period_2 with progressively larger means (see observed series). (2) Calendar/world knowledge: no specific dates or seasonal events provided for Period_27, so no calendar adjustments applied. (3) Recent trend analysis: recent periods show continued growth but smaller incremental gains: Period_24=2566, Period_25=2604 (+38), Period_26=2645 (+41); average recent increment \u2248 39.5 units. (4) Forecast logic: project next period by applying recent average incremental increase to last observed value (2645 + 39.5 \u2248 2685).
 
 Carry-over insight: (empty)
 
@@ -1251,22 +1251,22 @@ Period 27 (Period_27) OR Backend Computation (CAPPED POLICY):
 
 chips(Regular):
   LLM predicted single-period demand: 2685
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2685 = 13425.00
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2685 = 8055.00
   empirical_std (all 31 samples): 858.26
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 858.26 = 1919.13
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 858.26 = 1486.55
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 15040.18
-  Total inventory (on-hand + in-transit): 13368
+  Base stock = 9306.11
+  Total inventory (on-hand + in-transit): 6060
   Cap value: 4096.71
-  Order (uncapped): 1673
-  Order (capped): 1673
+  Order (uncapped): 3247
+  Order (capped): 3247
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1673
+    "chips(Regular)": 3247
   }
 }
 ======================================================================
@@ -1278,18 +1278,18 @@ Period 27 (Period_27) Demand: {
 }
 
 === Period 27 Summary ===
-chips(Regular): ordered=1673, arrived=3495 units (ordered on Period 23, lead_time was 4 periods), starting on-hand inventory=3495, demand=2890, sold=2890, ending on-hand inventory=605
-Daily Profit: $11560.00, Daily Holding Cost: $605.00
-Daily Reward (R_t): $10955.00
+chips(Regular): ordered=3247, arrived=0, starting on-hand inventory=1932, demand=2890, sold=1932, ending on-hand inventory=0
+Daily Profit: $7728.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $7728.00
 
 Period 28 (Period_28) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: Past demands show a strong, sustained upward regime from Period_3 onward (values rising from 285 to 2890 by Period_27). Recent values: Period_25=2604, Period_26=2645, Period_27=2890. (2) Seasonal/calendar: No calendar or product-specific events provided; chips(Regular) typically shows stable consumption with occasional promotional/seasonal spikes\u2014none identified explicitly for Period_28. (3) Recent trend analysis: Long-run upward regime confirmed; short-run absolute changes: +38 (24->25), +41 (25->26), +245 (26->27) \u2014 recent growth rates ~1.5%, 1.6%, 9.3% (3-period avg ~4.1%). (4) Forecast logic: Project next period using recent average growth (~4.1%) applied to Period_27 (2890) => 2890 * 1.041 \u2248 3008. Forecast rounded to nearest integer.
+(1) Historical pattern: training mean 111.4 then test period shows a clear sustained upward regime beginning Period_2 with values rising from 246 to 2890 over Periods 2-27. (2) Calendar/seasonality: no calendar dates or seasonal events provided for Period_28; product chips(Regular) typically has stable demand with occasional promotional/seasonal spikes \u2014 no explicit event indicated. (3) Recent trend: growth is consistently positive and accelerating overall. Recent sequential changes: Period_23\u219224 +240, 24\u219225 +38, 25\u219226 +41, 26\u219227 +245. 4-period average increase \u2248 +141 units; short-run momentum supports continued increase. (4) Forecast logic: project next period by adding the recent 4-period average increase to Period_27 observed demand (2890 + 141 \u2248 3031).
 
-Carry-over insight: Upward trend extended through Period 27: avg Periods 3-27 = 1509.1 vs avg Periods 1-2 = 168.5 (+~796%), sustained higher demand across Periods 3-27 (25 consecutive periods).
+Carry-over insight: (empty)
 
-Predicted demand: 3008 units
+Predicted demand: 3031 units
 ======================================================================
 
 ======================================================================
@@ -1297,23 +1297,23 @@ Period 28 (Period_28) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 3008
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 3008 = 15040.00
+  LLM predicted single-period demand: 3031
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 3031 = 9093.00
   empirical_std (all 32 samples): 898.43
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 898.43 = 2008.95
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 898.43 = 1556.13
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 16730.78
-  Total inventory (on-hand + in-transit): 12151
-  Cap value: 4485.79
-  Order (uncapped): 4580
-  Order (capped): 4486
+  Base stock = 10402.67
+  Total inventory (on-hand + in-transit): 7375
+  Cap value: 4508.79
+  Order (uncapped): 3028
+  Order (capped): 3028
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 4486
+    "chips(Regular)": 3028
   }
 }
 ======================================================================
@@ -1325,18 +1325,18 @@ Period 28 (Period_28) Demand: {
 }
 
 === Period 28 Summary ===
-chips(Regular): ordered=4486, arrived=3283 units (ordered on Period 24, lead_time was 4 periods), starting on-hand inventory=3888, demand=2643, sold=2643, ending on-hand inventory=1245
-Daily Profit: $10572.00, Daily Holding Cost: $1245.00
-Daily Reward (R_t): $9327.00
+chips(Regular): ordered=3028, arrived=0, starting on-hand inventory=0, demand=2643, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 29 (Period_29) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical summary: demand rose markedly from early periods (Periods 1-2 avg 168.5) into a sustained higher regime from Period 3 onward with values generally increasing to 2.6-2.9k by Periods 24-28. 2) Calendar/seasonality: no calendar dates provided for Period_29; product (chips) can show modest uplift around holidays, but no specific event indicated. 3) Recent trend: last 5 periods show stabilization around ~2.67k (Periods 24-28 avg = 2669.6); last 3 periods average = 2726 and show one dip from 2890 to 2643 (not a sustained decline). 4) Forecast logic: weight most recent observations (last 3) while acknowledging slight mean reversion toward the 5-period average; choose the last-3 mean as the forecast to reflect recent level. Predicted integer demand = 2726.
+(1) Historical pattern summary: Training mean = 111.4 (from past demands [112,97,116,138,94]). Test-phase shows a sustained, large regime jump starting Period_2 with values much higher than training (Periods 2-28 mean ~1504). (2) Seasonal/calendar: No calendar dates or holidays provided for Period_29; product is non-seasonal snack so no immediate calendar adjustments. (3) Recent trend analysis: Recent 5 periods (Periods 24-28) = [2566,2604,2645,2890,2643], mean ~2669.6, slight volatility but no reversal. (4) Final forecast logic: base next-period forecast on recent 5-period average to capture current elevated regime while smoothing noise => forecast = 2670 (rounded integer).
 
-Carry-over insight: (empty)
+Carry-over insight: Updated demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 1504.3 (Periods 2-28) (+1251%), sustained over 27 consecutive periods (Periods 2-28).
 
-Predicted demand: 2726 units
+Predicted demand: 2670 units
 ======================================================================
 
 ======================================================================
@@ -1344,23 +1344,23 @@ Period 29 (Period_29) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 2726
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2726 = 13630.00
+  LLM predicted single-period demand: 2670
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2670 = 8010.00
   empirical_std (all 33 samples): 918.94
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 918.94 = 2054.81
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 918.94 = 1591.65
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 15359.37
-  Total inventory (on-hand + in-transit): 13994
-  Cap value: 4237.52
-  Order (uncapped): 1366
-  Order (capped): 1366
+  Base stock = 9349.57
+  Total inventory (on-hand + in-transit): 10403
+  Cap value: 4181.52
+  Order (uncapped): 0
+  Order (capped): 0
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 1366
+    "chips(Regular)": 0
   }
 }
 ======================================================================
@@ -1372,18 +1372,18 @@ Period 29 (Period_29) Demand: {
 }
 
 === Period 29 Summary ===
-chips(Regular): ordered=1366, arrived=4044 units (ordered on Period 25, lead_time was 4 periods), starting on-hand inventory=5289, demand=2814, sold=2814, ending on-hand inventory=2475
-Daily Profit: $11256.00, Daily Holding Cost: $2475.00
-Daily Reward (R_t): $8781.00
+chips(Regular): ordered=0, arrived=1757 units (ordered on Period 26, lead_time was 3 periods), 3028 units (ordered on Period 28, lead_time was 1 periods), starting on-hand inventory=4785, demand=2814, sold=2814, ending on-hand inventory=1971
+Daily Profit: $11256.00, Daily Holding Cost: $1971.00
+Daily Reward (R_t): $9285.00
 
 Period 30 (Period_30) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand shows a strong, sustained upward regime from Period_3 onward with values rising from 285 to 2814 by Period_29. (2) Calendar/seasonality: no calendar events provided; product (chips) often tracks steady growth and occasional promotional spikes\u2014no specific event to adjust for. (3) Recent trend: last six periods (Period_24\u201329) = [2566,2604,2645,2890,2643,2814], average gain \u2248 +50 units/period over that window, recent values centered ~2782 with volatility \xb1~120. (4) Forecast logic: project recent linear trend (~+50) added to last observed 2814, tempered by recent volatility \u2192 round to nearest integer. Final forecast = 2864.
+(1) Historical pattern: training mean = 111.4; test series shows a clear sustained upward regime starting at Period_2 with values rising into the 2\u20133k range by Period_29. (2) Calendar/seasonality: no calendar dates provided to adjust; product (chips) often stable or increases around events but no event indicated. (3) Recent trend: last 3 periods = [2890, 2643, 2814], 3-period average \u2248 2782, slight volatility but no reversal. (4) Forecast logic: weight recent observations heavily (3-period average) with conservative rounding.
 
 Carry-over insight: (empty)
 
-Predicted demand: 2864 units
+Predicted demand: 2800 units
 ======================================================================
 
 ======================================================================
@@ -1391,23 +1391,23 @@ Period 30 (Period_30) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 2864
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2864 = 14320.00
+  LLM predicted single-period demand: 2800
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2800 = 8400.00
   empirical_std (all 34 samples): 943.80
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 943.80 = 2110.41
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 943.80 = 1634.71
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 16096.16
-  Total inventory (on-hand + in-transit): 12546
-  Cap value: 4416.42
-  Order (uncapped): 3551
-  Order (capped): 3551
+  Base stock = 9775.81
+  Total inventory (on-hand + in-transit): 7589
+  Cap value: 4352.42
+  Order (uncapped): 2187
+  Order (capped): 2187
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 3551
+    "chips(Regular)": 2187
   }
 }
 ======================================================================
@@ -1419,18 +1419,18 @@ Period 30 (Period_30) Demand: {
 }
 
 === Period 30 Summary ===
-chips(Regular): ordered=3551, arrived=2546 units (ordered on Period 26, lead_time was 4 periods), starting on-hand inventory=5021, demand=2873, sold=2873, ending on-hand inventory=2148
-Daily Profit: $11492.00, Daily Holding Cost: $2148.00
-Daily Reward (R_t): $9344.00
+chips(Regular): ordered=2187, arrived=0, starting on-hand inventory=1971, demand=2873, sold=1971, ending on-hand inventory=0
+Daily Profit: $7884.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $7884.00
 
 Period 31 (Period_31) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical summary: demand rose from 91/246 early periods to a sustained higher level, reaching ~2.6\u20132.9k in the most recent periods. 2) Calendar/world: no specific date or event provided for Period_31 to alter baseline. 3) Recent trend: Periods 26\u201330 = [2645,2890,2643,2814,2873] showing stabilization around 2.7\u20132.9k with a slight uptick in the last two periods. 4) Forecast logic: use recent window average with modest upward bias toward the last observed value to reflect stabilization and slight momentum.
+(1) Historical pattern: training mean ~111.4; test data shows a large, sustained upward regime starting Period_2 with values rising from 246 to 2873 by Period_30. (2) Calendar/seasonal: no calendar events provided; product (chips) typically stable or slightly higher around events but no specific date-driven spikes indicated. (3) Recent trend: last 6 periods show elevated stable-to-upward values (Periods 25-30 mean = (2604+2645+2890+2643+2814+2873)/6 = 2746), last 3 periods average = 2776.7 and most recent value = 2873, indicating a modest continuing upward drift. (4) Forecast logic: weight recent observation more, project a small upward continuation (~3% above last value) to reflect ongoing trend while avoiding overreaction to volatility.
 
 Carry-over insight: (empty)
 
-Predicted demand: 2850 units
+Predicted demand: 2960 units
 ======================================================================
 
 ======================================================================
@@ -1438,23 +1438,23 @@ Period 31 (Period_31) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 2850
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2850 = 14250.00
+  LLM predicted single-period demand: 2960
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2960 = 8880.00
   empirical_std (all 35 samples): 967.26
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 967.26 = 2162.85
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 967.26 = 1675.34
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 16070.30
-  Total inventory (on-hand + in-transit): 13224
-  Cap value: 4440.99
-  Order (uncapped): 2847
-  Order (capped): 2847
+  Base stock = 10290.00
+  Total inventory (on-hand + in-transit): 7805
+  Cap value: 4550.99
+  Order (uncapped): 2485
+  Order (capped): 2485
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 2847
+    "chips(Regular)": 2485
   }
 }
 ======================================================================
@@ -1466,18 +1466,18 @@ Period 31 (Period_31) Demand: {
 }
 
 === Period 31 Summary ===
-chips(Regular): ordered=2847, arrived=1673 units (ordered on Period 27, lead_time was 4 periods), starting on-hand inventory=3821, demand=3046, sold=3046, ending on-hand inventory=775
-Daily Profit: $12184.00, Daily Holding Cost: $775.00
-Daily Reward (R_t): $11409.00
+chips(Regular): ordered=2485, arrived=2187 units (ordered on Period 30, lead_time was 1 periods), starting on-hand inventory=2187, demand=3046, sold=2187, ending on-hand inventory=0
+Daily Profit: $8748.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $8748.00
 
 Period 32 (Period_32) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern summary: demand rose from early low values (Periods 1-2 avg 168.5) to a sustained higher regime from Period 3 onward (values mostly >250 and growing). Recent values show a strong upward level: Periods 28-31 = [2643, 2814, 2873, 3046]. (2) Seasonal/calendar considerations: no calendar dates or special events provided for Period_32; product (chips) typically follows retail/consumption trends and can steadily increase absent shocks. (3) Recent trend analysis: sustained upward regime confirmed across many periods; short-term momentum over last 3 periods is positive (2814 -> 2873 -> 3046). Recent average of last 3 = 2911; recent incremental changes = +59, +173 (avg +116 per period). (4) Final forecast logic: project recent momentum forward by adding the average recent increment (~116) to the last observed demand (3046) => 3046 + 116 = 3162 (rounded to integer).
+(1) Historical summary: Training mean = 111.4 (past demands [112,97,116,138,94]). Test series shows a clear sustained regime shift to much higher demand beginning Period_2 with values rising from 246 to 3046 by Period_31. (2) Seasonal/calendar: No calendar or product-season signals provided; product is chips (Regular) which has no explicit seasonality here. (3) Recent trend: Last 8 periods show an overall upward trajectory with recent values P28\u2013P31 = [2643,2814,2873,3046]; recent differences = [+171,+59,+173], average recent increase \u2248 +134 units/period. (4) Forecast logic: base forecast on recent trend: last observed 3046 + recent average increase (~134) \u2192 3180 (rounded).
 
-Carry-over insight: Upward trend extended through Period 31: avg Periods 3-31 = 1693.9 vs avg Periods 1-2 = 168.5 (+~905%), sustained higher demand across Periods 3-31 (29 consecutive periods).
+Carry-over insight: (empty)
 
-Predicted demand: 3162 units
+Predicted demand: 3180 units
 ======================================================================
 
 ======================================================================
@@ -1485,23 +1485,23 @@ Period 32 (Period_32) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 3162
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 3162 = 15810.00
+  LLM predicted single-period demand: 3180
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 3180 = 9540.00
   empirical_std (all 36 samples): 994.77
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 994.77 = 2224.36
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 994.77 = 1722.99
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 17682.07
-  Total inventory (on-hand + in-transit): 13025
-  Cap value: 4798.24
-  Order (uncapped): 4658
-  Order (capped): 4658
+  Base stock = 10990.10
+  Total inventory (on-hand + in-transit): 8103
+  Cap value: 4816.24
+  Order (uncapped): 2888
+  Order (capped): 2888
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 4658
+    "chips(Regular)": 2888
   }
 }
 ======================================================================
@@ -1513,18 +1513,18 @@ Period 32 (Period_32) Demand: {
 }
 
 === Period 32 Summary ===
-chips(Regular): ordered=4658, arrived=4486 units (ordered on Period 28, lead_time was 4 periods), starting on-hand inventory=5261, demand=3005, sold=3005, ending on-hand inventory=2256
-Daily Profit: $12020.00, Daily Holding Cost: $2256.00
-Daily Reward (R_t): $9764.00
+chips(Regular): ordered=2888, arrived=0, starting on-hand inventory=0, demand=3005, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 33 (Period_33) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand rose from low triple-digits in Periods 1-2 to a sustained high regime from Period 3 onward, with values now in the ~2,800\u20133,100 range in the last 6 periods. (2) Calendar/seasonal: no calendar or product-seasonality signals provided for Period_33. (3) Recent trend: last 3 periods = 2873, 3046, 3005 (3-period avg = 2974.7), showing stabilization around ~3,000 after earlier strong growth. (4) Forecast logic: use short-term recent average (weighted to most recent periods) to project continuity of the current regime\u2014rounding to integer.
+(1) Historical summary: training mean = 111.4; test series shows large sustained increase from Period_2 onward with values now in the ~2.6k\u20133.0k range. (2) Calendar: no date-specific holidays provided; product (chips) can have higher baseline but no discrete calendar spike indicated. (3) Recent trend: last 5 periods (28-32) = [2643,2814,2873,3046,3005], 5-period average = 2876, 3-period average = 2974 \u2014 modest upward drift. (4) Forecast logic: weight recent 3-period average more heavily due to recent stabilization; choose a rounded integer near that average.
 
 Carry-over insight: (empty)
 
-Predicted demand: 2975 units
+Predicted demand: 2960 units
 ======================================================================
 
 ======================================================================
@@ -1532,23 +1532,23 @@ Period 33 (Period_33) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 2975
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 2975 = 14875.00
+  LLM predicted single-period demand: 2960
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 2960 = 8880.00
   empirical_std (all 37 samples): 1016.20
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1016.20 = 2272.30
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1016.20 = 1760.12
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 16787.42
-  Total inventory (on-hand + in-transit): 14678
-  Cap value: 4646.51
-  Order (uncapped): 2110
-  Order (capped): 2110
+  Base stock = 10361.35
+  Total inventory (on-hand + in-transit): 10991
+  Cap value: 4631.51
+  Order (uncapped): 0
+  Order (capped): 0
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 2110
+    "chips(Regular)": 0
   }
 }
 ======================================================================
@@ -1560,18 +1560,18 @@ Period 33 (Period_33) Demand: {
 }
 
 === Period 33 Summary ===
-chips(Regular): ordered=2110, arrived=1366 units (ordered on Period 29, lead_time was 4 periods), starting on-hand inventory=3622, demand=3391, sold=3391, ending on-hand inventory=231
-Daily Profit: $13564.00, Daily Holding Cost: $231.00
-Daily Reward (R_t): $13333.00
+chips(Regular): ordered=0, arrived=2485 units (ordered on Period 31, lead_time was 2 periods), starting on-hand inventory=2485, demand=3391, sold=2485, ending on-hand inventory=0
+Daily Profit: $9940.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $9940.00
 
 Period 34 (Period_34) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: demand shows a clear sustained upward regime from Period_3 onward (values rising from 285 to 3391 by Period_33). Recent values: Period_31=3046, Period_32=3005, Period_33=3391. (2) Calendar/world: no specific date-based events provided; product (chips) often benefits from general seasonal/occasion-driven spikes but none specified for Period_34. (3) Recent trend: short-term momentum is positive\u2014three-period weighted average (weights 0.5/0.3/0.2) yields ~3206; simple 3-period mean = ~3147; last period jump was +386 (+12.8%). (4) Forecast logic: combine recent weighted average with modest upward bias to account for continuing upward regime while being conservative against volatility. Final forecast rounded to integer.
+(1) Historical pattern summary: training mean = 111.4; test data shows a sustained regime shift to much higher demand starting Period_2 with large growth through Period_33. (2) Seasonal/calendar: no calendar info provided for Period_34; no specific holiday adjustments applied. (3) Recent trend analysis: demand has generally trended upward recently; last three values = [3046, 3005, 3391] (3\u2010period avg = 3147), recent per\u2010period increase ~+170\u2013180. (4) Final forecast logic: combine recent average and recent growth to project continuation of the upward trend; forecast = 3550 (rounded integer).
 
-Carry-over insight: Upward trend extended through Period 33: avg Periods 3-33 = 1787.71 vs avg Periods 1-2 = 168.5 (+~961%), sustained higher demand across Periods 3-33 (31 consecutive periods).
+Carry-over insight: (empty)
 
-Predicted demand: 3220 units
+Predicted demand: 3550 units
 ======================================================================
 
 ======================================================================
@@ -1579,23 +1579,23 @@ Period 34 (Period_34) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 3220
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 3220 = 16100.00
+  LLM predicted single-period demand: 3550
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 3550 = 10650.00
   empirical_std (all 38 samples): 1051.52
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1051.52 = 2351.28
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1051.52 = 1821.29
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 18078.88
-  Total inventory (on-hand + in-transit): 13397
-  Cap value: 4949.60
-  Order (uncapped): 4682
-  Order (capped): 4682
+  Base stock = 12182.84
+  Total inventory (on-hand + in-transit): 8506
+  Cap value: 5279.60
+  Order (uncapped): 3677
+  Order (capped): 3677
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 4682
+    "chips(Regular)": 3677
   }
 }
 ======================================================================
@@ -1607,18 +1607,18 @@ Period 34 (Period_34) Demand: {
 }
 
 === Period 34 Summary ===
-chips(Regular): ordered=4682, arrived=3551 units (ordered on Period 30, lead_time was 4 periods), starting on-hand inventory=3782, demand=3368, sold=3368, ending on-hand inventory=414
-Daily Profit: $13472.00, Daily Holding Cost: $414.00
-Daily Reward (R_t): $13058.00
+chips(Regular): ordered=3677, arrived=2888 units (ordered on Period 32, lead_time was 2 periods), starting on-hand inventory=2888, demand=3368, sold=2888, ending on-hand inventory=0
+Daily Profit: $11552.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $11552.00
 
 Period 35 (Period_35) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: data show a strong sustained upward regime since Period_3 with recent values: Period_31-34 = [3046,3005,3391,3368]. Overall mean has risen substantially since Period_3. (2) Seasonal/calendar: no date-specific events supplied; no calendar adjustments applied. (3) Recent trend: recent average change over Period_30-34 is +~124 units/period; last period stable (3391\u21923368). (4) Forecast logic: project recent mean-reversion + ongoing upward trend using recent average increment (\u2248+124) applied to Period_34 (3368) => 3368+124 \u2248 3492.
+(1) Historical pattern: training mean = 111.4 (periods 1-5). Test series shows a clear, sustained regime increase starting Period_2 with much higher values throughout Periods 2-34. (2) Calendar/world: no specific calendar events provided; product (chips, regular) typically stable but can rise with general demand\u2014no adjustments. (3) Recent trend: last 5 periods (30-34) = [2873,3046,3005,3391,3368], 5-period avg = 3136.6, showing a modest uptick from the prior window. Overall mean for Periods 2-34 = 1791.0, substantially above training mean. (4) Forecast logic: weight recent observations more heavily; use short-window average (last 5) to capture current level and momentum. Final forecast rounded to integer.
 
-Carry-over insight: Upward trend extended through Period 34: avg Periods 3-34 = 1839.6 vs avg Periods 1-2 = 168.5 (+~992%), sustained higher demand across Periods 3-34 (32 consecutive periods).
+Carry-over insight: Demand regime shift starting Period_2: avg increased from training mean 111.4 to recent mean 1791.0 (Periods 2-34) (+1505.8%), sustained over 33 consecutive periods (Periods 2-34).
 
-Predicted demand: 3492 units
+Predicted demand: 3140 units
 ======================================================================
 
 ======================================================================
@@ -1626,23 +1626,23 @@ Period 35 (Period_35) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 3492
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 3492 = 17460.00
+  LLM predicted single-period demand: 3140
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 3140 = 9420.00
   empirical_std (all 39 samples): 1080.56
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1080.56 = 2416.21
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1080.56 = 1871.59
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 19493.53
-  Total inventory (on-hand + in-transit): 14711
-  Cap value: 5269.36
-  Order (uncapped): 4783
-  Order (capped): 4783
+  Base stock = 10995.17
+  Total inventory (on-hand + in-transit): 9295
+  Cap value: 4917.36
+  Order (uncapped): 1701
+  Order (capped): 1701
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 4783
+    "chips(Regular)": 1701
   }
 }
 ======================================================================
@@ -1654,18 +1654,18 @@ Period 35 (Period_35) Demand: {
 }
 
 === Period 35 Summary ===
-chips(Regular): ordered=4783, arrived=2847 units (ordered on Period 31, lead_time was 4 periods), starting on-hand inventory=3261, demand=3282, sold=3261, ending on-hand inventory=0
-Daily Profit: $13044.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $13044.00
+chips(Regular): ordered=1701, arrived=0, starting on-hand inventory=0, demand=3282, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 36 (Period_36) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand rose from low triple-digits in Periods 1-2 to a sustained multi-thousand level from Period 9 onward, showing a long-term upward regime. (2) Calendar/seasonal: no specific dates or events given for Period_36, so no calendar adjustments applied. (3) Recent trend: last three periods show a mild pullback from 3391 -> 3368 -> 3282, suggesting short-term plateau/softening but still within the higher regime. (4) Forecast logic: use a short-window average to reflect recent modest decline while anchoring to the established high-demand regime; 3-period average = 3347, rounded to integer.
+1) Historical summary: Training mean = 111.4; test series shows a clear sustained upward regime since Period_2 with values rising from 246 to the 3k+ range by Period_31+. 2) Calendar/seasonality: No specific calendar dates or seasonal events provided for Period_36, so no calendar adjustments. 3) Recent trend: last 5 periods = [3046,3005,3391,3368,3282], 5-period avg = 3218, last 3 avg = 3347; recent values show a mild plateau/small decline from a peak around Period_33. 4) Forecast logic: weigh recent observations more heavily while respecting the established higher regime; choose a conservative near-term value between the 5-period and 3-period averages to reflect slight recent cooling.
 
 Carry-over insight: (empty)
 
-Predicted demand: 3347 units
+Predicted demand: 3300 units
 ======================================================================
 
 ======================================================================
@@ -1673,23 +1673,23 @@ Period 36 (Period_36) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 3347
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 3347 = 16735.00
+  LLM predicted single-period demand: 3300
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 3300 = 9900.00
   empirical_std (all 40 samples): 1101.91
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1101.91 = 2463.95
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1101.91 = 1908.56
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 18808.71
-  Total inventory (on-hand + in-transit): 16233
-  Cap value: 5159.48
-  Order (uncapped): 2576
-  Order (capped): 2576
+  Base stock = 11506.29
+  Total inventory (on-hand + in-transit): 10996
+  Cap value: 5112.48
+  Order (uncapped): 511
+  Order (capped): 511
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 2576
+    "chips(Regular)": 511
   }
 }
 ======================================================================
@@ -1701,18 +1701,18 @@ Period 36 (Period_36) Demand: {
 }
 
 === Period 36 Summary ===
-chips(Regular): ordered=2576, arrived=4658 units (ordered on Period 32, lead_time was 4 periods), starting on-hand inventory=4658, demand=3448, sold=3448, ending on-hand inventory=1210
-Daily Profit: $13792.00, Daily Holding Cost: $1210.00
-Daily Reward (R_t): $12582.00
+chips(Regular): ordered=511, arrived=0, starting on-hand inventory=0, demand=3448, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 37 (Period_37) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand has shown a strong multi-period upward regime from Period_3 onward, rising from mid-hundreds to multi-thousands; recent values (P34-P36) = 3368, 3282, 3448. (2) Calendar/seasonality: no specific calendar events provided for Period_37; product (chips) typically has modest increases for general consumption but no known spike. (3) Recent trend: short-term shows small volatility around a rising mean; last change P35->P36 = +5.1%, three-period average (P34-P36) = 3366. (4) Forecast logic: blend recent growth and short-term average, favoring the latest upward move while being conservative given volatility. Forecast = 3500 (rounded integer).
+(1) Historical pattern summary: Training mean = 111.4; test data shows a clear sustained regime shift to much higher demand starting Period_2, with values now in the 2k-3.4k range. (2) Seasonal/calendar considerations: No calendar/date specifics provided for Period_37; product is everyday snack likely stable absent events. (3) Recent trend analysis: Last 6 periods (Periods 31-36) average = ~3257, last 3 periods (34-36) average = ~3366 with values [3368, 3282, 3448] indicating short-term stability with slight upward volatility. (4) Final forecast logic: blend short-term stability and recent uptick by using the 3-period average adjusted slightly toward the most recent observation.
 
 Carry-over insight: (empty)
 
-Predicted demand: 3500 units
+Predicted demand: 3370 units
 ======================================================================
 
 ======================================================================
@@ -1720,23 +1720,23 @@ Period 37 (Period_37) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 3500
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 3500 = 17500.00
+  LLM predicted single-period demand: 3370
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 3370 = 10110.00
   empirical_std (all 41 samples): 1126.64
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1126.64 = 2519.24
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1126.64 = 1951.40
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 19620.25
-  Total inventory (on-hand + in-transit): 15361
-  Cap value: 5353.16
-  Order (uncapped): 4260
-  Order (capped): 4260
+  Base stock = 11752.34
+  Total inventory (on-hand + in-transit): 11507
+  Cap value: 5223.16
+  Order (uncapped): 246
+  Order (capped): 246
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 4260
+    "chips(Regular)": 246
   }
 }
 ======================================================================
@@ -1748,18 +1748,18 @@ Period 37 (Period_37) Demand: {
 }
 
 === Period 37 Summary ===
-chips(Regular): ordered=4260, arrived=2110 units (ordered on Period 33, lead_time was 4 periods), starting on-hand inventory=3320, demand=3748, sold=3320, ending on-hand inventory=0
-Daily Profit: $13280.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $13280.00
+chips(Regular): ordered=246, arrived=3677 units (ordered on Period 34, lead_time was 3 periods), starting on-hand inventory=3677, demand=3748, sold=3677, ending on-hand inventory=0
+Daily Profit: $14708.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $14708.00
 
 Period 38 (Period_38) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical summary: demand grew rapidly from early low values to a much higher plateau; recent observed demands (Periods 33-37) = [3391, 3368, 3282, 3448, 3748]. 2) Calendar/world: no date-specific events provided; product is a non-seasonal snack so no immediate calendar spike expected. 3) Recent trend: modest upward momentum over the last three periods (P35\u2192P36\u2192P37 = 3282\u21923448\u21923748); 5-period mean = 3447, 3-period mean = 3493, latest increment = +300. 4) Forecast logic: blend recent mean with short-term momentum (weight recent periods higher) to conservatively project continuation of the upward movement. Predicted next-period demand set slightly above the recent 3-period mean to reflect momentum.
+(1) Historical summary: Training mean = 111.4; test series shows a strong sustained upward regime starting Period_2 with values rising from 246 to 3748 by Period_37. (2) Calendar/seasonal: No calendar dates provided beyond period index; product (chips) often sees steady or rising demand but no explicit holiday noted for Period_38. (3) Recent trend: last three periods = 3282, 3448, 3748 \u2014 consecutive increases with recent average increment \u2248 +233 units per period and 3-period average \u2248 3493. (4) Forecast logic: extrapolate recent upward momentum using average recent increment (~+233) applied to latest observation (3748) => 3748 + 233 \u2248 3981.
 
 Carry-over insight: (empty)
 
-Predicted demand: 3668 units
+Predicted demand: 3981 units
 ======================================================================
 
 ======================================================================
@@ -1767,23 +1767,23 @@ Period 38 (Period_38) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 3668
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 3668 = 18340.00
+  LLM predicted single-period demand: 3981
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 3981 = 11943.00
   empirical_std (all 42 samples): 1160.17
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1160.17 = 2594.23
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1160.17 = 2009.48
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 20523.36
-  Total inventory (on-hand + in-transit): 16301
-  Cap value: 5576.31
-  Order (uncapped): 4223
-  Order (capped): 4223
+  Base stock = 13634.22
+  Total inventory (on-hand + in-transit): 8076
+  Cap value: 5889.31
+  Order (uncapped): 5559
+  Order (capped): 5559
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 4223
+    "chips(Regular)": 5559
   }
 }
 ======================================================================
@@ -1795,18 +1795,18 @@ Period 38 (Period_38) Demand: {
 }
 
 === Period 38 Summary ===
-chips(Regular): ordered=4223, arrived=4682 units (ordered on Period 34, lead_time was 4 periods), starting on-hand inventory=4682, demand=3929, sold=3929, ending on-hand inventory=753
-Daily Profit: $15716.00, Daily Holding Cost: $753.00
-Daily Reward (R_t): $14963.00
+chips(Regular): ordered=5559, arrived=1701 units (ordered on Period 35, lead_time was 3 periods), 511 units (ordered on Period 36, lead_time was 2 periods), 246 units (ordered on Period 37, lead_time was 1 periods), starting on-hand inventory=2458, demand=3929, sold=2458, ending on-hand inventory=0
+Daily Profit: $9832.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $9832.00
 
 Period 39 (Period_39) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: demand shows a strong, sustained upward regime from Period_3 onward (values rising from 285 to 3929 by Period_38). (2) Calendar: no specific date-based events provided for Period_39 to alter pattern. (3) Recent trend: last three periods increasing: Period_36=3448, Period_37=3748, Period_38=3929; recent period-to-period changes = +300, +181 (avg \u2248 +215). (4) Forecast logic: project recent average increment forward from Period_38: 3929 + 215 \u2248 4144, rounded to integer.
+(1) Historical summary: Training mean=111.4; test series shows a large sustained regime shift upward starting Period_2 with values rising from 246 to 3929 by Period_38. (2) Calendar/world: No specific calendar events provided; product (chips) can have higher demand around holidays, but none indicated for Period_39. (3) Recent trend: Last 6 periods show an overall upward trend (Period_33..38 average ~3386; Period_34..38 average ~3384; recent three increments: +300, +181, +181) indicating continued growth but with moderating increments. (4) Forecast logic: Extrapolate recent momentum using recent average absolute increase (~240) and short-term multiplicative trend (~+6.7%); combine conservatively to project next period slightly above Period_38.
 
 Carry-over insight: (empty)
 
-Predicted demand: 4144 units
+Predicted demand: 4190 units
 ======================================================================
 
 ======================================================================
@@ -1814,23 +1814,23 @@ Period 39 (Period_39) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 4144
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 4144 = 20720.00
+  LLM predicted single-period demand: 4190
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4190 = 12570.00
   empirical_std (all 43 samples): 1196.82
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1196.82 = 2676.18
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1196.82 = 2072.96
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 22972.33
-  Total inventory (on-hand + in-transit): 16595
-  Cap value: 6112.60
-  Order (uncapped): 6378
-  Order (capped): 6113
+  Base stock = 14314.64
+  Total inventory (on-hand + in-transit): 11177
+  Cap value: 6158.60
+  Order (uncapped): 3138
+  Order (capped): 3138
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 6113
+    "chips(Regular)": 3138
   }
 }
 ======================================================================
@@ -1842,18 +1842,18 @@ Period 39 (Period_39) Demand: {
 }
 
 === Period 39 Summary ===
-chips(Regular): ordered=6113, arrived=4783 units (ordered on Period 35, lead_time was 4 periods), starting on-hand inventory=5536, demand=4212, sold=4212, ending on-hand inventory=1324
-Daily Profit: $16848.00, Daily Holding Cost: $1324.00
-Daily Reward (R_t): $15524.00
+chips(Regular): ordered=3138, arrived=0, starting on-hand inventory=0, demand=4212, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 40 (Period_40) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical summary: demand shows a strong sustained upward regime from Period_3 onward with values rising from 285 to 4212 by Period_39. 2) Calendar/seasonality: no explicit calendar events provided; product (chips) typically has steady or rising demand\u2014no seasonal adjustments applied. 3) Recent trend: last four periods = [3448, 3748, 3929, 4212], absolute increases = [+300, +181, +283], average recent increase \u2248 +254 units; recent compound growth ~7%/period. 4) Forecast logic: project the recent average absolute increase (conservative) and align with recent % growth. 4212 + 254 \u2248 4466; using a small upward bias toward percent growth yields final conservative rounded forecast of 4500.
+(1) Historical pattern summary: Training mean ~111.4 with test series showing a strong, sustained regime shift upward beginning Period_2; test demands rise from 246 (P2) to 4212 (P39). (2) Seasonal/calendar considerations: No calendar dates or seasonal events provided for Period_40, so no event-driven adjustment. (3) Recent trend analysis: Recent four-period deltas: P36->P37 +300, P37->P38 +181, P38->P39 +283; recent 3-period average increase ~255 units. (4) Final forecast logic: project next period by adding recent average absolute increase (~255) to last observed demand (4212) => 4212 + 255 = 4467. Conservatively round to integer.
 
 Carry-over insight: (empty)
 
-Predicted demand: 4500 units
+Predicted demand: 4467 units
 ======================================================================
 
 ======================================================================
@@ -1861,23 +1861,23 @@ Period 40 (Period_40) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 4500
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 4500 = 22500.00
+  LLM predicted single-period demand: 4467
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4467 = 13401.00
   empirical_std (all 44 samples): 1240.83
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1240.83 = 2774.58
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1240.83 = 2149.18
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 24835.15
-  Total inventory (on-hand + in-transit): 18496
-  Cap value: 6540.99
-  Order (uncapped): 6340
-  Order (capped): 6340
+  Base stock = 15209.80
+  Total inventory (on-hand + in-transit): 14315
+  Cap value: 6507.99
+  Order (uncapped): 895
+  Order (capped): 895
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 6340
+    "chips(Regular)": 895
   }
 }
 ======================================================================
@@ -1889,14 +1889,14 @@ Period 40 (Period_40) Demand: {
 }
 
 === Period 40 Summary ===
-chips(Regular): ordered=6340, arrived=2576 units (ordered on Period 36, lead_time was 4 periods), starting on-hand inventory=3900, demand=4461, sold=3900, ending on-hand inventory=0
-Daily Profit: $15600.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $15600.00
+chips(Regular): ordered=895, arrived=0, starting on-hand inventory=0, demand=4461, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 41 (Period_41) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical summary: demand shows a strong sustained upward trend from Period_3 onward, rising from ~285 to 4461 by Period_40. 2) Seasonal/calendar: no date-specific events provided; treat as ongoing growth in regular snack demand. 3) Recent trend: last five period changes = +166, +300, +181, +283, +249 (avg change \u2248 +236). 4) Forecast logic: extrapolate recent average increment onto Period_40 (4461 + 236).
+(1) Historical pattern: training mean = 111.4 with initial low baseline; test data shows a clear sustained regime shift starting Period_2 with steadily rising demand from 246 to 4461 by Period_40. (2) Calendar/world: no specific date-based events provided for Period_41, so no holiday adjustments applied. (3) Recent trend: demand has been increasing consistently \u2014 Periods 35-40: [3282, 3448, 3748, 3929, 4212, 4461]; consecutive period increments = [166, 300, 181, 283, 249]; recent average increment \u2248 236 units. (4) Forecast logic: project next period using recent average increment added to Period_40 (4461 + 236 \u2248 4697).
 
 Carry-over insight: (empty)
 
@@ -1909,22 +1909,22 @@ Period 41 (Period_41) OR Backend Computation (CAPPED POLICY):
 
 chips(Regular):
   LLM predicted single-period demand: 4697
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 4697 = 23485.00
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4697 = 14091.00
   empirical_std (all 45 samples): 1290.05
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1290.05 = 2884.64
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1290.05 = 2234.44
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 25912.78
-  Total inventory (on-hand + in-transit): 20936
+  Base stock = 15971.55
+  Total inventory (on-hand + in-transit): 15210
   Cap value: 6818.95
-  Order (uncapped): 4977
-  Order (capped): 4977
+  Order (uncapped): 762
+  Order (capped): 762
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 4977
+    "chips(Regular)": 762
   }
 }
 ======================================================================
@@ -1936,18 +1936,18 @@ Period 41 (Period_41) Demand: {
 }
 
 === Period 41 Summary ===
-chips(Regular): ordered=4977, arrived=4260 units (ordered on Period 37, lead_time was 4 periods), starting on-hand inventory=4260, demand=4166, sold=4166, ending on-hand inventory=94
-Daily Profit: $16664.00, Daily Holding Cost: $94.00
-Daily Reward (R_t): $16570.00
+chips(Regular): ordered=762, arrived=0, starting on-hand inventory=0, demand=4166, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 42 (Period_42) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand shows a strong long-term upward trend from Period_1 (91) to Period_41 (4166) with increasing volatility; recent levels are in the 3.4k\u20134.5k range. (2) Calendar/seasonal: no explicit calendar events provided; product (chips) typically sees steady or rising demand, especially toward later periods in this series. (3) Recent trend: Periods 36\u201341 = [3448, 3748, 3929, 4212, 4461, 4166]; linear slope over 36\u219241 \u2248 +144 units/period but Period_41 dipped from Period_40. Short moving average (last 3) = ~4280. (4) Forecast logic: combine recent linear trend projection and short MA to moderate the impact of the single-period dip; choose a rounded integer near their mean. Predicted next-period demand ~4310 units.
+(1) Historical pattern: training mean 111.4 then large, sustained regime shift from Period_2 onward with steadily rising demand across test periods. (2) Calendar/seasonality: no calendar or product-specific seasonality provided; product (chips) can see bumps around major events, but none specified for Period_42. (3) Recent trend: last three periods show values 4212, 4461, 4166 (3-period average 4279.7) \u2014 recent growth over earlier test periods but slight dip in Period_41, no clear reversal. (4) Forecast logic: use short-term rolling average to capture recent level while smoothing volatility; predict next period close to 3-period mean, rounded to integer.
 
 Carry-over insight: (empty)
 
-Predicted demand: 4310 units
+Predicted demand: 4280 units
 ======================================================================
 
 ======================================================================
@@ -1955,23 +1955,23 @@ Period 42 (Period_42) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 4310
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 4310 = 21550.00
+  LLM predicted single-period demand: 4280
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4280 = 12840.00
   empirical_std (all 46 samples): 1320.90
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1320.90 = 2953.62
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1320.90 = 2287.86
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 24035.83
-  Total inventory (on-hand + in-transit): 21747
-  Cap value: 6482.69
-  Order (uncapped): 2289
-  Order (capped): 2289
+  Base stock = 14765.52
+  Total inventory (on-hand + in-transit): 15972
+  Cap value: 6452.69
+  Order (uncapped): 0
+  Order (capped): 0
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 2289
+    "chips(Regular)": 0
   }
 }
 ======================================================================
@@ -1983,18 +1983,18 @@ Period 42 (Period_42) Demand: {
 }
 
 === Period 42 Summary ===
-chips(Regular): ordered=2289, arrived=4223 units (ordered on Period 38, lead_time was 4 periods), starting on-hand inventory=4317, demand=4040, sold=4040, ending on-hand inventory=277
-Daily Profit: $16160.00, Daily Holding Cost: $277.00
-Daily Reward (R_t): $15883.00
+chips(Regular): ordered=0, arrived=3138 units (ordered on Period 39, lead_time was 3 periods), 895 units (ordered on Period 40, lead_time was 2 periods), starting on-hand inventory=4033, demand=4040, sold=4033, ending on-hand inventory=0
+Daily Profit: $16132.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $16132.00
 
 Period 43 (Period_43) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical summary: Demand shows a strong long-term upward trend from Period_1 (91) to Period_42 (4040), with larger growth after Period_3. 2) Calendar/seasonal: No specific calendar events provided; product (chips) typically has stable demand with peaks around major events \u2014 none given. 3) Recent trend: Peak at Period_40 (4461) followed by declines in Period_41 (4166) and Period_42 (4040); last-3 average = 4222, last-6 average \u2248 4093, indicating a mild short-term pullback within an overall uptrend. 4) Forecast logic: Weight recent observations while respecting the longer-term upward regime; choose a value near the short-term average reflecting slight continuation of the pullback but remaining above the 6-period average. Predicted demand = 4150.
+(1) Historical pattern: training mean = 111.4, test data shows a clear long-run upward regime starting Period_2 with values rising from 246 up to 4461 by Period_40. (2) Calendar/seasonal: no calendar date details provided; product (chips) often shows steady demand with occasional promotional spikes\u2014no specific event indicated for Period_43. (3) Recent trend: peak near Period_40 (4461) followed by two modest declines: Period_41=4166, Period_42=4040; last 5-period average (Periods 38-42) = 4162, last 3-period average (40-42) = 4222. (4) Forecast logic: weight very recent periods higher but smooth short-term volatility using a 3-period average, producing a conservative near-term forecast reflecting slight recent pullback.
 
 Carry-over insight: (empty)
 
-Predicted demand: 4150 units
+Predicted demand: 4222 units
 ======================================================================
 
 ======================================================================
@@ -2002,23 +2002,23 @@ Period 43 (Period_43) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 4150
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 4150 = 20750.00
+  LLM predicted single-period demand: 4222
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4222 = 12666.00
   empirical_std (all 47 samples): 1343.53
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1343.53 = 3004.22
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1343.53 = 2327.06
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 23278.41
-  Total inventory (on-hand + in-transit): 19996
-  Cap value: 6359.90
-  Order (uncapped): 3283
-  Order (capped): 3283
+  Base stock = 14624.50
+  Total inventory (on-hand + in-transit): 11939
+  Cap value: 6431.90
+  Order (uncapped): 2686
+  Order (capped): 2686
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 3283
+    "chips(Regular)": 2686
   }
 }
 ======================================================================
@@ -2030,18 +2030,18 @@ Period 43 (Period_43) Demand: {
 }
 
 === Period 43 Summary ===
-chips(Regular): ordered=3283, arrived=6113 units (ordered on Period 39, lead_time was 4 periods), starting on-hand inventory=6390, demand=3950, sold=3950, ending on-hand inventory=2440
-Daily Profit: $15800.00, Daily Holding Cost: $2440.00
-Daily Reward (R_t): $13360.00
+chips(Regular): ordered=2686, arrived=0, starting on-hand inventory=0, demand=3950, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 44 (Period_44) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: overall strong upward regime from Period_3 onward with values rising from mid-hundreds to multi-thousands. (2) Calendar/seasonal: no calendar info provided; product is non-seasonal snack so rely on demand history. (3) Recent trend: short pullback from Period_40 peak (4461) with three consecutive declines: 4166, 4040, 3950. Recent 3-period average = 4052 and average sequential decline \u2248 -108 per period. (4) Forecast logic: continue modest short-term decline rather than full reversion to earlier regime; apply last observed value minus recent average decline (3950 - 108 \u2248 3842).
+(1) Historical summary: training mean = 111.4; test series shows a sustained, large upward regime starting at Period_2 with demands rising from 246 to multi-thousand levels through Period_43. (2) Calendar/seasonality: no calendar info provided; product (chips) can be stable or spike around events but none specified. (3) Recent trend: peak near Period_40 (4461) followed by three modest declines: 4166, 4040, 3950 \u2014 a short cooling but no large regime reversal. Last-3 average = 4052, last value = 3950. (4) Forecast logic: weight recent observations more heavily while acknowledging slight downward momentum; produce a near-term demand slightly below the recent 3-period average but close to the last observed value.
 
 Carry-over insight: (empty)
 
-Predicted demand: 3842 units
+Predicted demand: 4000 units
 ======================================================================
 
 ======================================================================
@@ -2049,23 +2049,23 @@ Period 44 (Period_44) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 3842
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 3842 = 19210.00
+  LLM predicted single-period demand: 4000
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4000 = 12000.00
   empirical_std (all 48 samples): 1360.54
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1360.54 = 3042.25
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1360.54 = 2356.52
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 21770.43
-  Total inventory (on-hand + in-transit): 19329
-  Cap value: 6079.89
-  Order (uncapped): 2442
-  Order (capped): 2442
+  Base stock = 13983.30
+  Total inventory (on-hand + in-transit): 14625
+  Cap value: 6237.89
+  Order (uncapped): 0
+  Order (capped): 0
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 2442
+    "chips(Regular)": 0
   }
 }
 ======================================================================
@@ -2077,18 +2077,18 @@ Period 44 (Period_44) Demand: {
 }
 
 === Period 44 Summary ===
-chips(Regular): ordered=2442, arrived=6340 units (ordered on Period 40, lead_time was 4 periods), starting on-hand inventory=8780, demand=4444, sold=4444, ending on-hand inventory=4336
-Daily Profit: $17776.00, Daily Holding Cost: $4336.00
-Daily Reward (R_t): $13440.00
+chips(Regular): ordered=0, arrived=762 units (ordered on Period 41, lead_time was 3 periods), starting on-hand inventory=762, demand=4444, sold=762, ending on-hand inventory=0
+Daily Profit: $3048.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $3048.00
 
 Period 45 (Period_45) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical pattern summary: Demand shows a strong long-term upward regime beginning Period_3, rising from low hundreds to multi-thousands by Period_44. Mean Periods 3-44 = 2346; Periods 1-2 mean = 168.5. 2) Seasonal/calendar: No explicit calendar events provided for Period_45; product (chips) typically has higher demand near holidays/summer, but no date signals now. 3) Recent trend analysis: Last 5 periods (40-44) average = 4212; last 3 (42-44) average = 4145. Recent values show volatility around a high level (3950\u20134461) with a rebound to 4444 in Period_44. 4) Final forecast logic: Weight recent 3\u20135 period average and the persistent upward regime; choose a conservative near-term value slightly above the recent 5-period mean to reflect momentum. Predicted demand = 4300.
+(1) Historical summary: training mean was 111.4 but test data shows a large, sustained regime shift to much higher demand beginning Period_2; long-term level now in the thousands. (2) Calendar/world: no explicit dates or seasonal events provided for Period_45, so no calendar adjustments applied. (3) Recent trend: last five periods = [4461,4166,4040,3950,4444] show high-level volatility around ~4.2k with no clear sudden drop or spike; short-term mean = 4,212. (4) Forecast logic: use recent 5-period average to smooth volatility while reflecting latest uplift; predicted demand = round(4212.2) => 4212.
 
-Carry-over insight: Upward trend extended through Period 44: avg Periods 3-44 = 2346.36 vs avg Periods 1-2 = 168.5 (+~1292%), sustained higher demand across Periods 3-44 (42 consecutive periods).
+Carry-over insight: (empty)
 
-Predicted demand: 4300 units
+Predicted demand: 4212 units
 ======================================================================
 
 ======================================================================
@@ -2096,23 +2096,23 @@ Period 45 (Period_45) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 4300
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 4300 = 21500.00
+  LLM predicted single-period demand: 4212
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4212 = 12636.00
   empirical_std (all 49 samples): 1391.58
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1391.58 = 3111.67
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1391.58 = 2410.29
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 24118.84
-  Total inventory (on-hand + in-transit): 17327
-  Cap value: 6588.94
-  Order (uncapped): 6792
-  Order (capped): 6589
+  Base stock = 14664.55
+  Total inventory (on-hand + in-transit): 13863
+  Cap value: 6500.94
+  Order (uncapped): 802
+  Order (capped): 802
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 6589
+    "chips(Regular)": 802
   }
 }
 ======================================================================
@@ -2124,18 +2124,18 @@ Period 45 (Period_45) Demand: {
 }
 
 === Period 45 Summary ===
-chips(Regular): ordered=6589, arrived=4977 units (ordered on Period 41, lead_time was 4 periods), starting on-hand inventory=9313, demand=4364, sold=4364, ending on-hand inventory=4949
-Daily Profit: $17456.00, Daily Holding Cost: $4949.00
-Daily Reward (R_t): $12507.00
+chips(Regular): ordered=802, arrived=2686 units (ordered on Period 43, lead_time was 2 periods), starting on-hand inventory=2686, demand=4364, sold=2686, ending on-hand inventory=0
+Daily Profit: $10744.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $10744.00
 
 Period 46 (Period_46) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-1) Historical summary: Demand shows a sustained multi-period upward regime from Period_3 onward with increasing magnitude; recent values (Periods 41-45) = [4166, 4040, 3950, 4444, 4364]. 2) Calendar/seasonality: No specific calendar events provided; product (chips) typically stable with occasional promotional spikes\u2014none indicated. 3) Recent trend: Last 3-period avg = 4,252.7; last 5-period avg = 4,192.8; slight short-term uptick but noisy. 4) Forecast logic: Use recent central tendency weighted to latest periods (give more weight to last 3) and round to integer.
+1) Historical pattern summary: Training mean was 111.4; test phase shows a clear sustained regime shift to much higher demand, rising from low hundreds to multiple thousands across periods. 2) Seasonal/calendar considerations: No calendar date details provided for Period_46; product (chips) can see spikes around holidays, but no specific event indicated. 3) Recent trend analysis: Last 3 periods (Periods 43-45) = [3950, 4444, 4364], recent 3-period average = 4253; last 10-period average (36-45) \u2248 3869 showing higher recent levels versus earlier test periods. Volatility present but no abrupt regime change in last 3 periods. 4) Final forecast logic: Use a recent-weighted average emphasizing the last 3 periods to capture current level while smoothing volatility -> forecast = 4253.
 
 Carry-over insight: (empty)
 
-Predicted demand: 4240 units
+Predicted demand: 4253 units
 ======================================================================
 
 ======================================================================
@@ -2143,23 +2143,23 @@ Period 46 (Period_46) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 4240
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 4240 = 21200.00
+  LLM predicted single-period demand: 4253
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4253 = 12759.00
   empirical_std (all 50 samples): 1416.33
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1416.33 = 3167.00
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1416.33 = 2453.15
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 23865.42
-  Total inventory (on-hand + in-transit): 19552
-  Cap value: 6569.65
-  Order (uncapped): 4314
-  Order (capped): 4314
+  Base stock = 14823.62
+  Total inventory (on-hand + in-transit): 11979
+  Cap value: 6582.65
+  Order (uncapped): 2845
+  Order (capped): 2845
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 4314
+    "chips(Regular)": 2845
   }
 }
 ======================================================================
@@ -2171,18 +2171,18 @@ Period 46 (Period_46) Demand: {
 }
 
 === Period 46 Summary ===
-chips(Regular): ordered=4314, arrived=2289 units (ordered on Period 42, lead_time was 4 periods), starting on-hand inventory=7238, demand=4530, sold=4530, ending on-hand inventory=2708
-Daily Profit: $18120.00, Daily Holding Cost: $2708.00
-Daily Reward (R_t): $15412.00
+chips(Regular): ordered=2845, arrived=802 units (ordered on Period 45, lead_time was 1 periods), starting on-hand inventory=802, demand=4530, sold=802, ending on-hand inventory=0
+Daily Profit: $3208.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $3208.00
 
 Period 47 (Period_47) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: Demand shows a strong long-term upward regime from Period_3 onward with periodic volatility; overall increases from low hundreds to multi-thousands. (2) Calendar/seasonality: No specific date/holiday provided so no calendar adjustments applied. (3) Recent trend: Last periods show modest upward momentum with Periods 41-46 = [4166,4040,3950,4444,4364,4530]; 6-period avg \u22484249, recent 3-period avg (Periods 44-46) \u22484446 and last observation =4530. (4) Forecast logic: Weight recent observations more heavily while allowing some mean reversion toward the 3-period average; forecast set slightly below last peak to reflect volatility but maintain upward bias.
+(1) Historical pattern: training mean = 111.4; test period shows a sustained regime shift upward starting Period_2 with steadily increasing demand across periods. (2) Calendar/world: no specific dates or events given for Period_47, so no event-driven adjustment. (3) Recent trend: last six periods = [4166,4040,3950,4444,4364,4530]; recent movement shows recovery from a mid-40xx dip with the last two periods rising (Period_45->46 = +166). 3-period average (Periods 44-46) = 4446; 6-period average = 4249. (4) Forecast logic: weight recent observations more heavily (last period and last 3-period average), yielding a near-term demand estimate around 4463 units.
 
 Carry-over insight: (empty)
 
-Predicted demand: 4480 units
+Predicted demand: 4463 units
 ======================================================================
 
 ======================================================================
@@ -2190,23 +2190,23 @@ Period 47 (Period_47) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 4480
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 4480 = 22400.00
+  LLM predicted single-period demand: 4463
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4463 = 13389.00
   empirical_std (all 51 samples): 1443.58
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1443.58 = 3227.95
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1443.58 = 2500.36
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 25116.71
-  Total inventory (on-hand + in-transit): 19336
-  Cap value: 6854.48
-  Order (uncapped): 5781
-  Order (capped): 5781
+  Base stock = 15493.35
+  Total inventory (on-hand + in-transit): 14022
+  Cap value: 6837.48
+  Order (uncapped): 1472
+  Order (capped): 1472
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 5781
+    "chips(Regular)": 1472
   }
 }
 ======================================================================
@@ -2218,18 +2218,18 @@ Period 47 (Period_47) Demand: {
 }
 
 === Period 47 Summary ===
-chips(Regular): ordered=5781, arrived=3283 units (ordered on Period 43, lead_time was 4 periods), starting on-hand inventory=5991, demand=4595, sold=4595, ending on-hand inventory=1396
-Daily Profit: $18380.00, Daily Holding Cost: $1396.00
-Daily Reward (R_t): $16984.00
+chips(Regular): ordered=1472, arrived=0, starting on-hand inventory=0, demand=4595, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 48 (Period_48) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern: demand shows a strong sustained upward regime from Period_3 onward, rising from low hundreds to multi-thousands by Period_47. (2) Calendar/seasonality: no specific calendar info provided for Period_48; product (chips) typically has stable consumption with occasional event-driven spikes\u2014no one-off event indicated. (3) Recent trend: recent periods continue upward but with moderating increments: Period_45=4364, Period_46=4530 (+166), Period_47=4595 (+65). 3-period average = 4496; average recent increment ~115 per period. (4) Forecast logic: weight very recent increments to capture continuing but slowing growth; add average recent increment (~115) to last observed demand (4595) -> 4710. 
+(1) Historical pattern: training mean = 111.4; test series shows a clear long-term upward regime beginning at Period_2 with demand rising from 246 to 4595 by Period_47. (2) Calendar/seasonality: no calendar date context provided for Period_48; product is chips (snack) which typically shows steady demand with occasional spikes, but none explicitly indicated. (3) Recent trend: last 7 periods (Period_41-47) = [4166,4040,3950,4444,4364,4530,4595] \u2014 recent behavior shows short-term volatility but a mild upward bias; 3-period average (Periods 45-47) = 4496, average period-over-period change over last 3 = +50 units. (4) Forecast logic: combine recent mean (4496) with observed short-term upward drift (~+50) to produce a conservative next-period forecast while respecting sustained long-term regime.
 
 Carry-over insight: (empty)
 
-Predicted demand: 4710 units
+Predicted demand: 4645 units
 ======================================================================
 
 ======================================================================
@@ -2237,23 +2237,23 @@ Period 48 (Period_48) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 4710
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 4710 = 23550.00
+  LLM predicted single-period demand: 4645
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4645 = 13935.00
   empirical_std (all 52 samples): 1469.85
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1469.85 = 3286.69
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1469.85 = 2545.86
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 26316.15
-  Total inventory (on-hand + in-transit): 20522
-  Cap value: 7127.69
-  Order (uncapped): 5795
-  Order (capped): 5795
+  Base stock = 16077.65
+  Total inventory (on-hand + in-transit): 15494
+  Cap value: 7062.69
+  Order (uncapped): 584
+  Order (capped): 584
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 5795
+    "chips(Regular)": 584
   }
 }
 ======================================================================
@@ -2265,18 +2265,18 @@ Period 48 (Period_48) Demand: {
 }
 
 === Period 48 Summary ===
-chips(Regular): ordered=5795, arrived=2442 units (ordered on Period 44, lead_time was 4 periods), starting on-hand inventory=3838, demand=4776, sold=3838, ending on-hand inventory=0
-Daily Profit: $15352.00, Daily Holding Cost: $0.00
-Daily Reward (R_t): $15352.00
+chips(Regular): ordered=584, arrived=0, starting on-hand inventory=0, demand=4776, sold=0, ending on-hand inventory=0
+Daily Profit: $0.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $0.00
 
 Period 49 (Period_49) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical pattern summary: demand rises from low hundreds in Periods 1-2 to multi-thousands from Period 9 onward; recent values (P44-P48) = [4444,4364,4530,4595,4776]. (2) Seasonal/calendar: no calendar data provided for Period_49, no event adjustments applied. (3) Recent trend analysis: steady high-level regime with mild upward momentum over last 5 periods (net +7.6% from P44 to P48; average recent growth ~+1.36% per period). (4) Final forecast logic: project continuation of recent mild upward trend from 4776 by ~1.36% => 4842 (rounded integer).
+(1) Historical summary: Training mean 111.4; test data shows a strong, sustained upward regime starting Period_2 with values rising from 246 to 4776 by Period_48. (2) Calendar/world: No specific calendar or seasonal events provided for Period_49; product (chips) can see steady demand but no holiday spike indicated. (3) Recent trend: Recent periods show continued upward but moderating growth: Period_46=4530, Period_47=4595, Period_48=4776 (avg recent growth \u2248 +83\u2013123 units/period). (4) Forecast logic: project continuation of recent moderate upward trend using recent average growth (~+84 units from 5-period slope and ~+123 from 2-period slope); a conservative blend yields +84\u2013120. Applying blended increment (~+84) to Period_48 gives forecast \u2248 4860.
 
-Carry-over insight: Upward trend extended through Period 48: avg Periods 3-48 = 2539.4 vs avg Periods 1-2 = 168.5 (+~1407%), sustained across Periods 3-48 (46 consecutive periods).
+Carry-over insight: (empty)
 
-Predicted demand: 4842 units
+Predicted demand: 4860 units
 ======================================================================
 
 ======================================================================
@@ -2284,23 +2284,23 @@ Period 49 (Period_49) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 4842
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 4842 = 24210.00
+  LLM predicted single-period demand: 4860
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 4860 = 14580.00
   empirical_std (all 53 samples): 1498.96
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1498.96 = 3351.78
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1498.96 = 2596.28
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 27030.93
-  Total inventory (on-hand + in-transit): 22479
-  Cap value: 7307.57
-  Order (uncapped): 4552
-  Order (capped): 4552
+  Base stock = 16765.08
+  Total inventory (on-hand + in-transit): 16078
+  Cap value: 7325.57
+  Order (uncapped): 688
+  Order (capped): 688
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 4552
+    "chips(Regular)": 688
   }
 }
 ======================================================================
@@ -2312,18 +2312,18 @@ Period 49 (Period_49) Demand: {
 }
 
 === Period 49 Summary ===
-chips(Regular): ordered=4552, arrived=6589 units (ordered on Period 45, lead_time was 4 periods), starting on-hand inventory=6589, demand=5087, sold=5087, ending on-hand inventory=1502
-Daily Profit: $20348.00, Daily Holding Cost: $1502.00
-Daily Reward (R_t): $18846.00
+chips(Regular): ordered=688, arrived=2845 units (ordered on Period 46, lead_time was 3 periods), 1472 units (ordered on Period 47, lead_time was 2 periods), starting on-hand inventory=4317, demand=5087, sold=4317, ending on-hand inventory=0
+Daily Profit: $17268.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $17268.00
 
 Period 50 (Period_50) LLM Demand Forecast:
 ======================================================================
 LLM Rationale:
-(1) Historical summary: demand shows a clear sustained upward regime from Period_3 onward with values rising from 285 to 5087 by Period_49. (2) Calendar/world: no specific date/event provided; product (chips) often steady/increasing with general trend. (3) Recent trend: last 6 periods trending up: Period_44-49 = [4444,4364,4530,4595,4776,5087]; recent period-to-period growth rates ~+1.4%, +4.0%, +6.5%, +3.8% (avg ~3.9% over last 4). (4) Forecast logic: project recent average growth (~3.9%) from Period_49 (5087) to Period_50, yielding 5087 * 1.039 \u2248 5288. Final forecast rounded to integer.
+(1) Historical summary: Training mean ~111.4; test period shows clear sustained regime shift with much higher levels (Periods 2-49). Recent series values (Periods 44-49): [4444, 4364, 4530, 4595, 4776, 5087]. (2) Calendar/seasonality: no calendar info provided; product (chips) likely stable with occasional promotional spikes\u2014no specific event flagged for Period_50. (3) Recent trend: overall upward regime with short-term acceleration \u2014 last increments: +65, +181, +311; 3-period avg growth \u2248 +186; 6-period avg growth \u2248 +129. (4) Forecast logic: weight recent acceleration more heavily but remain conservative; apply ~+191 to last observed 5087 to produce next-period forecast.
 
 Carry-over insight: (empty)
 
-Predicted demand: 5288 units
+Predicted demand: 5278 units
 ======================================================================
 
 ======================================================================
@@ -2331,23 +2331,23 @@ Period 50 (Period_50) OR Backend Computation (CAPPED POLICY):
 ======================================================================
 
 chips(Regular):
-  LLM predicted single-period demand: 5288
-  Promised lead time (L): 4
-  mu_hat = (1+L) \xd7 prediction = 5 \xd7 5288 = 26440.00
+  LLM predicted single-period demand: 5278
+  Promised lead time (L): 2
+  mu_hat = (1+L) \xd7 prediction = 3 \xd7 5278 = 15834.00
   empirical_std (all 54 samples): 1535.13
-  sigma_hat = sqrt(1+L) \xd7 std = 2.236 \xd7 1535.13 = 3432.65
+  sigma_hat = sqrt(1+L) \xd7 std = 1.732 \xd7 1535.13 = 2658.92
   Critical fractile q = 0.8000, z* = 0.8416
-  Base stock = 29328.99
-  Total inventory (on-hand + in-transit): 21944
-  Cap value: 7813.06
-  Order (uncapped): 7385
-  Order (capped): 7385
+  Base stock = 18071.80
+  Total inventory (on-hand + in-transit): 12449
+  Cap value: 7803.06
+  Order (uncapped): 5623
+  Order (capped): 5623
 
 ======================================================================
 Final Order Action:
 {
   "action": {
-    "chips(Regular)": 7385
+    "chips(Regular)": 5623
   }
 }
 ======================================================================
@@ -2359,9 +2359,9 @@ Period 50 (Period_50) Demand: {
 }
 
 === Period 50 Summary ===
-chips(Regular): ordered=7385, arrived=4314 units (ordered on Period 46, lead_time was 4 periods), starting on-hand inventory=5816, demand=5028, sold=5028, ending on-hand inventory=788
-Daily Profit: $20112.00, Daily Holding Cost: $788.00
-Daily Reward (R_t): $19324.00
+chips(Regular): ordered=5623, arrived=584 units (ordered on Period 48, lead_time was 2 periods), starting on-hand inventory=584, demand=5028, sold=584, ending on-hand inventory=0
+Daily Profit: $2336.00, Daily Holding Cost: $0.00
+Daily Reward (R_t): $2336.00
 
 ======================================================================
 === Final Results (Simple LLM->OR Strategy) ===
@@ -2370,9 +2370,9 @@ Daily Reward (R_t): $19324.00
 Per-Item Statistics:
 
 chips(Regular) (chips(Regular)):
-  Ordered: 143246, Sold: 118945, Ending: 788
+  Ordered: 71221, Sold: 53733, Ending: 0
   Profit/unit: $4.0, Holding: $1.0/unit/period
-  Total Profit: $475780.0
+  Total Profit: $214932.0
 
 ======================================================================
 Period Breakdown:
@@ -2380,60 +2380,60 @@ Period Breakdown:
 Period 1 (Period_1): Profit=$0.00, Holding=$0.00, Reward=$0.00
 Period 2 (Period_2): Profit=$0.00, Holding=$0.00, Reward=$0.00
 Period 3 (Period_3): Profit=$0.00, Holding=$0.00, Reward=$0.00
-Period 4 (Period_4): Profit=$0.00, Holding=$0.00, Reward=$0.00
-Period 5 (Period_5): Profit=$560.00, Holding=$0.00, Reward=$560.00
-Period 6 (Period_6): Profit=$524.00, Holding=$0.00, Reward=$524.00
-Period 7 (Period_7): Profit=$1080.00, Holding=$0.00, Reward=$1080.00
-Period 8 (Period_8): Profit=$1512.00, Holding=$0.00, Reward=$1512.00
-Period 9 (Period_9): Profit=$2996.00, Holding=$0.00, Reward=$2996.00
-Period 10 (Period_10): Profit=$2776.00, Holding=$0.00, Reward=$2776.00
-Period 11 (Period_11): Profit=$3912.00, Holding=$0.00, Reward=$3912.00
-Period 12 (Period_12): Profit=$4244.00, Holding=$0.00, Reward=$4244.00
-Period 13 (Period_13): Profit=$4396.00, Holding=$0.00, Reward=$4396.00
-Period 14 (Period_14): Profit=$5060.00, Holding=$330.00, Reward=$4730.00
-Period 15 (Period_15): Profit=$1320.00, Holding=$0.00, Reward=$1320.00
-Period 16 (Period_16): Profit=$6188.00, Holding=$16.00, Reward=$6172.00
-Period 17 (Period_17): Profit=$6896.00, Holding=$258.00, Reward=$6638.00
-Period 18 (Period_18): Profit=$7208.00, Holding=$217.00, Reward=$6991.00
-Period 19 (Period_19): Profit=$7356.00, Holding=$0.00, Reward=$7356.00
-Period 20 (Period_20): Profit=$7892.00, Holding=$302.00, Reward=$7590.00
-Period 21 (Period_21): Profit=$5968.00, Holding=$0.00, Reward=$5968.00
-Period 22 (Period_22): Profit=$8884.00, Holding=$552.00, Reward=$8332.00
-Period 23 (Period_23): Profit=$9304.00, Holding=$724.00, Reward=$8580.00
-Period 24 (Period_24): Profit=$10264.00, Holding=$1473.00, Reward=$8791.00
-Period 25 (Period_25): Profit=$9524.00, Holding=$0.00, Reward=$9524.00
-Period 26 (Period_26): Profit=$7348.00, Holding=$0.00, Reward=$7348.00
-Period 27 (Period_27): Profit=$11560.00, Holding=$605.00, Reward=$10955.00
-Period 28 (Period_28): Profit=$10572.00, Holding=$1245.00, Reward=$9327.00
-Period 29 (Period_29): Profit=$11256.00, Holding=$2475.00, Reward=$8781.00
-Period 30 (Period_30): Profit=$11492.00, Holding=$2148.00, Reward=$9344.00
-Period 31 (Period_31): Profit=$12184.00, Holding=$775.00, Reward=$11409.00
-Period 32 (Period_32): Profit=$12020.00, Holding=$2256.00, Reward=$9764.00
-Period 33 (Period_33): Profit=$13564.00, Holding=$231.00, Reward=$13333.00
-Period 34 (Period_34): Profit=$13472.00, Holding=$414.00, Reward=$13058.00
-Period 35 (Period_35): Profit=$13044.00, Holding=$0.00, Reward=$13044.00
-Period 36 (Period_36): Profit=$13792.00, Holding=$1210.00, Reward=$12582.00
-Period 37 (Period_37): Profit=$13280.00, Holding=$0.00, Reward=$13280.00
-Period 38 (Period_38): Profit=$15716.00, Holding=$753.00, Reward=$14963.00
-Period 39 (Period_39): Profit=$16848.00, Holding=$1324.00, Reward=$15524.00
-Period 40 (Period_40): Profit=$15600.00, Holding=$0.00, Reward=$15600.00
-Period 41 (Period_41): Profit=$16664.00, Holding=$94.00, Reward=$16570.00
-Period 42 (Period_42): Profit=$16160.00, Holding=$277.00, Reward=$15883.00
-Period 43 (Period_43): Profit=$15800.00, Holding=$2440.00, Reward=$13360.00
-Period 44 (Period_44): Profit=$17776.00, Holding=$4336.00, Reward=$13440.00
-Period 45 (Period_45): Profit=$17456.00, Holding=$4949.00, Reward=$12507.00
-Period 46 (Period_46): Profit=$18120.00, Holding=$2708.00, Reward=$15412.00
-Period 47 (Period_47): Profit=$18380.00, Holding=$1396.00, Reward=$16984.00
-Period 48 (Period_48): Profit=$15352.00, Holding=$0.00, Reward=$15352.00
-Period 49 (Period_49): Profit=$20348.00, Holding=$1502.00, Reward=$18846.00
-Period 50 (Period_50): Profit=$20112.00, Holding=$788.00, Reward=$19324.00
+Period 4 (Period_4): Profit=$1748.00, Holding=$77.00, Reward=$1671.00
+Period 5 (Period_5): Profit=$308.00, Holding=$0.00, Reward=$308.00
+Period 6 (Period_6): Profit=$2348.00, Holding=$592.00, Reward=$1756.00
+Period 7 (Period_7): Profit=$2368.00, Holding=$0.00, Reward=$2368.00
+Period 8 (Period_8): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 9 (Period_9): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 10 (Period_10): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 11 (Period_11): Profit=$3192.00, Holding=$0.00, Reward=$3192.00
+Period 12 (Period_12): Profit=$2664.00, Holding=$0.00, Reward=$2664.00
+Period 13 (Period_13): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 14 (Period_14): Profit=$5060.00, Holding=$830.00, Reward=$4230.00
+Period 15 (Period_15): Profit=$3488.00, Holding=$0.00, Reward=$3488.00
+Period 16 (Period_16): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 17 (Period_17): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 18 (Period_18): Profit=$7208.00, Holding=$1382.00, Reward=$5826.00
+Period 19 (Period_19): Profit=$5528.00, Holding=$0.00, Reward=$5528.00
+Period 20 (Period_20): Profit=$7892.00, Holding=$774.00, Reward=$7118.00
+Period 21 (Period_21): Profit=$3096.00, Holding=$0.00, Reward=$3096.00
+Period 22 (Period_22): Profit=$8884.00, Holding=$449.00, Reward=$8435.00
+Period 23 (Period_23): Profit=$1796.00, Holding=$0.00, Reward=$1796.00
+Period 24 (Period_24): Profit=$3972.00, Holding=$0.00, Reward=$3972.00
+Period 25 (Period_25): Profit=$10416.00, Holding=$196.00, Reward=$10220.00
+Period 26 (Period_26): Profit=$10580.00, Holding=$1932.00, Reward=$8648.00
+Period 27 (Period_27): Profit=$7728.00, Holding=$0.00, Reward=$7728.00
+Period 28 (Period_28): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 29 (Period_29): Profit=$11256.00, Holding=$1971.00, Reward=$9285.00
+Period 30 (Period_30): Profit=$7884.00, Holding=$0.00, Reward=$7884.00
+Period 31 (Period_31): Profit=$8748.00, Holding=$0.00, Reward=$8748.00
+Period 32 (Period_32): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 33 (Period_33): Profit=$9940.00, Holding=$0.00, Reward=$9940.00
+Period 34 (Period_34): Profit=$11552.00, Holding=$0.00, Reward=$11552.00
+Period 35 (Period_35): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 36 (Period_36): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 37 (Period_37): Profit=$14708.00, Holding=$0.00, Reward=$14708.00
+Period 38 (Period_38): Profit=$9832.00, Holding=$0.00, Reward=$9832.00
+Period 39 (Period_39): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 40 (Period_40): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 41 (Period_41): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 42 (Period_42): Profit=$16132.00, Holding=$0.00, Reward=$16132.00
+Period 43 (Period_43): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 44 (Period_44): Profit=$3048.00, Holding=$0.00, Reward=$3048.00
+Period 45 (Period_45): Profit=$10744.00, Holding=$0.00, Reward=$10744.00
+Period 46 (Period_46): Profit=$3208.00, Holding=$0.00, Reward=$3208.00
+Period 47 (Period_47): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 48 (Period_48): Profit=$0.00, Holding=$0.00, Reward=$0.00
+Period 49 (Period_49): Profit=$17268.00, Holding=$0.00, Reward=$17268.00
+Period 50 (Period_50): Profit=$2336.00, Holding=$0.00, Reward=$2336.00
 
 ======================================================================
 === TOTAL SUMMARY ===
 ======================================================================
-Total Profit from Sales: $475780.00
-Total Holding Cost: $35798.00
+Total Profit from Sales: $214932.00
+Total Holding Cost: $8203.00
 
->>> Total Reward (Simple LLM->OR Strategy): $439982.00 <<<
-VM Final Reward: 439982.00
+>>> Total Reward (Simple LLM->OR Strategy): $206729.00 <<<
+VM Final Reward: 206729.00
 ======================================================================
