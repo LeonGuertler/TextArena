@@ -130,20 +130,14 @@ class UltimateTicTacToeEnv(ta.Env):
 
     def _is_board_filled(self, board_array: str) -> bool:
         """ Check if a given 3×3 board is full """
-        if all(cell != ' ' for row in board_array for cell in row):
-            return True
-
+        if all(cell != ' ' for row in board_array for cell in row): return True
         return False
 
     def _is_draw(self) -> bool:
         # If all micro boards are full, it's a draw
-        if all(self._is_board_filled(micro_board) for micro_board in self.state.game_state['board']):
-            return True
-
+        if all(self._is_board_filled(micro_board) for micro_board in self.state.game_state['board']): return True
         # If the macro boards are full, it's a draw
-        if self._is_board_filled(self.state.game_state['macro_board']):
-            return True
-
+        if self._is_board_filled(self.state.game_state['macro_board']): return True
         return False
 
     def _is_valid_move(self, micro_board, row, col):
