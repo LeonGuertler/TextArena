@@ -100,50 +100,34 @@ class BreakthroughEnv(ta.Env):
         return True
 
     def _find_player_without_move(self):
-        board = np.array(self.state.game_state['board'])
+        board = self.state.game_state["board"]
+        size = self.board_size
 
         white_has_move = False
-        for r, c in zip(*np.where(board == 'W')):
-            if r == board.shape[0] - 1:
-                continue
-
-            # Check 'W' forward (row +1)
-            if not board[r+1, c]:
-                white_has_move = True
-                break
-
-            # Check 'W' forward diagonally (row +1, col +/- 1)
-            if c > 0 and board[r+1, c-1] == 'B':
-                white_has_move = True
-                break
-
-            if c < board.shape[1] - 1 and board[r+1, c+1] == 'B':
-                white_has_move = True
-
-        if not white_has_move:
-            return 0
+        for r in range(size):
+            for c in range(size):
+                if board[r][c] != "W": continue
+                if r == size - 1: continue
+                # Check 'W' forward (row +1)
+                if board[r + 1][c] == "": white_has_move = True; break
+                # Check 'W' forward diagonally (row +1, col +/- 1)
+                if c > 0 and board[r + 1][c - 1] == "B": white_has_move = True; break
+                if c < size - 1 and board[r + 1][c + 1] == "B": white_has_move = True; break
+            if white_has_move: break
+        if not white_has_move: return 0
 
         black_has_move = False
-        for r, c in zip(*np.where(board == 'B')):
-            if r == 0:
-                continue
-
-            # Check 'B' forward (row -1)
-            if not board[r-1, c]:
-                black_has_move = True
-                break
-
-            # Check 'B' forward diagonally (row -1, col +/- 1)
-            if c > 0 and board[r-1, c-1] == 'W':
-                black_has_move = True
-                break
-
-            if c < board.shape[1] - 1 and board[r-1, c+1] == 'W':
-                black_has_move = True
-
-        if not black_has_move:
-            return 1
-
+        for r in range(size):
+            for c in range(size):
+                if board[r][c] != "B": continue
+                if r == 0: continue 
+                # Check 'B' forward (row -1)
+                if board[r - 1][c] == "": black_has_move = True; break
+                # Check 'B' forward diagonally (row -1, col +/- 1)
+                if c > 0 and board[r - 1][c - 1] == "W": black_has_move = True; break
+                if c < size - 1 and board[r - 1][c + 1] == "W": black_has_move = True; break
+            if black_has_move: break
+        if not black_has_move: return 1
         return None
 
     def _check_winner(self):
