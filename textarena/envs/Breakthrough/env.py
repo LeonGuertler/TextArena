@@ -1,7 +1,6 @@
 import re
 from typing import Dict, Tuple, Any, Optional
 
-import numpy as np
 import textarena as ta
 from textarena.envs.Breakthrough.renderer import create_board_str
 
