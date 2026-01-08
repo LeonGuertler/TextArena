@@ -22,7 +22,7 @@ class CheckersEnv(ta.Env):
     def _render_board(self) -> str:
         header = "\n     " + "  ".join(str(col) for col in range(8)) + "\n"
         divider = "   +" + "-" * 25 + "\n"
-        rows = "\n".join(f" {row} |" + "".join(f" {self.state.game_state["board"][row][col]} " for col in range(8)) for row in range(8))
+        rows = "\n".join(f" {row} |" + "".join(f" {self.state.game_state['board'][row][col]} " for col in range(8)) for row in range(8))
         return header + divider + rows + "\n"
 
     def _prompt(self, player_id: int, game_state: Dict[str, Any]) -> str:
