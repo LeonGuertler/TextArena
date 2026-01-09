@@ -18,11 +18,10 @@ except LookupError:
     nltk.download('words', quiet=True)
     
 class WordleEnv(ta.Env):
-    def __init__(self, word_length: int = 5, num_guesses: int = 6, hardcore: Optional[bool] = False):
+    def __init__(self, word_lengths: List[int] = [5], hardcore: Optional[bool] = False):
         """ Initializes the Wordle environment """
         super().__init__()
-        self.word_length = word_length
-        self.num_guesses = num_guesses
+        self.word_lengths = word_lengths
         self._load_word_list(hardcore=hardcore)
         self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
 
@@ -39,6 +38,8 @@ class WordleEnv(ta.Env):
 
     def reset(self, num_players: int = 1, seed: Optional[int] = None):
         self.state = ta.SinglePlayerState(num_players=num_players, seed=seed)
+        self.word_length = random.choice(self.word_lengths)
+        self.num_guesses = self.word_length + 1
         game_state = {"secret_word": random.choice(self.word_list), "guess_history": [], "word_length": self.word_length, "num_guesses": self.num_guesses}
         self.state.reset(game_state=game_state, player_prompt_function=self._generate_player_prompt)
     

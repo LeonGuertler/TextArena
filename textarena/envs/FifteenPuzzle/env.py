@@ -1,23 +1,25 @@
 import re, random
-from typing import Any, Dict, List, Tuple, Optional, Union
+from typing import Any, Dict, List, Tuple, Optional, Union, Literal
 
 import textarena as ta
 from textarena.envs.FifteenPuzzle.renderer import create_board_str
+from textarena.envs.FifteenPuzzle.utils import generate_puzzle
 
 class FifteenPuzzleEnv(ta.Env):
     """ Fifteen Puzzle environment """
-    def __init__(self, max_turns: int = 50):
+    def __init__(self, difficulty: Literal['easy', 'medium', 'hard'] = 'easy'):
         """ Initialize the Fifteen Puzzle environment """
         super().__init__()
-        self.max_turns = max_turns
+        
+        self.difficulty = difficulty
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)
     
     def reset(self, num_players: int, seed: Optional[int] = None):
         """ Reset the environment to its initial state """
-        self.state = ta.SinglePlayerState(num_players=num_players, seed=seed, max_turns=self.max_turns) ## initialize the game state
         self.board = self._generate_board() ## initialize the game state
+        self.state = ta.SinglePlayerState(num_players=num_players, seed=seed, max_turns=self.max_turns) ## initialize the game state
         self.initial_board = [row[:] for row in self.board]  # Deep copy of the initial board
         game_state = {"board": self.board, "rendered_board": self._render_board(self.board)} ## reset the game state
         self.state.reset(game_state=game_state, player_prompt_function=self._generate_player_prompt)
@@ -46,9 +48,15 @@ class FifteenPuzzleEnv(ta.Env):
     
     def _generate_board(self):
         """ Generate a shuffled board configuration """
-        tiles = list(range(1, 16)) + [None]
-        random.shuffle(tiles)
-        return [tiles[i:i + 4] for i in range(0, 16, 4)] # e.g. [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, None]]
+        n_swaps = None
+        if self.difficulty == 'easy':
+            n_swaps = random.choice([i for i in range(1, 6)])
+        elif self.difficulty == 'medium':
+            n_swaps = random.choice([i for i in range(6, 11)])
+        elif self.difficulty == 'hard':
+            n_swaps = random.choice([i for i in range(11, 21)])
+        self.max_turns = n_swaps * 20
+        return generate_puzzle(n_swaps)
     
     def _render_board(self, board):
         """ Render the current board layout """
