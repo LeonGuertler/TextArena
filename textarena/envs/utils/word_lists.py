@@ -3,6 +3,7 @@
 import importlib.resources
 import re
 from collections import defaultdict
+from functools import cache
 from typing import Optional
 
 # Load NLTK word list
@@ -210,6 +211,26 @@ class EnglishDictionary:
     def get_basic_words(self) -> set[str]:
         """Get all words in the basic NLTK dictionary as a set"""
         return self.nltk_basic_words
+
+
+@cache
+def shared_english_dictionary(
+    keep_proper_nouns: bool = False,
+    include_nltk: bool = True,
+    keep_non_alpha: bool = False,
+) -> EnglishDictionary:
+    """Process-wide shared EnglishDictionary, built once per parameter set.
+
+    Building the dictionary parses the bundled word lists and expands their
+    affix rules (~1s of CPU and ~40MB per instance), and is read-only
+    afterwards, so word games with the same settings share one instance
+    instead of rebuilding it on every environment construction.
+    """
+    return EnglishDictionary(
+        keep_proper_nouns=keep_proper_nouns,
+        include_nltk=include_nltk,
+        keep_non_alpha=keep_non_alpha,
+    )
 
 
 # --------------------------------------------------------------------------
