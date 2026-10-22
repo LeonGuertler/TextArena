@@ -7,14 +7,14 @@ nltk.download("words")
 
 import textarena as ta 
 from textarena.envs.WordChains.renderer import create_board_str
-from textarena.envs.utils.word_lists import EnglishDictionary
+from textarena.envs.utils.word_lists import shared_english_dictionary
 
 
 class WordChainsEnv(ta.Env):
     def __init__(self):
         self.word_list = list((set(word.lower() for word in words.words()))) # Ensure NLTK words are loaded
         self.word_list = [word for word in self.word_list if len(word) <= 5] # only conserd words shorter then 6 characters
-        self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True) # Initialize dictionaries for US and UK English
+        self.dictionary = shared_english_dictionary(keep_proper_nouns=False, include_nltk=True) # Initialize dictionaries for US and UK English
 
     def get_board_str(self): return create_board_str(game_state=self.state.game_state)
     def reset(self, num_players: int, seed: Optional[int]=None):

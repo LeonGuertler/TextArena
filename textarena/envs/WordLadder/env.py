@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple, Optional
 
 import textarena as ta
 from textarena.envs.WordLadder.renderer import create_board_str
-from textarena.envs.utils.word_lists import EnglishDictionary
+from textarena.envs.utils.word_lists import shared_english_dictionary
 
 
 # NLTK is only needed to fetch the basic word list
@@ -32,7 +32,7 @@ class WordLadderEnv(ta.Env):
 
     def _load_universal_word_list(self):
         """Combine NLTK + US/UK spell-check dictionaries (no proper nouns)."""
-        dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
+        dictionary = shared_english_dictionary(keep_proper_nouns=False, include_nltk=True)
         return dictionary.get_all_words()
 
     @staticmethod

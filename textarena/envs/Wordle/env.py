@@ -5,7 +5,7 @@ from typing import Optional, Tuple, List, Dict, Any
 
 import textarena as ta
 from textarena.envs.Wordle.renderer import create_board_str
-from textarena.envs.utils.word_lists import EnglishDictionary
+from textarena.envs.utils.word_lists import shared_english_dictionary
 
 try:
     pos_tag(['test'])
@@ -24,7 +24,7 @@ class WordleEnv(ta.Env):
         self.word_length = word_length
         self.num_guesses = num_guesses
         self._load_word_list(hardcore=hardcore)
-        self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
+        self.dictionary = shared_english_dictionary(keep_proper_nouns=False, include_nltk=True)
 
     def get_board_str(self):
         return create_board_str(game_state=self.state.game_state)

@@ -5,7 +5,7 @@ from typing import Optional, Tuple, Dict, Any
 
 import textarena as ta
 from textarena.envs.SpellingBee.renderer import create_board_str
-from textarena.envs.utils.word_lists import EnglishDictionary
+from textarena.envs.utils.word_lists import shared_english_dictionary
 
 class SpellingBeeEnv(ta.Env):
     def __init__(self, num_letters: int):
@@ -15,7 +15,7 @@ class SpellingBeeEnv(ta.Env):
         """
         super().__init__()
         self.num_letters = num_letters
-        self.dictionary = EnglishDictionary(keep_proper_nouns=False, include_nltk=True)
+        self.dictionary = shared_english_dictionary(keep_proper_nouns=False, include_nltk=True)
 
     def get_board_str(self): return create_board_str(game_state=self.state.game_state)
 
